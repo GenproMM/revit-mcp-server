@@ -10,3 +10,11 @@ wheels/
 .venv
 
 *TODO.md
+
+# GSD (Get Shit Done) planning artifacts
+.planning/
+.gsd/
+gsd-core/
+.claude/gsd-core/
+.claude/agents/gsd-*
+*.gsd.json

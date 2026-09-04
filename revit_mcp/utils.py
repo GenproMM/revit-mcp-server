@@ -46,22 +46,33 @@ def suppress_warnings(transaction):
         pass
 
 
-def normalize_string(text):
-    """Safely normalize string values to ASCII-safe output."""
+def sanitize_string(text):
+    """Return Revit text as a JSON-safe unicode string.
+
+    Revit API strings arrive as .NET System.String, which IronPython 2.7
+    already represents as unicode -- there is no need to collapse non-ASCII
+    characters (e.g. Cyrillic element/view names) to '?'. pyRevit's routes
+    JSON serializer escapes non-ASCII as \\uXXXX on its own, so unicode text
+    round-trips to the client intact.
+    """
     if text is None:
         return "Unnamed"
     try:
-        return str(text).strip().encode('ascii', 'replace').decode('ascii')
+        if isinstance(text, unicode):
+            return text
+        if isinstance(text, str):
+            return text.decode('utf-8', 'replace')
+        return unicode(text)
     except Exception:
         return "Unnamed"
 
 
-def sanitize_string(text):
-    """Sanitize a string to be ASCII-safe for JSON serialization."""
+def normalize_string(text):
+    """Whitespace-trimmed variant of sanitize_string()."""
     if text is None:
         return "Unnamed"
     try:
-        return str(text).encode('ascii', 'replace').decode('ascii')
+        return sanitize_string(text).strip()
     except Exception:
         return "Unnamed"
 
@@ -70,7 +81,7 @@ def get_element_name(element):
     """
     Get the name of a Revit element.
     Useful for both FamilySymbol and other elements.
-    Returns ASCII-safe string for JSON serialization.
+    Returns a JSON-safe unicode string (non-ASCII characters preserved).
     """
     try:
         name = element.Name

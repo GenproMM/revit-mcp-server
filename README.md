@@ -144,7 +144,7 @@ mcp dev main.py
 
 Then open `http://127.0.0.1:6274` in your browser.
 
-## Supported Tools (48)
+## Supported Tools (49)
 
 ### Create (15)
 
@@ -166,7 +166,7 @@ Then open `http://127.0.0.1:6274` in your browser.
 | `create_detail_line` | Create view-specific detail lines |
 | `create_view` | Create floor plans, sections, elevations, 3D views |
 
-### Query (12)
+### Query (13)
 
 | Tool | Description |
 |------|-------------|
@@ -182,8 +182,9 @@ Then open `http://127.0.0.1:6274` in your browser.
 | `get_selected_elements` | Get currently selected elements |
 | `list_category_parameters` | List parameters for a category |
 | `get_element_properties` | Get all parameters and properties of an element |
+| `list_project_parameters` | List project parameters, flagging which are shared |
 
-### Modify (8)
+### Modify (9)
 
 | Tool | Description |
 |------|-------------|
@@ -207,7 +208,7 @@ Then open `http://127.0.0.1:6274` in your browser.
 | `check_clashes` | Detect hard clashes (interferences) between disciplines, e.g. structure vs MEP |
 | `analyze_model_statistics` | Element counts and model stats |
 
-### Document (3)
+### Document (2)
 
 | Tool | Description |
 |------|-------------|

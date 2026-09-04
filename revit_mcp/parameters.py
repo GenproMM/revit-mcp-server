@@ -14,33 +14,144 @@ logger = logging.getLogger(__name__)
 
 
 def _safe_str(value):
-    """Convert a value to a JSON-safe ASCII string, replacing problematic chars.
-    IronPython 2.7 compatible — handles both str (bytes) and unicode."""
+    """Convert a value to a JSON-safe string, preserving non-ASCII text.
+
+    Differs from utils.sanitize_string() only in the empty-input contract: a
+    missing parameter value renders as "" rather than "Unnamed". Non-ASCII
+    (e.g. Cyrillic parameter names and values) is preserved — pyRevit's routes
+    JSON serializer escapes it as \\uXXXX. IronPython 2.7 compatible.
+    """
+    if value is None:
+        return ""
     try:
-        if value is None:
-            return ""
-        # Try unicode first (IronPython 2.7 has unicode type)
-        try:
-            s = unicode(value)
-        except Exception:
-            try:
-                s = str(value)
-            except Exception:
-                return ""
-        # Strip any char with ordinal >= 128
-        result = []
-        for ch in s:
-            try:
-                o = ord(ch)
-                if o < 128:
-                    result.append(chr(o))
-                else:
-                    result.append("?")
-            except Exception:
-                result.append("?")
-        return "".join(result)
+        if isinstance(value, unicode):
+            return value
+        if isinstance(value, str):
+            return value.decode("utf-8", "replace")
+        return unicode(value)
     except Exception:
         return ""
+
+
+# A parameter's origin is encoded in the ForgeTypeId that
+# InternalDefinition.GetTypeId() returns:
+#   revit.local.shared:<guid>-<version>   -> shared parameter
+#   revit.local.project:<guid>-<version>  -> plain (non-shared) project parameter
+# This is the ONLY reliable test. Do not check for DB.ExternalDefinition:
+# BindingMap always yields InternalDefinition, because a shared parameter
+# acquires an internal definition the moment it is loaded into a project, so
+# that check reports "not shared" for every parameter including ADSK_* ones.
+_SHARED_TYPEID_PREFIX = "revit.local.shared"
+_PROJECT_TYPEID_PREFIX = "revit.local.project"
+
+
+def _get_definition_type_id(definition):
+    """Return the ForgeTypeId string of a Definition, or None if unavailable."""
+    try:
+        type_id = definition.GetTypeId()
+        if type_id is None:
+            return None
+        return type_id.TypeId or None
+    except Exception:
+        return None
+
+
+def _classify_definition(definition):
+    """Classify a parameter Definition by origin.
+
+    Returns (is_shared, guid, type_id) where is_shared is True for a shared
+    parameter, False for a plain project parameter, and None when the origin
+    cannot be determined (older API, or a built-in parameter). guid is the
+    shared parameter's GUID (hex, no dashes) and is None unless is_shared.
+    """
+    type_id = _get_definition_type_id(definition)
+    if type_id:
+        lowered = type_id.lower()
+        if lowered.startswith(_SHARED_TYPEID_PREFIX):
+            guid = None
+            remainder = type_id.split(":", 1)[1] if ":" in type_id else ""
+            if remainder:
+                guid = remainder.split("-")[0] or None
+            return True, guid, type_id
+        if lowered.startswith(_PROJECT_TYPEID_PREFIX):
+            return False, None, type_id
+    return None, None, type_id
+
+
+def _get_binding_kind(binding):
+    """Return 'instance' or 'type' for a parameter binding."""
+    try:
+        if isinstance(binding, DB.InstanceBinding):
+            return "instance"
+        if isinstance(binding, DB.TypeBinding):
+            return "type"
+    except Exception:
+        pass
+    return _safe_str(type(binding).__name__)
+
+
+def _get_binding_categories(binding):
+    """Return the sorted category names a binding applies to."""
+    names = []
+    try:
+        for category in binding.Categories:
+            try:
+                names.append(_safe_str(category.Name))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return sorted(names)
+
+
+def _get_definition_data_type(definition):
+    """Get a Definition's data type label safely across Revit versions."""
+    try:
+        # Revit 2022+ (spec ForgeTypeId)
+        if hasattr(definition, "GetDataType"):
+            return _safe_str(DB.LabelUtils.GetLabelForSpec(definition.GetDataType()))
+    except Exception:
+        pass
+    try:
+        # Older Revit
+        if hasattr(definition, "ParameterType"):
+            return _safe_str(definition.ParameterType)
+    except Exception:
+        pass
+    return "Unknown"
+
+
+def _get_definition_group_name(definition):
+    """Get a Definition's group label safely across Revit versions."""
+    try:
+        # Revit 2024+
+        if hasattr(definition, "GetGroupTypeId"):
+            return _safe_str(
+                DB.LabelUtils.GetLabelForGroup(definition.GetGroupTypeId())
+            )
+    except Exception:
+        pass
+    try:
+        # Older Revit
+        if hasattr(definition, "ParameterGroup"):
+            return _safe_str(definition.ParameterGroup)
+    except Exception:
+        pass
+    return "Other"
+
+
+def _name_prefix(name):
+    """The namespace prefix of a parameter name — text before the first '_'."""
+    if name and "_" in name:
+        return name.split("_")[0]
+    return "(none)"
+
+
+def _as_bool(value):
+    """Interpret a query-string value as a boolean."""
+    if value is None:
+        return False
+    return _safe_str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _get_param_group_name(param):
@@ -89,6 +200,109 @@ def _get_param_value_display(param, doc):
 
 def register_parameter_routes(api):
     """Register all parameter routes with the API"""
+
+    @api.route("/project_parameters/", methods=["GET"])
+    def get_project_parameters_handler(
+        doc, shared_only=None, prefix=None, search=None, summary_only=None
+    ):
+        """List the project parameters bound in this document.
+
+        Query params (all optional): shared_only, prefix, search, summary_only.
+        """
+        try:
+            if not doc:
+                return routes.make_response(
+                    data={"error": "No active Revit document"}, status=503
+                )
+
+            want_shared_only = _as_bool(shared_only)
+            want_summary_only = _as_bool(summary_only)
+            prefix_filter = _safe_str(prefix) if prefix else None
+            search_filter = _safe_str(search).lower() if search else None
+
+            rows = []
+            skipped = 0
+            iterator = doc.ParameterBindings.ForwardIterator()
+            iterator.Reset()
+            while iterator.MoveNext():
+                try:
+                    definition = iterator.Key
+                    binding = iterator.Current
+                    is_shared, guid, type_id = _classify_definition(definition)
+                    rows.append({
+                        "name": _safe_str(definition.Name),
+                        "is_shared": is_shared,
+                        "guid": guid,
+                        "binding": _get_binding_kind(binding),
+                        "data_type": _get_definition_data_type(definition),
+                        "group": _get_definition_group_name(definition),
+                        "categories": _get_binding_categories(binding),
+                        "type_id": _safe_str(type_id),
+                    })
+                except Exception as row_error:
+                    # One unreadable binding must not sink the whole listing.
+                    skipped += 1
+                    logger.warning(
+                        "Skipped a parameter binding: {}".format(str(row_error))
+                    )
+
+            shared_prefixes = {}
+            non_shared_prefixes = {}
+            for row in rows:
+                bucket = None
+                if row["is_shared"] is True:
+                    bucket = shared_prefixes
+                elif row["is_shared"] is False:
+                    bucket = non_shared_prefixes
+                if bucket is not None:
+                    key = _name_prefix(row["name"])
+                    bucket[key] = bucket.get(key, 0) + 1
+
+            summary = {
+                "total": len(rows),
+                "shared": len([r for r in rows if r["is_shared"] is True]),
+                "non_shared": len([r for r in rows if r["is_shared"] is False]),
+                "unclassified": len([r for r in rows if r["is_shared"] is None]),
+                "skipped": skipped,
+                "shared_prefixes": shared_prefixes,
+                "non_shared_prefixes": non_shared_prefixes,
+            }
+
+            selected = rows
+            if want_shared_only:
+                selected = [r for r in selected if r["is_shared"] is True]
+            if prefix_filter:
+                selected = [
+                    r for r in selected if r["name"].startswith(prefix_filter)
+                ]
+            if search_filter:
+                selected = [
+                    r for r in selected if search_filter in r["name"].lower()
+                ]
+            selected = sorted(selected, key=lambda r: r["name"])
+
+            data = {
+                "status": "success",
+                "summary": summary,
+                "filter": {
+                    "shared_only": want_shared_only,
+                    "prefix": prefix_filter,
+                    "search": _safe_str(search) if search else None,
+                    "summary_only": want_summary_only,
+                },
+                "returned_count": 0 if want_summary_only else len(selected),
+            }
+            if not want_summary_only:
+                data["parameters"] = selected
+
+            return routes.make_response(data=data)
+
+        except Exception as e:
+            logger.error("Failed to list project parameters: {}".format(str(e)))
+            return routes.make_response(
+                data={"error": str(e), "traceback": traceback.format_exc()},
+                status=500,
+            )
 
     @api.route("/element_properties/<element_id>", methods=["GET"])
     def get_element_properties_handler(doc, element_id):

@@ -1,6 +1,6 @@
 # Revit MCP Server
 
-MCP server for Autodesk Revit 2024/2025/2026/2027 via pyRevit — 48 tools for building design, editing, analysis, clash detection, MEP, interop, documentation, and model persistence.
+MCP server for Autodesk Revit 2024/2025/2026/2027 via pyRevit — 51 tools for building design, editing, analysis, clash detection, MEP, interop, documentation, and model persistence.
 
 Works with any MCP client: Claude Desktop, Claude Code, Cursor, Windsurf, Copilot, or any other MCP-compatible application.
 
@@ -39,6 +39,12 @@ To verify: open a browser and go to `http://localhost:48884/` — you should see
 
 ## Quick Start
 
+> **Deploying to a team?** Don't follow this section. The steps below set up a
+> single developer machine from a git clone with internet access. For rolling
+> this out across an organisation — a file share, self-contained runtime,
+> silent updates, and no admin rights on workstations — see
+> [deploy/README.md](deploy/README.md).
+
 ### Step 1: Clone and install
 
 ```bash
@@ -51,19 +57,18 @@ uv sync
 
 The `revit_mcp/` folder and `startup.py` need to run inside Revit via pyRevit.
 
-**Option A — Install from pyRevit (recommended):**
-
-1. In Revit, go to pyRevit tab > Extensions
-2. Find "MCP Server for Revit Python" > Install
-3. Wait for pyRevit to reload
-
-**Option B — Manual install:**
-
-1. Copy the entire repo folder to `%APPDATA%\pyRevit\Extensions\`
-2. Rename the folder to `mcp-server-for-revit-python.extension`
+1. Copy the repo folder to `%APPDATA%\pyRevit\Extensions\`
+2. Rename the copy to **`revit-mcp-server.extension`** — the trailing
+   `.extension` is required, and the name itself matters: pyRevit keys its
+   config section by the folder name, so a different name is a different
+   extension as far as its enabled/disabled state is concerned.
 3. In Revit, go to pyRevit tab > Settings > Custom Extensions
 4. Add the path to the `.extension` folder
-5. Reload pyRevit (or restart Revit)
+5. **Fully restart Revit.** pyRevit's Reload button is not enough for changes
+   under `revit_mcp/` — reload-then-request has been observed to crash Revit.
+
+> The "MCP Server for Revit Python" entry in pyRevit's Extensions panel points
+> at a different upstream repository and will not install this fork.
 
 ### Step 3: Activate pyRevit Routes
 
@@ -144,7 +149,7 @@ mcp dev main.py
 
 Then open `http://127.0.0.1:6274` in your browser.
 
-## Supported Tools (49)
+## Supported Tools (51)
 
 ### Create (15)
 
@@ -229,6 +234,16 @@ Then open `http://127.0.0.1:6274` in your browser.
 | Tool | Description |
 |------|-------------|
 | `execute_revit_code` | Execute IronPython code in Revit context |
+
+### Revit process (2)
+
+The only two tools that work while Revit is **closed** — everything else goes
+through the pyRevit Routes bridge, which lives inside the Revit process.
+
+| Tool | Description |
+|------|-------------|
+| `get_revit_process_status` | Is Revit running, is a document open, which versions are installed |
+| `start_revit` | Launch Revit (optionally opening a model) and wait for the bridge |
 
 ## Architecture
 

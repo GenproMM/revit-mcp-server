@@ -6,4 +6,17 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=1.9.0",
+    # Imported directly by main.py, not just transitively through mcp[cli]:
+    #   httpx, anyio at module top (main.py:4-5); uvicorn inside run_combined_async.
+    # Undeclared, these break the deployed payload the day mcp drops one of them.
+    "httpx>=0.28.1",
+    "anyio>=4.9.0",
+    "uvicorn>=0.34.2",
+]
+
+# Deploy-time only: used by deploy/configure_hermes.py on the workstation.
+# Kept out of [project.dependencies] so it never ships in the stdio server's import path.
+[dependency-groups]
+deploy = [
+    "ruamel.yaml>=0.18.0",
 ]

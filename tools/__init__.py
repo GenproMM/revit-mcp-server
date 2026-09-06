@@ -27,6 +27,7 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .detail_tools import register_detail_tools
     from .clash_tools import register_clash_tools
     from .document_tools import register_document_tools
+    from .process_tools import register_process_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -53,3 +54,6 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_detail_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
     register_clash_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
     register_document_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
+    # No Revit-side counterpart: these run when Revit is closed, so there is no
+    # Routes server to talk to.
+    register_process_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)

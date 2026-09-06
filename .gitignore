@@ -18,3 +18,13 @@ gsd-core/
 .claude/gsd-core/
 .claude/agents/gsd-*
 *.gsd.json
+
+# Obsidian knowledge vault (local notes, not part of the codebase)
+rvt-mcp_Obsidian/
+*_Obsidian/
+.obsidian/
+.obsidian-git/
+.trash/
+*.canvas
+workspace.json
+workspace-mobile.json

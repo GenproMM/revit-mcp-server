@@ -10,7 +10,10 @@ import tempfile
 import os
 import base64
 import logging
-from urllib import unquote
+try:  # IronPython 3 / Python 3
+    from urllib.parse import unquote
+except ImportError:  # IronPython 2.7
+    from urllib import unquote
 from System.Collections.Generic import List
 
 from .utils import normalize_string, get_element_name

@@ -136,6 +136,54 @@ def test_f_string_detector_ignores_lookalikes(line):
     assert not any("f-strings" in v for v in violations), violations
 
 
+# --- the IronPython 3 move, 2026-09-07 --------------------------------------
+#
+# Each of these three shapes cost a pilot machine a route domain, and the last
+# one failed silently: `unicode` inside `except Exception` raises NameError,
+# is swallowed there, and blanks every parameter value with no log line. Three
+# separate greps missed them before the checker owned the rule.
+
+@pytest.mark.parametrize("source, expected", [
+    ("from utils import get_element_name", "relatively"),
+    ("from textutils import sanitize_string", "relatively"),
+    ("from StringIO import StringIO", "IronPython 3"),
+    ("from urllib import unquote", "IronPython 3"),
+    ("import urlparse", "IronPython 3"),
+])
+def test_py2_only_forms_are_caught(source, expected):
+    bad = "# -*- coding: utf-8 -*-\n{}\n".format(source)
+    violations = conventions.check_ironpython_dialect("bad.py", bad)
+    assert any(expected in v for v in violations), violations
+
+
+def test_bare_py2_builtin_is_caught_even_inside_a_broad_except():
+    """The parameters.py shape: swallowed NameError, blank data, no log."""
+    bad = (
+        "# -*- coding: utf-8 -*-\n"
+        "def f(value):\n"
+        "    try:\n"
+        "        return unicode(value)\n"
+        "    except Exception:\n"
+        "        return ''\n"
+    )
+    violations = conventions.check_ironpython_dialect("bad.py", bad)
+    assert any("Python 2 builtins" in v for v in violations), violations
+
+
+@pytest.mark.parametrize("source", [
+    "from .utils import get_element_name",
+    "try:\n    from io import StringIO\nexcept ImportError:\n"
+    "    from StringIO import StringIO",
+    "try:\n    from urllib.parse import unquote\nexcept ImportError:\n"
+    "    from urllib import unquote",
+    "try:\n    T = unicode\nexcept NameError:\n    T = str",
+])
+def test_the_compatibility_idioms_are_allowed(source):
+    """Guarded by the *named* exception -- the distinction the check turns on."""
+    ok = "# -*- coding: utf-8 -*-\n{}\n".format(source)
+    assert not conventions.check_ironpython_dialect("ok.py", ok)
+
+
 def test_element_id_detector_catches_an_integer():
     bad = "# -*- coding: utf-8 -*-\nDB.ElementId(12345)\n"
     assert conventions.check_element_id("bad.py", bad)

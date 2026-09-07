@@ -41,6 +41,28 @@ PY3_ONLY_MODULES = {
 # registry` does not depend on that.
 LOCAL_MODULES = {"utils", "textutils", "registry", "revit_mcp"}
 
+# Gone in Python 3, so gone in IronPython 3.
+PY2_ONLY_MODULES = {
+    "StringIO", "cStringIO", "urlparse", "urllib2", "httplib", "ConfigParser",
+    "cPickle", "Queue", "HTMLParser", "commands", "copy_reg",
+}
+
+# Modules that still exist but whose members moved.
+PY2_MOVED_NAMES = {
+    "urllib": {"unquote", "quote", "quote_plus", "unquote_plus", "urlencode",
+               "urlopen", "urlretrieve", "pathname2url", "url2pathname"},
+    "itertools": {"izip", "imap", "ifilter", "izip_longest", "ifilterfalse"},
+}
+
+# Builtins removed in Python 3. `unicode` is the one that matters: written
+# bare inside an `except Exception`, it raises NameError, gets swallowed on the
+# spot, and the function returns its empty fallback for every input. That is
+# not a crash anyone notices -- it is blank data. Only the explicit
+# compatibility idiom is allowed, and only when the handler names NameError:
+#     try:  _TEXT_TYPE = unicode
+#     except NameError:  _TEXT_TYPE = str
+PY2_ONLY_NAMES = {"unicode", "basestring", "xrange", "long", "raw_input", "unichr"}
+
 
 def _blank_strings_and_comments(source):
     """Blank string literals and comments so text checks only see code."""
@@ -94,6 +116,36 @@ def check_encoding_cookie(label, source):
 # --------------------------------------------------------------------------
 # the Revit half: IronPython 2.7 dialect
 # --------------------------------------------------------------------------
+
+def _guarded_by(tree, exception_names):
+    """ids of nodes in a try/except that explicitly handles one of these.
+
+    Both the body and the handler bodies count: the compatibility idiom puts
+    the Python 3 form in one and the Python 2 form in the other, and which
+    goes where differs between an import and a name alias.
+
+    The handler must *name* the exception. `except Exception` does catch
+    NameError, but it catches everything else too -- which is exactly how the
+    parameters.py copy of sanitize_string hid a NameError for months.
+    """
+    guarded = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        handled = set()
+        for handler in node.handlers:
+            if handler.type is None:
+                continue
+            for sub in ast.walk(handler.type):
+                if isinstance(sub, ast.Name):
+                    handled.add(sub.id)
+        if not (handled & exception_names):
+            continue
+        for stmt in list(node.body) + [s for h in node.handlers for s in h.body]:
+            for child in ast.walk(stmt):
+                guarded.add(id(child))
+    return guarded
+
 
 def check_ironpython_dialect(label, source):
     """f-strings, async and Python-3-only imports break the Revit half.
@@ -150,6 +202,51 @@ def check_ironpython_dialect(label, source):
     # The direction changed on 2026-09-07; the consistency requirement did not.
     # pyRevit also puts the module directory on sys.path, so mixing both forms
     # loads utils.py twice under two identities, each with its own state.
+    # Python-2-only imports and builtins. Each of these cost a pilot machine a
+    # domain on 2026-09-07, and two of the three failed silently.
+    importable = _guarded_by(tree, {"ImportError"})
+    py2_imports = []
+    for node in ast.walk(tree):
+        if id(node) in importable:
+            continue
+        if isinstance(node, ast.Import):
+            py2_imports.extend(
+                a.name for a in node.names
+                if a.name.split(".")[0] in PY2_ONLY_MODULES
+            )
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            if node.module.split(".")[0] in PY2_ONLY_MODULES:
+                py2_imports.append(node.module)
+            else:
+                moved = PY2_MOVED_NAMES.get(node.module, set())
+                py2_imports.extend(
+                    "{}.{}".format(node.module, a.name)
+                    for a in node.names if a.name in moved
+                )
+    if py2_imports:
+        violations.append(
+            "{}: {} do not exist in IronPython 3. Guard with "
+            "`try: <py3 form> / except ImportError: <py2 form>`.".format(
+                label, sorted(set(py2_imports))
+            )
+        )
+
+    nameable = _guarded_by(tree, {"NameError"})
+    py2_names = sorted({
+        n.id for n in ast.walk(tree)
+        if isinstance(n, ast.Name)
+        and n.id in PY2_ONLY_NAMES
+        and id(n) not in nameable
+    })
+    if py2_names:
+        violations.append(
+            "{}: {} are Python 2 builtins, removed in IronPython 3. A bare "
+            "reference inside `except Exception` raises NameError, is swallowed "
+            "there, and silently blanks the data instead of failing. Alias them "
+            "once under `except NameError`, as revit_mcp/textutils.py does."
+            .format(label, py2_names)
+        )
+
     flat = sorted({
         n.module for n in ast.walk(tree)
         if isinstance(n, ast.ImportFrom)

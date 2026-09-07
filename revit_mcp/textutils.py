@@ -14,10 +14,24 @@ under IronPython 2.7 text is `unicode` and bytes are `str`; under CPython 3
 text is `str` and bytes are `bytes`. Behaviour on the Revit side is unchanged.
 """
 
-try:  # IronPython 2.7 / Python 2
+import json
+
+# `bytes is str` is the discriminator, and the probe has to be this one: it is
+# true only on Python 2, where the two really are one type.
+#
+# Testing `unicode` for a NameError instead -- the obvious version, and what
+# this module did until 2026-09-07 -- reports the wrong runtime inside pyRevit.
+# pyRevit injects `unicode` as an alias of `str` into its IronPython 3 engine,
+# so the probe succeeded, both aliases collapsed onto `str`, and no real
+# `bytes` ever matched _BYTES_TYPE. Every POST body then reached its route
+# handler as undecoded bytes and died on `.get` ('bytes' object has no
+# attribute 'get'), while sanitize_string() stringified byte text into a
+# literal "b'...'". Verified live in the routes engine, where the same probe
+# that returns bytes-is-not-str also reports unicode as present.
+if bytes is str:  # IronPython 2.7 / Python 2
     _TEXT_TYPE = unicode  # noqa: F821 - defined only on Python 2
     _BYTES_TYPE = str
-except NameError:  # CPython 3
+else:  # IronPython 3 / CPython 3
     _TEXT_TYPE = str
     _BYTES_TYPE = bytes
 
@@ -79,3 +93,36 @@ def normalize_string(text):
         return sanitize_string(text).strip()
     except Exception:
         return "Unnamed"
+
+
+def parse_request_data(data):
+    """Return a route request body as Python data, in either engine.
+
+    pyRevit parses the body itself only when the request carries
+    Content-Type: application/json -- and that parse is broken on IronPython 3:
+    routes/server/server.py hands the raw bytes from rfile.read() to a
+    3.5-level json.loads, which rejects them with "the JSON object must be str,
+    not 'bytes'". The exception is raised while pyRevit prepares the request, so
+    no handler runs and no Revit work is attempted. Patching it from the
+    extension is not possible: the routes server lives in its own IronPython
+    engine with its own module table, and a patch installed from startup.py
+    reaches a different copy of that module (verified live, 2026-09-07).
+
+    So the MCP client declares text/plain instead (main.py), pyRevit passes the
+    body through untouched, and route handlers parse it here. That leaves three
+    shapes to accept, and all three are real:
+
+      bytes  what pyRevit passes through on IronPython 3
+      str    the same on IronPython 2.7, where bytes and str are one type
+      dict   a client that still sends application/json, on an engine where
+             pyRevit's own parse works (IronPython 2.7, or a fixed pyRevit)
+
+    Anything else -- None above all, from a request with no body -- is returned
+    untouched, so a route keeps deciding for itself whether a missing payload is
+    a 400 or a default.
+    """
+    if isinstance(data, _BYTES_TYPE):
+        data = data.decode("utf-8")
+    if isinstance(data, _TEXT_TYPE):
+        return json.loads(data)
+    return data

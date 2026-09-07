@@ -8,7 +8,7 @@ deliberately do not open one.
 """
 
 from pyrevit import routes, revit, DB
-import json
+from .utils import parse_request_data
 import os
 import logging
 
@@ -39,7 +39,7 @@ def register_document_routes(api):
 
             data = {}
             if request and request.data:
-                data = json.loads(request.data) if isinstance(request.data, str) else request.data
+                data = parse_request_data(request.data)
 
             file_path = data.get("file_path")
             overwrite = bool(data.get("overwrite", True))
@@ -68,13 +68,44 @@ def register_document_routes(api):
 
                 save_opts = DB.SaveAsOptions()
                 save_opts.OverwriteExistingFile = overwrite
+
+                # A workshared document -- which is what /open_model/ hands back
+                # after a detach-and-preserve-worksets open -- cannot be
+                # SaveAs'd without this. Revit refuses outright: "The document
+                # just had worksharing enabled or was opened detached, so
+                # WorksharingSaveAsOptions.SaveAsCentral must be set to true for
+                # SaveAs." Saving as central is also what keeps the worksets:
+                # it writes a new central file that still carries them.
+                is_workshared = False
+                try:
+                    is_workshared = bool(doc.IsWorkshared)
+                except Exception:
+                    logger.warning("Could not read doc.IsWorkshared")
+                as_central = bool(data.get("as_central", is_workshared))
+                if as_central:
+                    try:
+                        ws_opts = DB.WorksharingSaveAsOptions()
+                        ws_opts.SaveAsCentral = True
+                        save_opts.SetWorksharingOptions(ws_opts)
+                    except Exception as ws_err:
+                        return routes.make_response(
+                            data={"error": "Could not set worksharing save options: "
+                                           "{}".format(str(ws_err))},
+                            status=500,
+                        )
+
                 model_path = DB.ModelPathUtils.ConvertUserVisiblePathToModelPath(file_path)
                 doc.SaveAs(model_path, save_opts)
                 return routes.make_response(data={
                     "status": "success",
                     "operation": "save_as",
                     "file_path": file_path,
-                    "message": "Document saved to {}".format(file_path),
+                    "is_workshared": is_workshared,
+                    "saved_as_central": as_central,
+                    "message": "Document saved to {}{}".format(
+                        file_path,
+                        " as a central model" if as_central else "",
+                    ),
                 })
 
             if not path_on_disk:

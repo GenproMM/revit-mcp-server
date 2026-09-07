@@ -130,3 +130,59 @@ def register_family_tools(mcp, revit_get, revit_post, revit_image=None):
         """
         response = await revit_post("/load_family/", {"file_path": file_path}, ctx)
         return format_response(response)
+
+    @mcp.tool()
+    async def edit_family(
+        family_name: str,
+        type_name: str = None,
+        parameters: Dict[str, Any] = None,
+        new_type_name: str = None,
+        reload: bool = True,
+        ctx: Context = None,
+    ) -> str:
+        """Edit a family already loaded in the project and load it back.
+
+        Opens the family in Revit's family editor, changes its type parameters,
+        then reloads it into the project so every placed instance updates. Use
+        this to correct a family's dimensions or data without leaving Revit, or
+        to add a new type to an existing family.
+
+        Returns the family's available types, the type now current, which
+        parameters were applied, and which failed with the reason for each — a
+        parameter that does not exist or is read-only is reported per name
+        rather than failing the whole call.
+
+        Scope: type parameters of a loadable family. It cannot change instance
+        parameters (use set_parameter), family geometry, or system families such
+        as walls, floors and roofs, which have no editable family document.
+        In-place families are rejected too.
+
+        Limitations: lengths are millimetres and are converted using each
+        parameter's own unit type, so a value written to a non-length parameter
+        is stored as given. The reload overwrites the project copy and its
+        parameter values by design. A large family can exceed the 30s bridge
+        timeout; the edit usually completes in Revit even when the call does not
+        return.
+
+        Args:
+            family_name: Name of the loaded family, as list_families reports it
+            type_name: Which existing family type to edit; defaults to the
+                family's current type
+            parameters: Family type parameters to set, as {name: value} —
+                lengths in millimetres, e.g. {"Ширина": 1200}
+            new_type_name: Create a type with this name and edit that instead of
+                an existing one
+            reload: Load the edited family back into the project (defaults to
+                True); False edits and discards, which is only useful to probe
+                what a family exposes
+            ctx: MCP context for logging
+        """
+        data = {"family_name": family_name, "reload": reload}
+        if type_name is not None:
+            data["type_name"] = type_name
+        if parameters is not None:
+            data["parameters"] = parameters
+        if new_type_name is not None:
+            data["new_type_name"] = new_type_name
+        response = await revit_post("/edit_family/", data, ctx)
+        return format_response(response)

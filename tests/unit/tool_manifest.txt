@@ -19,6 +19,7 @@ create_structural_framing
 create_surface_based_element
 create_view
 delete_elements
+edit_family
 execute_revit_code
 export_document
 export_ifc
@@ -37,10 +38,12 @@ list_category_parameters
 list_families
 list_family_categories
 list_levels
+list_model_worksets
 list_project_parameters
 list_revit_views
 load_family
 modify_element
+open_model
 place_family
 save_document
 set_active_view

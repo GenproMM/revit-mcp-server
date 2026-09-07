@@ -149,7 +149,7 @@ mcp dev main.py
 
 Then open `http://127.0.0.1:6274` in your browser.
 
-## Supported Tools (51)
+## Supported Tools (54)
 
 ### Create (15)
 
@@ -220,14 +220,17 @@ Then open `http://127.0.0.1:6274` in your browser.
 | `create_dimensions` | Create dimension annotations |
 | `export_document` | Export views to PDF or image |
 
-### Interop & Persistence (4)
+### Interop & Persistence (7)
 
 | Tool | Description |
 |------|-------------|
 | `export_ifc` | Export model to IFC format (IFC2x3/IFC4) |
 | `link_file` | Link or import DWG, DXF, DGN, SAT, SKP, 3DM, or RVT files |
 | `load_family` | Load a Revit family (`.rfa`) from disk so its types can be placed |
-| `save_document` | Save / Save-As the model to disk (persistence across sessions) |
+| `edit_family` | Edit a loaded family's type parameters and reload it into the project |
+| `list_model_worksets` | Read a model's worksets from disk without opening it |
+| `open_model` | Open a model, detaching from central and choosing which worksets open |
+| `save_document` | Save / Save-As the model to disk (as a new central when workshared) |
 
 ### Advanced (1)
 

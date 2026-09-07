@@ -4,9 +4,8 @@ View Management Module for Revit MCP
 Handles view creation and active view switching
 """
 
-from .utils import get_element_name, get_element_id_value, suppress_warnings
+from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
 from pyrevit import routes, revit, DB
-import json
 import traceback
 import logging
 
@@ -27,7 +26,7 @@ def register_view_management_routes(api):
                     data={"error": "No active Revit document"}, status=503
                 )
 
-            data = json.loads(request.data) if isinstance(request.data, str) else request.data
+            data = parse_request_data(request.data)
 
             view_type = data.get("view_type")
             name = data.get("name")
@@ -162,8 +161,22 @@ def register_view_management_routes(api):
                         float(up.get("z", 1)),
                     ).Normalize()
 
-                    # Right vector = direction cross up
-                    right_vec = dir_vec.CrossProduct(up_vec).Normalize()
+                    # Revit only accepts a right-handed section box transform,
+                    # meaning BasisX == BasisY.CrossProduct(BasisZ). Crossing
+                    # the other way -- direction x up, which is what this did
+                    # until 2026-09-07 -- yields BasisZ x BasisY, whose
+                    # determinant is -1 for *any* perpendicular pair, so
+                    # CreateSection threw an ArgumentException carrying no
+                    # message and every section request failed identically.
+                    right_vec = up_vec.CrossProduct(dir_vec)
+                    if right_vec.GetLength() < 1e-9:
+                        t.RollBack()
+                        return routes.make_response(
+                            data={"error": "section_box direction and up are "
+                                           "parallel; they must be perpendicular"},
+                            status=400,
+                        )
+                    right_vec = right_vec.Normalize()
 
                     # Create transform
                     transform = DB.Transform.Identity
@@ -312,7 +325,7 @@ def register_view_management_routes(api):
                     data={"error": "No active Revit document"}, status=503
                 )
 
-            data = json.loads(request.data) if isinstance(request.data, str) else request.data
+            data = parse_request_data(request.data)
 
             view_name = data.get("view_name")
             if not view_name:

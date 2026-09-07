@@ -101,7 +101,7 @@ Discovery rules that matter when writing a module:
   (`?verbose=true` also lists the registered ones).
 - Imports still live *inside* the register functions, which keeps stdio cold start low.
 
-Current surface: 51 MCP tools over 49 routes across 22 domain modules. The authoritative
+Current surface: 54 MCP tools over 51 routes across 23 domain modules. The authoritative
 list is `tests/unit/tool_manifest.txt`; `deploy/gate.py` blocks a release that diverges from it.
 
 ## Non-negotiable invariants
@@ -124,6 +124,19 @@ in the repo.
 shared parameter acquires an internal definition the moment it loads into a project — so that
 test reports "not shared" for every parameter, `ADSK_*` included. Helpers:
 `_classify_definition()` in `revit_mcp/parameters.py`.
+
+**A POST body is declared `text/plain` and parsed with `parse_request_data()`.** pyRevit
+parses an `application/json` body itself, before dispatch, and that parse is broken under
+IronPython 3: `routes/server/server.py` hands the raw bytes from `rfile.read()` to a
+3.5-level `json.loads`, which answers `TypeError: the JSON object must be str, not 'bytes'`.
+Every POST route then returns 500 with nothing reaching Revit. The extension cannot patch
+it — the routes server runs in its own IronPython engine with its own module table, so a
+patch installed from `startup.py` lands on a different copy of that module (measured live,
+2026-09-07). So `main.py` sends `Content-Type: text/plain; charset=utf-8` and handlers call
+`parse_request_data(request.data)` (`revit_mcp/textutils.py`), which takes bytes, str or
+dict. Never hand-roll the parse: `scripts/conventions.py` and `tests/unit/` reject
+`json.loads(request.data)`, and any client that still sends `application/json` — curl
+included — hits pyRevit's broken parse rather than the route.
 
 **Route handlers never raise.** Wrap the whole body in `try/except` and return
 `routes.make_response(data=..., status=...)`. Status conventions: `400` bad/missing payload,
@@ -175,6 +188,26 @@ parameter including `ctx`. `check_clashes` in `tools/clash_tools.py` is the refe
   source. Since the modules now use `from .utils import …`, `exec` them with a package context
   (`__package__ = "revit_mcp"` in the namespace, after `import revit_mcp`) rather than by
   prepending `revit_mcp/` to `sys.path`, which no longer resolves a relative import.
+
+- **Never detect the runtime by asking whether a Python 2 builtin exists.** pyRevit defines
+  `unicode` in its IronPython 3 engine as an alias of `str`, so `try: unicode / except
+  NameError` reports Python 2 on a Python 3 runtime. `textutils.py` did exactly that until
+  2026-09-08: both type aliases collapsed onto `str`, no real `bytes` matched, and every POST
+  route answered 500 (`'bytes' object has no attribute 'get'`) while the CPython unit suite
+  stayed green, because CPython has no `unicode` and so took the correct branch. Use
+  `if bytes is str:` — true only on Python 2. `scripts/conventions.py` accepts either guard
+  and prefers this one.
+- Two Revit instances can **both** bind `127.0.0.1:48884` — pyRevit's routes server sets no
+  exclusive-address flag, so nothing fails loudly and requests land on whichever process the
+  OS picks. Open a model in one and the other answers `No active Revit document`. Check
+  `Get-NetTCPConnection -LocalPort 48884 -State Listen` returns exactly one row before
+  trusting any live result; note Revit Accelerator can start a second instance by itself.
+- Launching Revit with a workshared model on the command line pops the **workset selection
+  dialog**, which blocks the headless routes server forever. Boot Revit with no model and
+  open through `/open_model/`, which supplies a `WorksetConfiguration` and so never prompts.
+- Requests sent while Revit is still initializing **hang** rather than failing: handlers run
+  through a Revit external event that does not pump until startup finishes. Poll `/status/`
+  (a GET, which answers 503 promptly) before issuing the first POST.
 
 ## Reference documents
 

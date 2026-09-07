@@ -28,7 +28,7 @@ ROUTE_REGISTRAR = re.compile(r"^register_\w+_routes$")
 
 CANONICAL_TOOL_REGISTRAR = ["mcp", "revit_get", "revit_post", "revit_image"]
 
-# Not available in IronPython 2.7.
+# Not available in IronPython.
 PY3_ONLY_MODULES = {
     "pathlib", "dataclasses", "typing", "asyncio", "enum", "secrets",
     "statistics", "unittest.mock", "concurrent",
@@ -58,9 +58,13 @@ PY2_MOVED_NAMES = {
 # bare inside an `except Exception`, it raises NameError, gets swallowed on the
 # spot, and the function returns its empty fallback for every input. That is
 # not a crash anyone notices -- it is blank data. Only the explicit
-# compatibility idiom is allowed, and only when the handler names NameError:
+# compatibility idiom is allowed, in either of two guarded forms:
+#     if bytes is str:  _TEXT_TYPE = unicode      # true only on Python 2
+#     else:             _TEXT_TYPE = str
 #     try:  _TEXT_TYPE = unicode
 #     except NameError:  _TEXT_TYPE = str
+# Prefer the first. pyRevit defines `unicode` in its IronPython 3 engine, so the
+# NameError probe reports Python 2 there and every alias it sets is wrong.
 PY2_ONLY_NAMES = {"unicode", "basestring", "xrange", "long", "raw_input", "unichr"}
 
 
@@ -83,18 +87,21 @@ def _parse(label, source):
     """Parse with Python 3's parser.
 
     The Revit half must be written in the subset that is valid under BOTH
-    IronPython 2.7 and Python 3 -- that is what `"{}".format(x)` everywhere
-    buys, and it is what lets any of this be checked outside Revit at all.
-    Python-2-only syntax (`except E, e:`, `print x`, backticks) is therefore a
-    violation in its own right, not just an inconvenience for the checker.
+    IronPython 3 (which sits at the Python 3.4 language level) and modern
+    Python 3 -- that is what `"{}".format(x)` everywhere buys, and it is what
+    lets any of this be checked outside Revit at all. Python-2-only syntax
+    (`except E, e:`, `print x`, backticks) is therefore a violation in its own
+    right, not just an inconvenience for the checker.
     """
     try:
         return ast.parse(source), None
     except SyntaxError as exc:
         return None, (
             "{}: does not parse as Python 3 -- {}. The Revit half must be "
-            "valid under both IronPython 2.7 and Python 3; avoid Python-2-only "
-            "syntax such as `except E, e:` or `print x`.".format(label, exc)
+            "valid under both IronPython 3 and modern Python 3; avoid "
+            "Python-2-only syntax such as `except E, e:` or `print x`.".format(
+                label, exc
+            )
         )
 
 
@@ -114,7 +121,7 @@ def check_encoding_cookie(label, source):
 
 
 # --------------------------------------------------------------------------
-# the Revit half: IronPython 2.7 dialect
+# the Revit half: IronPython 3 dialect (Python 3.4 language level)
 # --------------------------------------------------------------------------
 
 def _guarded_by(tree, exception_names):
@@ -147,6 +154,40 @@ def _guarded_by(tree, exception_names):
     return guarded
 
 
+def _guarded_by_python2_runtime_test(tree):
+    """ids of nodes reachable only on Python 2, via an `if bytes is str:` test.
+
+    The second sanctioned way to alias a Python-2 builtin, and the one
+    textutils.py uses. `bytes is str` is true only on Python 2, so `unicode`
+    inside that branch is unreachable on IronPython 3 -- the same guarantee
+    `except NameError` gives, without depending on the name being absent.
+
+    That distinction is why this form has to be allowed. pyRevit injects
+    `unicode` into its IronPython 3 engine as an alias of `str`, so the
+    NameError probe does not raise there and reports Python 2 on a Python 3
+    runtime; the type-identity test is unfoolable. Both `else` and `elif`
+    bodies count, since the Python 3 form lives there.
+    """
+    guarded = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        if not (isinstance(test, ast.Compare) and len(test.ops) == 1
+                and isinstance(test.ops[0], ast.Is)):
+            continue
+        names = {test.left.id} if isinstance(test.left, ast.Name) else set()
+        right = test.comparators[0]
+        if isinstance(right, ast.Name):
+            names.add(right.id)
+        if names != {"bytes", "str"}:
+            continue
+        for stmt in list(node.body) + list(node.orelse):
+            for child in ast.walk(stmt):
+                guarded.add(id(child))
+    return guarded
+
+
 def check_ironpython_dialect(label, source):
     """f-strings, async and Python-3-only imports break the Revit half.
 
@@ -166,10 +207,9 @@ def check_ironpython_dialect(label, source):
     f_lines = sorted({n.lineno for n in ast.walk(tree) if isinstance(n, ast.JoinedStr)})
     if f_lines:
         violations.append(
-            "{}: f-strings are Python 3 only and this file runs under "
-            "IronPython 2.7 -- use \"{{}}\".format(x). Lines: {}".format(
-                label, f_lines
-            )
+            "{}: f-strings need Python 3.6+ and this file runs under "
+            "IronPython 3, which sits at the Python 3.4 language level -- use "
+            "\"{{}}\".format(x). Lines: {}".format(label, f_lines)
         )
 
     async_defs = [n.name for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef)]
@@ -188,7 +228,7 @@ def check_ironpython_dialect(label, source):
     banned = sorted(found & PY3_ONLY_MODULES)
     if banned:
         violations.append(
-            "{}: {} do not exist in IronPython 2.7".format(label, banned)
+            "{}: {} do not exist in IronPython".format(label, banned)
         )
 
     # Helper imports must be RELATIVE. A flat `from utils import ...` inside
@@ -232,6 +272,7 @@ def check_ironpython_dialect(label, source):
         )
 
     nameable = _guarded_by(tree, {"NameError"})
+    nameable |= _guarded_by_python2_runtime_test(tree)
     py2_names = sorted({
         n.id for n in ast.walk(tree)
         if isinstance(n, ast.Name)
@@ -243,7 +284,8 @@ def check_ironpython_dialect(label, source):
             "{}: {} are Python 2 builtins, removed in IronPython 3. A bare "
             "reference inside `except Exception` raises NameError, is swallowed "
             "there, and silently blanks the data instead of failing. Alias them "
-            "once under `except NameError`, as revit_mcp/textutils.py does."
+            "once under `if bytes is str:`, as revit_mcp/textutils.py does, or "
+            "under `except NameError`."
             .format(label, py2_names)
         )
 
@@ -298,6 +340,32 @@ def check_element_id(label, source):
             "{}: use make_element_id() instead of building DB.ElementId from an "
             "integer -- a bare int fails on Revit 2027 with \"Multiple targets "
             "could match\". Lines: {}".format(label, sorted(bad))
+        )
+    return violations
+
+
+def check_request_parsing(label, source):
+    """A route must not parse request.data itself.
+
+    pyRevit parses the body only for Content-Type: application/json, and that
+    parse raises TypeError under IronPython 3 -- so the MCP client sends
+    text/plain and the body reaches the handler unparsed, as bytes. The old
+    idiom, `json.loads(request.data) if isinstance(request.data, str) else
+    request.data`, then quietly yields bytes and the handler dies on .get().
+    parse_request_data() accepts bytes, str and dict alike.
+    """
+    violations = []
+    code = _blank_strings_and_comments(source)
+    hits = [
+        i + 1
+        for i, line in enumerate(code.splitlines())
+        if "json.loads(request.data)" in line
+    ]
+    if hits:
+        violations.append(
+            "{}: use parse_request_data(request.data) from .utils instead of "
+            "parsing the body by hand -- on IronPython 3 the body arrives as "
+            "bytes and json.loads rejects it. Lines: {}".format(label, hits)
         )
     return violations
 
@@ -444,6 +512,7 @@ def check_route_module(label, source):
         check_encoding_cookie(label, source)
         + check_ironpython_dialect(label, source)
         + check_element_id(label, source)
+        + check_request_parsing(label, source)
         + check_route_registrar(label, source)
     )
 

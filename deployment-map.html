@@ -1,0 +1,1216 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style></head><body>
+<title>Карта развёртывания RevitMCP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    --paper:   #EDEDE8;
+    --surface: #F7F7F3;
+    --sunk:    #E3E4DD;
+    --ink:     #16191A;
+    --muted:   #656A68;
+    --line:    #C7C8C1;
+    --hair:    #D8D9D2;
+    --accent:  #1F6F5C;
+    --accent-soft: #DCEAE4;
+    --warn:    #A8552A;
+    --warn-soft:   #F0E2D7;
+
+    --display: "Oswald", "Arial Narrow", system-ui, sans-serif;
+    --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", "Consolas", ui-monospace, monospace;
+
+    --sheet: 1120px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:   #131614;
+      --surface: #1B1F1C;
+      --sunk:    #10130F;
+      --ink:     #E7E9E4;
+      --muted:   #98A09B;
+      --line:    #333A36;
+      --hair:    #262C28;
+      --accent:  #52BB9E;
+      --accent-soft: #17342C;
+      --warn:    #D9926A;
+      --warn-soft:   #33231A;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:   #131614;
+    --surface: #1B1F1C;
+    --sunk:    #10130F;
+    --ink:     #E7E9E4;
+    --muted:   #98A09B;
+    --line:    #333A36;
+    --hair:    #262C28;
+    --accent:  #52BB9E;
+    --accent-soft: #17342C;
+    --warn:    #D9926A;
+    --warn-soft:   #33231A;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 28px 20px 72px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: var(--sheet);
+    margin: 0 auto;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  /* ---------- title block ---------- */
+
+  .titleblock {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    border-bottom: 1px solid var(--line);
+  }
+  .titleblock__main { padding: 34px 34px 30px; }
+  .titleblock__meta {
+    border-left: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .meta-cell {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--hair);
+    border-right: 1px solid var(--hair);
+    min-width: 0;
+  }
+  .meta-cell:nth-child(2n) { border-right: 0; }
+  .meta-cell:nth-last-child(-n+2) { border-bottom: 0; }
+
+  .stamp {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 6px;
+  }
+  .meta-cell p { margin: 0; font-size: 14px; line-height: 1.45; }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(30px, 4.6vw, 50px);
+    line-height: 1.04;
+    letter-spacing: 0.005em;
+    margin: 10px 0 14px;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: clamp(16px, 1.6vw, 18.5px);
+    line-height: 1.55;
+    max-width: 46ch;
+    margin: 0;
+    color: var(--ink);
+  }
+
+  /* ---------- sections ---------- */
+
+  section { border-bottom: 1px solid var(--line); padding: 34px; }
+  section:last-of-type { border-bottom: 0; }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: clamp(21px, 2.5vw, 28px);
+    line-height: 1.15;
+    letter-spacing: 0.01em;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .sub { color: var(--muted); margin: 0 0 26px; max-width: 68ch; font-size: 15.5px; }
+
+  /* ---------- key statement ---------- */
+
+  .key {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0;
+    border: 1px solid var(--line);
+    background: var(--paper);
+  }
+  .key > div { padding: 24px 26px; }
+  .key > div + div { border-left: 1px solid var(--line); }
+  .key p { margin: 0; font-size: 16.5px; line-height: 1.55; }
+  .key strong { font-weight: 600; }
+  .key .no { color: var(--warn); }
+  .key .yes { color: var(--accent); }
+
+  /* ---------- figure ---------- */
+
+  figure { margin: 0; }
+  .figwrap { overflow-x: auto; padding-bottom: 4px; }
+  svg.map { display: block; width: 100%; min-width: 720px; height: auto; color: var(--ink); }
+  figcaption {
+    margin-top: 14px;
+    font-size: 14px;
+    color: var(--muted);
+    max-width: 74ch;
+  }
+
+  /* ---------- responsibility split ---------- */
+
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    border: 1px solid var(--line);
+  }
+  .col { min-width: 0; }
+  .col + .col { border-left: 1px solid var(--line); }
+
+  .col__head {
+    padding: 20px 26px;
+    border-bottom: 1px solid var(--line);
+    background: var(--sunk);
+  }
+  .col__who {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 25px;
+    letter-spacing: 0.02em;
+    line-height: 1.1;
+    margin: 0;
+  }
+  .col__note { font-size: 13.5px; color: var(--muted); margin: 3px 0 0; }
+
+  .row { padding: 24px 26px 28px; border-bottom: 1px solid var(--hair); }
+  .row:last-child { border-bottom: 0; }
+  .row__label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 14px;
+  }
+
+  ol.steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; counter-reset: s; }
+  ol.steps li {
+    counter-increment: s;
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 12px;
+    font-size: 15.5px;
+    line-height: 1.5;
+  }
+  ol.steps li::before {
+    content: counter(s);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 50%;
+    width: 24px; height: 24px;
+    display: grid; place-items: center;
+    margin-top: 2px;
+  }
+  ol.steps code, .cmdlist code, p code, li code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--sunk);
+    padding: 1px 5px;
+    border: 1px solid var(--hair);
+    white-space: nowrap;
+  }
+
+  .nothing {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(46px, 8vw, 82px);
+    line-height: 0.95;
+    letter-spacing: -0.01em;
+    color: var(--accent);
+    margin: 4px 0 12px;
+  }
+  .nothing-note { font-size: 15.5px; line-height: 1.5; margin: 0; max-width: 34ch; }
+
+  ul.cmdlist { margin: 0; padding: 0; list-style: none; display: grid; gap: 16px; }
+  ul.cmdlist li { font-size: 15.5px; line-height: 1.5; }
+  ul.cmdlist .what { display: block; color: var(--muted); font-size: 14px; margin-top: 3px; }
+
+  /* ---------- timeline ---------- */
+
+  .flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); gap: 0; border: 1px solid var(--line); }
+  .flow > div { padding: 22px 24px; border-right: 1px solid var(--hair); min-width: 0; }
+  .flow > div:last-child { border-right: 0; }
+  .flow h3 {
+    font-family: var(--display); font-weight: 500; font-size: 17px;
+    margin: 8px 0 6px; letter-spacing: 0.01em;
+  }
+  .flow p { margin: 0; font-size: 14.5px; color: var(--muted); line-height: 1.5; }
+  .tick {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--accent); margin: 0;
+  }
+
+  /* ---------- callouts ---------- */
+
+  .callout {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    background: var(--paper);
+    padding: 22px 26px;
+  }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout h3 {
+    font-family: var(--display); font-weight: 500; font-size: 19px;
+    margin: 0 0 8px; letter-spacing: 0.01em;
+  }
+  .callout p { margin: 0 0 10px; font-size: 15.5px; line-height: 1.55; max-width: 72ch; }
+  .callout p:last-child { margin-bottom: 0; }
+
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+
+  /* ---------- glossary ---------- */
+
+  dl.gloss { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(272px, 1fr)); gap: 20px 34px; }
+  dl.gloss > div { min-width: 0; }
+  dl.gloss dt {
+    font-family: var(--display); font-weight: 500; font-size: 16px;
+    letter-spacing: 0.01em; margin-bottom: 3px;
+  }
+  dl.gloss dd { margin: 0; font-size: 14.5px; color: var(--muted); line-height: 1.5; }
+  dl.gloss dd code { white-space: normal; }
+
+  footer {
+    max-width: var(--sheet);
+    margin: 16px auto 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  @media (max-width: 860px) {
+    body { padding: 16px 12px 48px; }
+    .titleblock { grid-template-columns: 1fr; }
+    .titleblock__meta { border-left: 0; border-top: 1px solid var(--line); }
+    .titleblock__main { padding: 26px 22px 22px; }
+    section { padding: 26px 22px; }
+    .key { grid-template-columns: 1fr; }
+    .key > div + div { border-left: 0; border-top: 1px solid var(--line); }
+    .split { grid-template-columns: 1fr; }
+    .col + .col { border-left: 0; border-top: 1px solid var(--line); }
+    .flow > div { border-right: 0; border-bottom: 1px solid var(--hair); }
+    .flow > div:last-child { border-bottom: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* ---------- part II : engineering register ---------- */
+
+  .partmark {
+    border-top: 2px solid var(--ink);
+    margin: 64px 0 0;
+    padding: 18px 28px 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 20px;
+    align-items: baseline;
+  }
+  .partmark__no {
+    font-family: var(--display);
+    font-size: 42px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+  }
+  .partmark__t h2 { margin: 0; border: 0; padding: 0; }
+  .partmark__t p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    max-width: 62ch;
+  }
+
+  .pathmap {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+  }
+  .pathmap > div { background: var(--surface); padding: 18px 18px 20px; }
+  .pathmap h4 {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 15px;
+    margin: 0 0 2px;
+    letter-spacing: 0.01em;
+  }
+  .pathmap .where {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 12px;
+    word-break: break-all;
+  }
+  .pathmap ul { margin: 0; padding-left: 0; list-style: none; }
+  .pathmap li {
+    font-size: 13px;
+    padding: 5px 0;
+    border-top: 1px solid var(--hair);
+    color: var(--muted);
+  }
+  .pathmap li b {
+    display: block;
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--ink);
+  }
+
+  .tblwrap { overflow-x: auto; }
+  table.tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    min-width: 620px;
+  }
+  table.tbl th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    padding: 0 14px 8px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  table.tbl td {
+    padding: 11px 14px 11px 0;
+    border-bottom: 1px solid var(--hair);
+    vertical-align: top;
+  }
+  table.tbl td:first-child { white-space: nowrap; }
+  table.tbl tr:last-child td { border-bottom: 0; }
+
+  .loop { counter-reset: st; display: grid; gap: 1px; background: var(--line);
+          border: 1px solid var(--line); }
+  .loop > li { background: var(--surface); padding: 16px 18px 18px 56px;
+               position: relative; list-style: none; }
+  .loop > li::before {
+    counter-increment: st;
+    content: counter(st);
+    position: absolute;
+    left: 18px; top: 16px;
+    font-family: var(--display);
+    font-size: 18px;
+    color: var(--accent);
+  }
+  .loop h4 { margin: 0 0 4px; font-size: 14.5px; font-weight: 600; }
+  .loop p { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .loop code { font-size: 12px; }
+  .loop .auto {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 11px;
+    font-family: var(--mono);
+    letter-spacing: 0.4px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 2px 7px;
+  }
+  .loop .manual { color: var(--warn); background: var(--warn-soft); }
+
+  @media (max-width: 860px) {
+    .pathmap { grid-template-columns: 1fr; }
+    .partmark { padding-left: 18px; padding-right: 18px; }
+  }
+</style>
+
+<div class="sheet">
+
+  <div class="titleblock">
+    <div class="titleblock__main">
+      <p class="stamp">Схема развёртывания · RevitMCP</p>
+      <h1>Кто что делает при установке и обновлении</h1>
+      <p class="lede">
+        RevitMCP — это связка, которая позволяет ИИ-помощнику Hermes читать
+        и править модель прямо в Revit. Здесь показано, где что находится
+        и какие действия требуются от людей.
+      </p>
+    </div>
+    <div class="titleblock__meta">
+      <div class="meta-cell">
+        <p class="stamp">Для кого</p>
+        <p>Часть I — проектировщики, ИТ, руководители.
+           Часть II — разработчики инструментов</p>
+      </div>
+      <div class="meta-cell">
+        <p class="stamp">Где работает</p>
+        <p>Закрытый контур компании</p>
+      </div>
+      <div class="meta-cell">
+        <p class="stamp">Требуется заранее</p>
+        <p>Revit 2024–2027 и pyRevit — уже стоят у всех</p>
+      </div>
+      <div class="meta-cell">
+        <p class="stamp">Права администратора</p>
+        <p>Не нужны</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================ KEY IDEA ============================ -->
+  <section>
+    <h2>Главное, что стоит понять</h2>
+    <p class="sub">
+      Название «сервер» сбивает с толку. На сервере компании ничего не запускается.
+    </p>
+    <div class="key">
+      <div>
+        <p>
+          <strong class="no">На сервере ничего не работает.</strong>
+          Общая папка на сервере — это полка. На ней лежит актуальная версия,
+          и всё. Программы оттуда не запускаются.
+        </p>
+      </div>
+      <div>
+        <p>
+          <strong class="yes">Всё работает на компьютере пользователя.</strong>
+          Обе части живут рядом с Revit — иначе они просто не смогли бы
+          с ним разговаривать.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== MAP ============================== -->
+  <section>
+    <h2>Карта: что где находится</h2>
+    <p class="sub">
+      Две части приезжают с общей папки на компьютер и дальше работают там.
+      Зелёным показано единственное, что делает сервер, — отдаёт файлы.
+    </p>
+
+    <figure>
+      <div class="figwrap">
+        <svg class="map" viewBox="0 0 900 566" role="img"
+             aria-label="Схема: на сервере компании лежит общая папка с двумя частями RevitMCP. Обе копируются на компьютер пользователя — часть для Revit при перезапуске Revit, часть-переводчик при входе в систему. На компьютере помощник Hermes разговаривает с переводчиком, а переводчик — с надстройкой внутри Revit.">
+          <defs>
+            <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5"
+                    markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+            </marker>
+            <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5"
+                    markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+
+          <!-- ===== BAND 1 : server ===== -->
+          <rect x="40" y="22" width="820" height="124" fill="none"
+                stroke="currentColor" stroke-opacity="0.45" stroke-width="1"
+                stroke-dasharray="7 5"/>
+          <text x="62" y="50" font-family="IBM Plex Mono, monospace" font-size="11"
+                letter-spacing="1.6" fill="currentColor" fill-opacity="0.6">СЕРВЕР КОМПАНИИ</text>
+          <text x="62" y="80" font-family="IBM Plex Sans, sans-serif" font-size="16"
+                font-weight="500" fill="currentColor">Общая папка</text>
+          <text x="62" y="103" font-family="IBM Plex Sans, sans-serif" font-size="13"
+                fill="currentColor" fill-opacity="0.62">Хранит актуальную версию.</text>
+          <text x="62" y="122" font-family="IBM Plex Sans, sans-serif" font-size="13"
+                fill="currentColor" fill-opacity="0.62">Ничего не выполняет.</text>
+
+          <rect x="360" y="52" width="180" height="64" fill="none"
+                stroke="currentColor" stroke-opacity="0.5"/>
+          <text x="450" y="80" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="13.5" font-weight="500" fill="currentColor">Часть-переводчик</text>
+          <text x="450" y="100" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="12" fill="currentColor" fill-opacity="0.62">файлы программы</text>
+
+          <rect x="650" y="52" width="180" height="64" fill="none"
+                stroke="currentColor" stroke-opacity="0.5"/>
+          <text x="740" y="80" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="13.5" font-weight="500" fill="currentColor">Часть для Revit</text>
+          <text x="740" y="100" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="12" fill="currentColor" fill-opacity="0.62">надстройка</text>
+
+          <!-- ===== delivery arrows (the accent: what the server does) ===== -->
+          <line x1="450" y1="116" x2="450" y2="212" stroke="var(--accent)"
+                stroke-width="2" marker-end="url(#ahg)"/>
+          <text x="462" y="152" font-family="IBM Plex Sans, sans-serif" font-size="12"
+                fill="var(--accent)" font-weight="500">копируется</text>
+          <text x="462" y="169" font-family="IBM Plex Sans, sans-serif" font-size="12"
+                fill="var(--accent)">при входе в систему</text>
+
+          <line x1="740" y1="116" x2="740" y2="212" stroke="var(--accent)"
+                stroke-width="2" marker-end="url(#ahg)"/>
+          <text x="728" y="152" text-anchor="end" font-family="IBM Plex Sans, sans-serif"
+                font-size="12" fill="var(--accent)" font-weight="500">копируется</text>
+          <text x="728" y="169" text-anchor="end" font-family="IBM Plex Sans, sans-serif"
+                font-size="12" fill="var(--accent)">при перезапуске Revit</text>
+
+          <!-- ===== BAND 2 : workstation ===== -->
+          <rect x="40" y="214" width="820" height="330" fill="none"
+                stroke="currentColor" stroke-width="1.5"/>
+          <text x="62" y="244" font-family="IBM Plex Mono, monospace" font-size="11"
+                letter-spacing="1.6" fill="currentColor" fill-opacity="0.6">КОМПЬЮТЕР ПОЛЬЗОВАТЕЛЯ</text>
+          <text x="62" y="268" font-family="IBM Plex Sans, sans-serif" font-size="14"
+                fill="currentColor" fill-opacity="0.62">Здесь всё и работает</text>
+
+          <!-- Hermes -->
+          <rect x="70" y="300" width="180" height="112" fill="none" stroke="currentColor"/>
+          <text x="160" y="332" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="15" font-weight="600" fill="currentColor">Hermes</text>
+          <text x="160" y="356" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="12.5" fill="currentColor" fill-opacity="0.62">ИИ-помощник,</text>
+          <text x="160" y="374" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="12.5" fill="currentColor" fill-opacity="0.62">с которым говорит</text>
+          <text x="160" y="392" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="12.5" fill="currentColor" fill-opacity="0.62">человек</text>
+
+          <!-- Переводчик -->
+          <rect x="360" y="300" width="180" height="112" fill="none" stroke="currentColor"/>
+          <text x="450" y="332" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="15" font-weight="600" fill="currentColor">Переводчик</text>
+          <text x="450" y="356" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="12.5" fill="currentColor" fill-opacity="0.62">превращает просьбу</text>
+          <text x="450" y="374" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="12.5" fill="currentColor" fill-opacity="0.62">в команду Revit.</text>
+          <text x="450" y="392" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="12.5" fill="currentColor" fill-opacity="0.62">Запускает его Hermes</text>
+
+          <!-- Revit -->
+          <rect x="650" y="300" width="180" height="112" fill="none" stroke="currentColor"/>
+          <text x="740" y="332" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="15" font-weight="600" fill="currentColor">Revit</text>
+          <text x="740" y="356" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="12.5" fill="currentColor" fill-opacity="0.62">внутри него —</text>
+          <text x="740" y="374" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="12.5" fill="currentColor" fill-opacity="0.62">надстройка, которая</text>
+          <text x="740" y="392" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="12.5" fill="currentColor" fill-opacity="0.62">отвечает на команды</text>
+
+          <!-- conversation arrows -->
+          <line x1="252" y1="336" x2="356" y2="336" stroke="currentColor"
+                stroke-width="1.5" marker-end="url(#ah)"/>
+          <text x="304" y="328" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="11.5" fill="currentColor" fill-opacity="0.7">просьба</text>
+          <line x1="356" y1="378" x2="252" y2="378" stroke="currentColor"
+                stroke-width="1.5" marker-end="url(#ah)"/>
+          <text x="304" y="398" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="11.5" fill="currentColor" fill-opacity="0.7">ответ</text>
+
+          <line x1="542" y1="336" x2="646" y2="336" stroke="currentColor"
+                stroke-width="1.5" marker-end="url(#ah)"/>
+          <text x="594" y="328" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="11.5" fill="currentColor" fill-opacity="0.7">команда</text>
+          <line x1="646" y1="378" x2="542" y2="378" stroke="currentColor"
+                stroke-width="1.5" marker-end="url(#ah)"/>
+          <text x="594" y="398" text-anchor="middle" font-family="IBM Plex Sans, sans-serif"
+                font-size="11.5" fill="currentColor" fill-opacity="0.7">данные модели</text>
+
+          <!-- footnote inside band 2 -->
+          <line x1="70" y1="452" x2="830" y2="452" stroke="currentColor" stroke-opacity="0.22"/>
+          <text x="70" y="480" font-family="IBM Plex Sans, sans-serif" font-size="13"
+                fill="currentColor" fill-opacity="0.72">Если Revit закрыт — помощник открывает его сам</text>
+          <text x="70" y="502" font-family="IBM Plex Sans, sans-serif" font-size="13"
+                fill="currentColor" fill-opacity="0.55">и ждёт, пока Revit загрузится. Обычно 1–3 минуты.</text>
+        </svg>
+      </div>
+      <figcaption>
+        Сервер участвует только в момент доставки файлов — дальше он не нужен,
+        и компьютер работает даже если сервер недоступен.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ========================= WHO DOES WHAT ========================= -->
+  <section>
+    <h2>Кто что делает</h2>
+    <p class="sub">
+      Вся работа по поддержке лежит на разработчике. От пользователя нужна
+      только первая установка.
+    </p>
+
+    <div class="split">
+
+      <div class="col">
+        <div class="col__head">
+          <p class="col__who">Пользователь</p>
+          <p class="col__note">Проектировщик за своим компьютером</p>
+        </div>
+
+        <div class="row">
+          <p class="row__label">Установка · один раз</p>
+          <ol class="steps">
+            <li>Открыть общую папку на сервере и запустить файл <code>install.cmd</code>.</li>
+            <li>Когда программа попросит — закрыть Hermes и нажать любую клавишу.</li>
+            <li>Перезапустить Revit и снова открыть Hermes.</li>
+          </ol>
+        </div>
+
+        <div class="row">
+          <p class="row__label">Обновление · дальше всегда</p>
+          <p class="nothing">Ничего</p>
+          <p class="nothing-note">
+            Новые версии приезжают сами. Просить, нажимать и следить
+            за версиями не нужно.
+          </p>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="col__head">
+          <p class="col__who">Разработчик</p>
+          <p class="col__note">Тот, кто ведёт RevitMCP</p>
+        </div>
+
+        <div class="row">
+          <p class="row__label">Установка · подготовка</p>
+          <ol class="steps">
+            <li>Один раз разложить общую папку на сервере и указать в настройках путь к ней.</li>
+            <li>Собрать и опубликовать обе части — команды ниже.</li>
+            <li>Дать людям ссылку на папку. Дальше они справляются сами.</li>
+          </ol>
+        </div>
+
+        <div class="row">
+          <p class="row__label">Обновление · каждый раз</p>
+          <ul class="cmdlist">
+            <li>
+              <code>publish-extension.cmd</code>
+              <span class="what">Обновляет часть, которая живёт внутри Revit.
+              Люди получат её при следующем запуске Revit.</span>
+            </li>
+            <li>
+              <code>build-payload.cmd</code>
+              <span class="what">Обновляет вторую часть. Люди получат её
+              при следующем входе в систему.</span>
+            </li>
+          </ul>
+          <p class="nothing-note" style="margin-top:16px">
+            Запускается та команда, чья часть менялась. Обе — тоже можно.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ========================== UPDATE FLOW ========================== -->
+  <section>
+    <h2>Как обновление доходит до людей</h2>
+    <p class="sub">
+      Никто никому не звонит и ничего не рассылает. Обновление подхватывается
+      в момент, когда человек и так перезапускает программу.
+    </p>
+    <div class="flow">
+      <div>
+        <p class="tick">Шаг 1</p>
+        <h3>Разработчик публикует</h3>
+        <p>Одна команда на сервере. Новая версия ложится в общую папку.</p>
+      </div>
+      <div>
+        <p class="tick">Шаг 2</p>
+        <h3>Компьютер сам забирает</h3>
+        <p>Через несколько минут после входа в систему компьютер тихо
+           скачивает новую версию. Работе это не мешает.</p>
+      </div>
+      <div>
+        <p class="tick">Шаг 3</p>
+        <h3>Версия включается</h3>
+        <p>При следующем запуске Revit и Hermes. Старая версия остаётся
+           рядом — на случай отката.</p>
+      </div>
+      <div>
+        <p class="tick">Если нет сети</p>
+        <h3>Ничего не ломается</h3>
+        <p>Нет доступа к серверу — обновление просто пропускается,
+           а всё продолжает работать на прежней версии.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ CAVEATS ============================ -->
+  <section>
+    <h2>Что стоит знать заранее</h2>
+    <p class="sub">Две особенности, которые лучше не обнаруживать в процессе.</p>
+
+    <div class="two">
+      <div class="callout">
+        <h3>Revit нужно перезапускать целиком</h3>
+        <p>
+          Кнопка «Reload» в pyRevit для этой надстройки не годится — были случаи
+          аварийного закрытия Revit. Правильно: закрыть Revit полностью и открыть заново.
+        </p>
+      </div>
+
+      <div class="callout warn">
+        <h3>Обновление pyRevit требует внимания разработчика</h3>
+        <p>
+          RevitMCP пользуется тем Python, который приносит с собой pyRevit —
+          поэтому ничего лишнего на компьютер не ставится. Обратная сторона:
+          если pyRevit обновится и сменит свой Python, разработчику нужно
+          пересобрать вторую часть.
+        </p>
+        <p>
+          Пользователь в этом случае увидит понятное сообщение, а не непонятную ошибку.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= PART II : ENGINEERING ==================== -->
+  <div class="partmark">
+    <p class="partmark__no">II</p>
+    <div class="partmark__t">
+      <h2>Для разработчиков</h2>
+      <p>
+        Дальше — конкретика: реальные пути, что именно копируется, как
+        отслеживается версия и как группа разработчиков добавляет инструменты.
+        Всё выше можно показывать людям; всё ниже — рабочий регламент.
+      </p>
+    </div>
+  </div>
+
+  <!-- ---------------------- three homes of the code ------------------- -->
+  <section>
+    <h2>Три места, где живёт код</h2>
+    <p class="sub">
+      Различаются они не расположением, а ролью. Рабочая копия и опубликованные
+      копии могут лежать рядом, в одной и той же общей папке — и обычно лежат.
+      Путаница между ними — источник большинства вопросов «а почему не
+      обновилось».
+    </p>
+
+    <div class="pathmap">
+      <div>
+        <h4>1 · Рабочая копия Git</h4>
+        <span class="where">…\827_RevitMCP\revit-mcp-server\ — или локальный диск, скрипту всё равно</span>
+        <ul>
+          <li><b>revit_mcp/</b> маршруты, IronPython, исполняются внутри Revit</li>
+          <li><b>tools/</b> инструменты MCP, CPython 3.11+</li>
+          <li><b>startup.py</b> точка входа расширения, обход пакета</li>
+          <li><b>main.py</b> сервер MCP и мост HTTP</li>
+          <li><b>tests/unit/</b> тесты, без Revit</li>
+          <li><b>deploy/</b>, <b>scripts/</b>, <b>contrib-kit/</b>, <b>.git/</b>
+            — сюда правите вы; <strong>pyRevit эту папку не видит вообще</strong></li>
+        </ul>
+      </div>
+      <div>
+        <h4>2 · Опубликованные копии</h4>
+        <span class="where">…\827_RevitMCP\ext\ и …\827_RevitMCP\payload\</span>
+        <ul>
+          <li><b>ext\revit-mcp-server.extension\</b> Revit-половина, обрезанная.
+            Грузится станциями <strong>прямо отсюда</strong> по UNC</li>
+          <li><b>payload\</b> CPython-половина, зеркалится на станцию</li>
+          <li><b>payload\VERSION</b> пишется последним — маркер готовности</li>
+          <li><b>payload\ENGINE</b> версия CPython, под которую собраны колёса</li>
+          <li><b>install\</b> install.cmd, update.cmd для пользователей</li>
+        </ul>
+      </div>
+      <div>
+        <h4>3 · Станция</h4>
+        <span class="where">%LOCALAPPDATA%\RevitMCP\</span>
+        <ul>
+          <li><b>versions\&lt;VERSION&gt;\</b> распакованные версии, хранится
+            текущая и одна предыдущая</li>
+          <li><b>current</b> junction на активную версию</li>
+          <li><b>current-version.txt</b> что стоит сейчас</li>
+          <li><b>~\.hermes\config.yaml</b> управляемый блок mcp_servers</li>
+          <li><b>update.log</b> первое, что смотреть при «застряло на старой»</li>
+        </ul>
+      </div>
+    </div>
+
+    <figcaption>
+      Асимметрия намеренная: Revit-половина исполняется прямо из общей папки по
+      UNC, поэтому публикация и есть раскатка. CPython-половина зеркалится на
+      станцию, потому что запускать интерпретатор с сетевого диска медленно и
+      хрупко.
+    </figcaption>
+
+    <div class="callout warn" style="margin-top:22px">
+      <h3>Кириллица в пути — отложенная проблема</h3>
+      <p>
+        Путь общей папки содержит русские буквы и пробелы, и он попадает на
+        <code>sys.path</code> IronPython, в TOML-конфиг pyRevit и в ключи
+        кэша — на парке с русской локалью. Работает, но это ровно тот класс
+        путей, на котором ломаются сторонние библиотеки.
+      </p>
+      <p>
+        Стоит запросить у ИТ DFS-ссылку с ASCII-именем без пробелов
+        (например <code>\\srv-dfs\BIM\RevitMCP</code>) и использовать только
+        её в <code>deploy\config.cmd</code>. Папку приёма это не касается —
+        <code>inbox\</code> нигде не оказывается на <code>sys.path</code>.
+      </p>
+    </div>
+  </section>
+
+  <!-- ---------------------- what gets copied -------------------------- -->
+  <section>
+    <h2>Что именно копируется</h2>
+    <p class="sub">
+      Оба скрипта публикации работают по <strong>белому списку</strong>, а не по
+      списку исключений. Это значит: новая папка в корне репозитория
+      <strong>не уедет</strong> и никто об этом не сообщит.
+    </p>
+
+    <div class="callout" style="margin-bottom:24px">
+      <h3>Зачем вообще копия, если репозиторий и так на общей папке</h3>
+      <p>
+        Самый частый вопрос. Ответ: <code>publish-extension.cmd</code> — это не
+        перемещение файлов, а <strong>фильтр</strong>. В <code>ext\</code>
+        уезжает четыре вещи из примерно двадцати пяти: <code>extension.json</code>,
+        <code>startup.py</code>, <code>LICENSE</code> и <code>revit_mcp\</code>.
+        Всё остальное — <code>main.py</code>, <code>tools\</code>,
+        <code>tests\</code>, <code>deploy\</code>, <code>.git\</code>,
+        <code>.planning\</code>, Obsidian-архив — остаётся в рабочей копии.
+        Revit это не нужно, а часть просто не должна лежать на папке, читаемой
+        отделом.
+      </p>
+      <p>
+        Вторая причина — <strong>атомарность</strong>. Если бы pyRevit смотрел
+        прямо в рабочую копию, пользователь, запустивший Revit в момент
+        <code>git pull</code>, загрузил бы полуобновлённое расширение: часть
+        файлов новая, часть старая. Публикация пересобирает <code>ext\</code>
+        целиком, и до этого момента станции видят консистентную предыдущую
+        версию.
+      </p>
+      <p>
+        Третья — <code>sys.path</code>. Папка расширения целиком попадает в путь
+        поиска модулей IronPython. Лишние каталоги там означают лишние места,
+        откуда может импортироваться что-то неожиданное, и лишние SMB-обходы
+        при каждой загрузке Revit.
+      </p>
+    </div>
+
+    <div class="tblwrap">
+      <table class="tbl">
+        <thead>
+          <tr><th>Команда</th><th>Берёт</th><th>Кладёт</th><th>Когда включится</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>publish-extension.cmd</code></td>
+            <td><code>extension.json</code>, <code>startup.py</code>,
+                <code>LICENSE</code>, вся <code>revit_mcp\</code> рекурсивно</td>
+            <td><code>…\827_RevitMCP\ext\revit-mcp-server.extension\</code></td>
+            <td>при следующем запуске Revit</td>
+          </tr>
+          <tr>
+            <td><code>build-payload.cmd</code></td>
+            <td><code>main.py</code>, <code>server.py</code>, <code>gate.py</code>,
+                <code>warm.py</code>, <code>tools\</code> и <code>tests\</code>
+                рекурсивно, плюс собранные колёса</td>
+            <td><code>…\827_RevitMCP\payload\</code></td>
+            <td>при следующем входе в систему</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="two" style="margin-top:22px">
+      <div class="callout">
+        <h3>Подпапки уезжают сами</h3>
+        <p>
+          Копирование рекурсивное, поэтому <code>tools\audit\profiles\</code> или
+          <code>revit_mcp\helpers\</code> попадут на станции без правки скриптов.
+          Новые данные и модули кладите <strong>внутрь</strong>
+          <code>tools\</code> или <code>revit_mcp\</code>.
+        </p>
+      </div>
+      <div class="callout warn">
+        <h3>Корень репозитория — нет</h3>
+        <p>
+          Папка, созданная в корне, в белый список не входит и потеряется молча.
+          Если она действительно нужна на станции — правьте белый список
+          осознанно, а не добавляйте исключение.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------------------- how it is tracked ------------------------- -->
+  <section>
+    <h2>Как отслеживается, что и куда доехало</h2>
+    <p class="sub">
+      Пять маркеров. Если обновление «не дошло», ответ всегда в одном из них.
+    </p>
+
+    <div class="tblwrap">
+      <table class="tbl">
+        <thead>
+          <tr><th>Маркер</th><th>Где</th><th>Что означает</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>payload\VERSION</code></td>
+            <td>общая папка</td>
+            <td>Версия, готовая к раздаче. Пишется <strong>последней</strong>,
+                поэтому станция физически не может забрать полупубликацию.</td>
+          </tr>
+          <tr>
+            <td><code>current-version.txt</code></td>
+            <td>станция</td>
+            <td>Что реально стоит. <code>update.cmd</code> сравнивает с VERSION и
+                при совпадении не делает ничего.</td>
+          </tr>
+          <tr>
+            <td><code>payload\ENGINE</code></td>
+            <td>общая папка</td>
+            <td>Версия CPython pyRevit, под которую собраны колёса.
+                Расхождение = <code>update.cmd</code> предупреждает,
+                <code>install.cmd</code> отказывается ставить.</td>
+          </tr>
+          <tr>
+            <td><code>tool_manifest.txt</code></td>
+            <td>репозиторий</td>
+            <td>Авторитетный список инструментов. <code>gate.py</code> не даёт
+                опубликовать сборку, где инструмент пропал или появился
+                незаявленным.</td>
+          </tr>
+          <tr>
+            <td><code>/revit_mcp/status/</code></td>
+            <td>станция, в Revit</td>
+            <td>Что реально загрузилось внутри Revit. <code>health: degraded</code>
+                и <code>failed_domains</code> называют сломанный домен.
+                <code>?verbose=true</code> — весь список.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <figcaption>
+      Отслеживание версии и отслеживание работоспособности — разные вещи.
+      Совпадение версий говорит только о том, что файлы доехали; загрузился ли
+      домен внутри Revit, показывает лишь <code>/status/</code>.
+    </figcaption>
+  </section>
+
+  <!-- ---------------------- developer loop ---------------------------- -->
+  <section>
+    <h2>Как инструмент попадает в репозиторий</h2>
+    <p class="sub">
+      У разработчиков инструментов <strong>нет доступа к репозиторию</strong>.
+      Они собирают самодостаточный пакет и кладут его в папку приёма; сборкой
+      занимается сопровождающий. Это возможно потому, что регистрация идёт по
+      соглашению: возможность — это ровно два файла, не трогающих ни одного
+      общего.
+    </p>
+
+    <div class="pathmap" style="margin-bottom:26px">
+      <div>
+        <h4>Разработчик</h4>
+        <span class="where">contrib-kit\revitmcp-contrib-kit.zip</span>
+        <ul>
+          <li><b>Получает</b> набор: <code>revitmcp_kit.py</code>
+            (new · check · probe · pack), <code>conventions.py</code>,
+            <code>INSTRUCTION.md</code>, <code>AGENTS.md</code>. Кода сервера
+            в нём нет</li>
+          <li><b>Проверяет</b> у себя: конвенции и прогон на живой модели через
+            свой же <code>/execute_code/</code> — без репозитория и без
+            перезапуска Revit</li>
+          <li><b>Отдаёт</b> один <code>.zip</code>: два модуля, манифест,
+            заметки</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Папка приёма</h4>
+        <span class="where">\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\inbox\</span>
+        <ul>
+          <li><b>Запись</b> разрешена разработчикам</li>
+          <li><b>Чтение</b> — сопровождающему</li>
+          <li>Ни Git, ни интернета, ни доступа к репозиторию</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Сопровождающий</h4>
+        <span class="where">репозиторий · единственный, у кого доступ</span>
+        <ul>
+          <li><b>Проверяет</b> пакет автоматической приёмкой</li>
+          <li><b>Читает</b> код глазами — это обязательный шаг</li>
+          <li><b>Коммитит и публикует</b></li>
+        </ul>
+      </div>
+    </div>
+
+    <ol class="loop">
+      <li>
+        <h4>Генератор, не руками</h4>
+        <p>
+          <code>python revitmcp_kit.py new &lt;domain&gt; &lt;tool&gt;</code> —
+          создаёт каркас пакета. Флаг <code>--get</code> для читающего
+          инструмента. Структура, сигнатуры и имена уже заданы.
+        </p>
+        <span class="auto">создаётся автоматически</span>
+      </li>
+      <li>
+        <h4>Заполнить TODO</h4>
+        <p>
+          Единственное решение разработчика — алгоритм маршрута и докстринг
+          инструмента.
+        </p>
+        <span class="manual">решение человека</span>
+      </li>
+      <li>
+        <h4>Проверка на своей машине</h4>
+        <p>
+          <code>python revitmcp_kit.py check</code> прогоняет те же конвенции,
+          что и репозиторий: кодировку, диалект IronPython-половины,
+          <code>ctx</code> последним, блок <code>Args:</code>, запрет
+          <code>DB.ElementId(&lt;int&gt;)</code>.
+        </p>
+        <span class="auto">проверяется автоматически</span>
+      </li>
+      <li>
+        <h4>Прогон на живой модели без репозитория</h4>
+        <p>
+          <code>probe</code> отправляет текст маршрута в
+          <code>/execute_code/</code> собственного Revit разработчика и вызывает
+          обработчик на реальной модели. Репозиторий для этого не нужен —
+          нужен только штатно установленный RevitMCP.
+        </p>
+        <span class="manual">только вручную</span>
+      </li>
+      <li>
+        <h4>Упаковать и положить в <code>inbox\</code></h4>
+        <p>
+          <code>pack</code> собирает <code>.zip</code>: два файла, тесты,
+          манифест с именами инструментов и автором, результаты прогона.
+        </p>
+        <span class="auto">создаётся автоматически</span>
+      </li>
+      <li>
+        <h4>Приёмка у сопровождающего</h4>
+        <p>
+          <code>intake_package.py</code> отклоняет пакет, который трогает общие
+          файлы, конфликтует по именам, не проходит конвенции или содержит
+          опасные вызовы. Пройденная приёмка означает «можно смотреть», а не
+          «можно брать».
+        </p>
+        <span class="auto">отклоняется автоматически</span>
+      </li>
+      <li>
+        <h4>Ревью, коммит, релиз</h4>
+        <p>
+          Сопровождающий <strong>читает код</strong>, коммитит с указанием
+          автора и запускает публикацию. Автоматика умеет только отклонять;
+          одобрить может лишь человек.
+        </p>
+        <span class="manual">решение человека</span>
+      </li>
+    </ol>
+
+    <div class="callout warn" style="margin-top:22px">
+      <h3>Почему ревью обязательно, а не формальность</h3>
+      <p>
+        Принимаемый код — это IronPython, который исполняется
+        <strong>внутри процесса Revit с полным доступом к API и файловой
+        системе</strong>, на каждой станции отдела. Приёмка ловит нарушения
+        конвенций и очевидно опасные конструкции
+        (<code>exec</code>, <code>subprocess</code>, сеть, запись за пределы
+        ожидаемого), но она не способна оценить намерение. Автоматика
+        отклоняет — одобряет только человек, прочитавший код.
+      </p>
+    </div>
+
+    <div class="two" style="margin-top:22px">
+      <div class="callout">
+        <h3>Правила аудита обновляются без релиза</h3>
+        <p>
+          Профили проверок, словарь классификатора и шаблон отчёта живут в
+          репозитории скиллов и едут к людям каналом Гены. Изменение порога или
+          категории не требует ни <code>git pull</code>, ни сборки, ни входа в
+          систему. Релиз сервера нужен только для правила нового типа.
+        </p>
+      </div>
+      <div class="callout warn">
+        <h3>Что ломается молча</h3>
+        <p>
+          f-строка (или наоборот — «плоский» импорт вместо относительного,
+          смотря какую версию движка ставит IronPython сейчас) в
+          <code>revit_mcp/</code> — домен не загрузится, в логах ничего
+          внятного. Забытая строка в манифесте — сборка не опубликуется.
+          Папка в корне репозитория — не уедет. Первые два ловят тесты и
+          <code>gate.py</code>, третье — только внимание.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================== GLOSSARY ============================ -->
+  <section>
+    <h2>Словарик</h2>
+    <p class="sub">
+      Простые названия на схеме и их настоящие имена — чтобы ИТ и разработчик
+      понимали друг друга.
+    </p>
+    <dl class="gloss">
+      <div>
+        <dt>Часть для Revit</dt>
+        <dd>Надстройка pyRevit <code>revit-mcp-server.extension</code>. Работает внутри
+          процесса Revit и отвечает на команды.</dd>
+      </div>
+      <div>
+        <dt>Часть-переводчик</dt>
+        <dd>MCP-сервер. Отдельная небольшая программа, которую запускает Hermes;
+          переводит просьбы человека в команды Revit.</dd>
+      </div>
+      <div>
+        <dt>Общая папка</dt>
+        <dd>Сетевой каталог на сервере компании, здесь
+          <code>\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\</code>. Для
+          пользователей — только чтение. ИТ и разработчики называют это
+          «шара» (от английского <em>share</em>) или «SMB-шара» — это одно и
+          то же. <code>srv-dfs</code> — имя сервера, точнее DFS-пространства
+          имён: путь может физически перенаправляться на другой файловый
+          сервер, оставаясь для пользователя неизменным.</dd>
+      </div>
+      <div>
+        <dt>Помощник</dt>
+        <dd>Hermes Agent — приложение, в котором человек ставит задачи словами.</dd>
+      </div>
+      <div>
+        <dt>Обновление «само»</dt>
+        <dd>Задача в планировщике, а где прав не хватает — ярлык в автозагрузке.
+          Ждёт несколько минут после входа и тихо синхронизирует папку.</dd>
+      </div>
+      <div>
+        <dt>Откат</dt>
+        <dd>Предыдущая версия остаётся на диске. Вернуться на неё — минутное дело
+          для разработчика.</dd>
+      </div>
+    </dl>
+  </section>
+
+</div>
+
+<footer>
+  <span>RevitMCP · схема развёртывания</span>
+  <span>Revit 2024–2027 · pyRevit · Hermes Agent</span>
+</footer>
+
+</body></html>

@@ -29,14 +29,24 @@ uv run main.py --sse                 # SSE at /sse, /messages/
 uv run main.py --combined            # both HTTP + SSE under one uvicorn
 mcp dev main.py                      # MCP Inspector at http://127.0.0.1:6274
 
+uv sync --group dev                     # adds pytest (dev-only; never ships in the payload)
+uv run pytest tests/unit                # Revit-free suite; run before every commit
 python tests/test_init_latency.py       # cold-start gate (<2.0s); runs anywhere
 python tests/test_model_info_format.py  # needs live Revit + pyRevit Routes on :48884
 ```
 
-There is no pytest, no runner, no lint/format config, and no CI. Tests are standalone
-`asyncio.run` scripts run one at a time; they print an uppercase sentinel (`MODEL_INFO_OK`,
-`INIT_LATENCY_S=…`) on pass. To add one, copy the stdio-client skeleton from an existing
-test, keep the absolute-`main.py`-path idiom, and note in a comment whether it needs live Revit.
+Two test tiers. `tests/unit/` is a pytest suite that must never need Revit, pyRevit or the
+network — run it before every commit (`uv run pytest tests/unit`). The two scripts directly
+in `tests/` are the older tier: standalone `asyncio.run` programs run one at a time that
+print an uppercase sentinel (`MODEL_INFO_OK`, `INIT_LATENCY_S=…`) on pass; they are excluded
+from pytest collection because they execute at import. To add one, copy the stdio-client
+skeleton from an existing test, keep the absolute-`main.py`-path idiom, and note in a comment
+whether it needs live Revit.
+
+There is no lint/format config and no CI. `revit_mcp/` cannot be imported under CPython (it
+needs pyRevit), so **new domain logic belongs on the CPython side where it can be tested**;
+keep the Revit half a thin data provider. Pure helpers that both halves need go in
+`revit_mcp/textutils.py`, which imports nothing from pyRevit and is unit tested.
 
 Verifying the Revit side requires Revit open with a document, pyRevit installed, and
 Routes Server enabled — check `http://localhost:48884/revit_mcp/status/` in a browser.
@@ -52,21 +62,32 @@ MCP client ──stdio/SSE/HTTP──> main.py + tools/ ──HTTP :48884──>
 `revit_get` / `revit_post` / `revit_image`. Those three callables are **injected** into every
 tool registrar — tool modules never import the transport.
 
-Strict 1:1 mirroring by domain: `revit_mcp/clash.py` ⇄ `tools/clash_tools.py`. Each side has one
-registration entry point (`register_<domain>_routes(api)` / `register_<domain>_tools(mcp, revit_get, revit_post, revit_image=None)`)
-called from a hand-maintained barrel (`startup.py` / `tools/__init__.py`). Imports live *inside*
-those register functions, not at module top — this isolates per-domain import failures and keeps
-stdio cold start low.
+Mirroring by domain: `revit_mcp/clash.py` ⇄ `tools/clash_tools.py`. Each side has one
+registration entry point (`register_<domain>_routes(api)` / `register_<domain>_tools(mcp, revit_get, revit_post, revit_image=None)`).
+The mirroring is a convention, not a law — `tools/process_tools.py` has no Revit half (it runs
+when Revit is closed) and `tools/family_tools.py` maps onto `revit_mcp/placement.py`.
 
-**Adding a capability means editing 4 places, in the same order as existing entries.** A missing
-line in either barrel silently drops the capability with no error:
+**Registration is by convention — there is no barrel to edit.** `startup.py` and
+`tools/__init__.py` discover every module exposing a `register_*_routes` /
+`register_*_tools` callable. **Adding a capability is 2 files plus the manifest:**
 
 1. `revit_mcp/<domain>.py` — `@api.route("/<name>/", methods=[...])` handler taking pyRevit's injected `(doc, request)`
-2. `startup.py` — import + `register_<domain>_routes(api)`
-3. `tools/<domain>_tools.py` — `@mcp.tool()` async function, `ctx: Context = None` **last**
-4. `tools/__init__.py` — import + `register_<domain>_tools(...)`
+2. `tools/<domain>_tools.py` — `@mcp.tool()` async function, `ctx: Context = None` **last**
+3. `tests/unit/tool_manifest.txt` — add the tool name, same commit
 
-Current surface: 49 MCP tools over 48 routes across 22 domain modules.
+Discovery rules that matter when writing a module:
+
+- Order is alphabetical and **must stay insignificant — never import one `revit_mcp/` domain
+  from another.** `tests/unit/test_registration.py` enforces this.
+- A module exposing no registrar is treated as a helper and *reported*, so a misspelled
+  registrar name surfaces instead of vanishing.
+- Failures are isolated per domain: one broken module no longer kills the extension, but it
+  is not silent — `/status/` returns `"health": "degraded"` and names the failed domains
+  (`?verbose=true` also lists the registered ones).
+- Imports still live *inside* the register functions, which keeps stdio cold start low.
+
+Current surface: 51 MCP tools over 49 routes across 22 domain modules. The authoritative
+list is `tests/unit/tool_manifest.txt`; `deploy/gate.py` blocks a release that diverges from it.
 
 ## Non-negotiable invariants
 

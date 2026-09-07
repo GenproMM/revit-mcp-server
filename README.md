@@ -277,18 +277,31 @@ All tools accept **millimeters (mm)**. The server converts to Revit's internal f
 
 ## Creating Your Own Tools
 
-Adding a new tool requires 2 files + 2 registration lines:
+Adding a new tool takes 2 files. Registration is by convention — there is no list to
+append to, so a forgotten registration line is no longer possible:
 
-1. **Route handler** in `revit_mcp/new_module.py` (IronPython 2.7)
-2. **Tool definition** in `tools/new_tools.py` (Python 3.11+)
-3. **Register routes** in `startup.py`
-4. **Register tools** in `tools/__init__.py`
+1. **Route handler** in `revit_mcp/<domain>.py` (IronPython 2.7), exposing
+   `register_<domain>_routes(api)`
+2. **Tool definition** in `tools/<domain>_tools.py` (Python 3.11+), exposing
+   `register_<domain>_tools(mcp, revit_get, revit_post, revit_image=None)`
 
-See `LLM.txt` for full context that helps AI assistants understand the codebase.
+Then add the new tool's name to `tests/unit/tool_manifest.txt` in the same commit — that
+file is the authoritative tool list, and `deploy/gate.py` refuses to publish a build that
+diverges from it.
+
+Verify with `uv run pytest tests/unit`, then call the tool through `mcp dev main.py`.
+
+**Read [CONTRIBUTING.md](CONTRIBUTING.md) first.** It covers the two-runtime rule, the
+transaction and ElementId invariants, and how to write a tool docstring — which is the
+API contract the model actually sees.
+
+See `LLM.txt` for background (note: its directory layout and tool count are out of date).
 
 ## Contributing
 
-Contributions are welcome! Feel free to submit pull requests or open issues.
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) — almost none of
+the conventions in this codebase are enforced by tooling, so they are worth reading before
+your first pull request.
 
 ## Author
 

@@ -20,3 +20,14 @@ dependencies = [
 deploy = [
     "ruamel.yaml>=0.18.0",
 ]
+# Dev-time only, for the same reason: build-payload.cmd exports the runtime
+# dependencies alone, so pytest never reaches a workstation.
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+# Only the pytest suite. The two standalone scripts (tests/test_init_latency.py,
+# tests/test_model_info_format.py) are run by hand and by deploy/gate.py; they
+# execute at import and would spawn servers during collection.
+testpaths = ["tests/unit"]

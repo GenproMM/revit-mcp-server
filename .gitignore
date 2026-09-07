@@ -11,8 +11,11 @@ wheels/
 
 *TODO.md
 
-# GSD (Get Shit Done) planning artifacts
-.planning/
+# GSD (Get Shit Done) planning artifacts.
+# Exception: .planning/codebase/ holds the conventions and concerns maps a new
+# contributor needs. Ignoring the whole tree meant a clone carried none of it.
+.planning/*
+!.planning/codebase/
 .gsd/
 gsd-core/
 .claude/gsd-core/

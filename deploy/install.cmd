@@ -113,10 +113,24 @@ for %%o in (revit-mcp-server.extension revit-mcp-python.extension mcp-server-for
 rem coreapi is deliberately NOT enabled: it exposes pyRevit's own API surface
 rem for no benefit here.
 "!PYREVIT!" extensions paths add "%EXTPATH%" >nul 2>&1
-rem This MCP replaces GenproMCP; leaving both loaded is a route-name collision.
+rem GenproMCP is retired by this install: this server supersedes it.
+rem
+rem NOT because of a route-name collision -- the comment that used to say so
+rem was wrong. GenproMCP declares routes.API('genpro_mcp') and this extension
+rem declares routes.API("revit_mcp"), so they would coexist on 48884 quite
+rem happily. It is disabled because the decision is one server, one namespace,
+rem one deployment channel -- not because it would break anything.
+rem
+rem KNOWN GAP, accepted deliberately: open_revit_server_model has not been
+rem ported yet, so from this install until that port ships there is no way to
+rem open an RSN:// model in the background with #_RVT_LINK worksets closed.
+rem The BIM audit workflow opens those models by hand in the meantime. Close
+rem the gap by porting the operation (ExternalEvent controller, dialog
+rem watchdog, operation state machine) into revit_mcp/.
 "!PYREVIT!" extensions disable GenproMCP >nul 2>&1
 "!PYREVIT!" extensions disable GenproMCP.extension >nul 2>&1
 echo        routes enabled on 48884, extension path registered
+echo        GenproMCP disabled (superseded; see the note in install.cmd)
 
 rem Read-only sanity check. Routes must stay on loopback: /execute_code/ is
 rem unauthenticated arbitrary IronPython with full doc/DB/clr access, and

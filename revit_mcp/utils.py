@@ -3,6 +3,11 @@ from pyrevit import DB
 import traceback
 import logging
 
+# sanitize_string / normalize_string live in textutils so they can be imported
+# and unit tested under CPython 3 (this module cannot -- it needs pyRevit).
+# Re-exported here so route modules keep using `from utils import ...`.
+from textutils import sanitize_string, normalize_string  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,37 +49,6 @@ def suppress_warnings(transaction):
         transaction.SetFailureHandlingOptions(opts)
     except Exception:
         pass
-
-
-def sanitize_string(text):
-    """Return Revit text as a JSON-safe unicode string.
-
-    Revit API strings arrive as .NET System.String, which IronPython 2.7
-    already represents as unicode -- there is no need to collapse non-ASCII
-    characters (e.g. Cyrillic element/view names) to '?'. pyRevit's routes
-    JSON serializer escapes non-ASCII as \\uXXXX on its own, so unicode text
-    round-trips to the client intact.
-    """
-    if text is None:
-        return "Unnamed"
-    try:
-        if isinstance(text, unicode):
-            return text
-        if isinstance(text, str):
-            return text.decode('utf-8', 'replace')
-        return unicode(text)
-    except Exception:
-        return "Unnamed"
-
-
-def normalize_string(text):
-    """Whitespace-trimmed variant of sanitize_string()."""
-    if text is None:
-        return "Unnamed"
-    try:
-        return sanitize_string(text).strip()
-    except Exception:
-        return "Unnamed"
 
 
 def get_element_name(element):

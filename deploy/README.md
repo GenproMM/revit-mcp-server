@@ -19,8 +19,10 @@ and update point, not a runtime.**
 ## Layout
 
 ```
-\\srv-dfs\BIM\RevitMCP\            (read-only for users)
-├─ src\revit-mcp-server\           git working copy — yours only, in NO search path
+<MCP_SHARE_ROOT>\                  (read-only for users)
+├─ revit-mcp-server\               git working copy — yours only, in NO search path
+├─ inbox\                          contributed tool packages
+├─ contrib-kit\                    revitmcp-contrib-kit.zip for tool developers
 ├─ ext\revit-mcp-server.extension\ published, pruned; pyRevit loads this over UNC
 ├─ payload\                        mirrored to workstations
 │   ├─ VERSION                     written LAST by build-payload.cmd
@@ -37,6 +39,18 @@ WORKSTATION (user profile only — no admin, no UAC)
 ├─ %APPDATA%\pyRevit\pyRevit_config.ini    written ONLY via pyrevit.exe
 └─ update trigger at logon                 scheduled task, else Startup folder
 ```
+
+`MCP_SHARE_ROOT` is set in `config.cmd`; on the reference fleet it is
+`\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP`. The working copy may live
+anywhere — `publish-extension.cmd` and `build-payload.cmd` derive the repo root
+relative to themselves (`%~dp0..`), so a local disk works just as well. Keeping
+it beside the published copies is convenience, not a requirement.
+
+`ext\`, `install\` and `payload\` are created by the publish scripts; do not
+create them by hand. `payload.build\` appears during a build and is removed at
+the end — if it survives, the build failed partway.
+
+**First-time setup and pilot rollout: follow [SETUP-RUNBOOK.md](SETUP-RUNBOOK.md).**
 
 ## The interpreter: pyRevit's, not ours
 

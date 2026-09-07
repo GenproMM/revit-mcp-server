@@ -35,7 +35,8 @@ and update point, not a runtime.**
 WORKSTATION (user profile only — no admin, no UAC)
 ├─ %LOCALAPPDATA%\RevitMCP\versions\<VERSION>\
 ├─ %LOCALAPPDATA%\RevitMCP\current  ──junction──> versions\<VERSION>
-├─ %USERPROFILE%\.hermes\config.yaml       managed block under mcp_servers
+├─ %HERMES_HOME%\config.yaml               managed block under mcp_servers
+│    (defaults to %LOCALAPPDATA%\hermes on Windows -- NOT ~\.hermes)
 ├─ %APPDATA%\pyRevit\pyRevit_config.ini    written ONLY via pyrevit.exe
 └─ update trigger at logon                 scheduled task, else Startup folder
 ```
@@ -206,7 +207,7 @@ exposure; the only thing containing it is `[routes] host = "127.0.0.1"`.
 
 | Symptom | Check |
 |---|---|
-| Hermes shows no Revit tools | Does `<pyrevit python.exe> %LOCALAPPDATA%\RevitMCP\current\app\warm.py` succeed? Managed block present in `~/.hermes/config.yaml`? |
+| Hermes shows no Revit tools | Does `<pyrevit python.exe> %LOCALAPPDATA%\RevitMCP\current\app\warm.py` succeed? Is the managed block in the file Hermes actually reads — run `configure_hermes.py --print-only` and compare its `# target:` line |
 | Tools present, every call errors | `http://localhost:48884/revit_mcp/status/` in a browser — empty means the extension did not load |
 | Extension did not load | `[revit-mcp-server.extension] disabled` in `pyRevit_config.ini`; extension path registered; Revit fully restarted (Reload is not enough) |
 | Server will not start | Compare `payload\ENGINE` with the machine's `bin\cengines\CPY*` — a pyRevit engine bump needs a payload rebuild |

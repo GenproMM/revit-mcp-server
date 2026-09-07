@@ -313,7 +313,7 @@ uv run python scripts\intake_package.py "...\wall_report.zip" --apply
 | `install.cmd` ругается на pyRevit | pyRevit не установлен для **этого** пользователя. `where pyrevit` |
 | `install.cmd`: «cannot read payload\VERSION» | шаг 5 не выполнен или нет доступа к папке |
 | `ERROR: the server will not start under CPY…` | движок pyRevit у пользователя не тот, под который собраны колёса. Сравните с `payload\ENGINE` и пересоберите шаг 5 |
-| В Hermes нет инструментов Revit | `%LOCALAPPDATA%\RevitMCP\current\app\warm.py` запускается? Управляемый блок есть в `~\.hermes\config.yaml`? |
+| В Hermes нет инструментов Revit | `%LOCALAPPDATA%\RevitMCP\current\app\warm.py` запускается? Блок попал в тот файл, который Hermes читает? Запустите `configure_hermes.py --print-only` и сверьте строку `# target:` с `echo %HERMES_HOME%` (на Windows умолчание — `%LOCALAPPDATA%\hermes`, а **не** `~\.hermes`) |
 | Инструменты есть, но каждый вызов — ошибка | `http://localhost:48884/revit_mcp/status/` пусто → расширение не загрузилось |
 | Расширение не загрузилось | В `%APPDATA%\pyRevit\pyRevit_config.ini` строка `disabled` у `[revit-mcp-server.extension]`; путь расширения зарегистрирован; **Revit перезапущен полностью** |
 | `health: degraded` | Читайте `failed_domains` — там имя сломанного домена и текст исключения |

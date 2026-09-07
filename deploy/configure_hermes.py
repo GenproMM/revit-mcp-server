@@ -53,6 +53,30 @@ def die(msg: str, code: int = 1) -> "None":
     raise SystemExit(code)
 
 
+def hermes_config_path() -> str:
+    """Resolve the config.yaml Hermes actually reads.
+
+    Mirrors the agent's own hermes_constants.py: HERMES_HOME wins, and the
+    fallback is platform-native -- %LOCALAPPDATA%\\hermes on Windows,
+    ~/.hermes everywhere else.
+
+    ``~/.hermes`` is NOT a Windows fallback, which is the whole reason this
+    function exists. Hardcoding it wrote a file the agent never reads on every
+    machine in the fleet: the installer reported success and Hermes showed no
+    Revit tools, with nothing in either place pointing at the mismatch.
+    """
+    home = os.environ.get("HERMES_HOME", "").strip()
+    if not home:
+        if sys.platform == "win32":
+            base = os.environ.get("LOCALAPPDATA", "").strip()
+            if not base:
+                base = os.path.join(os.path.expanduser("~"), "AppData", "Local")
+            home = os.path.join(base, "hermes")
+        else:
+            home = os.path.join(os.path.expanduser("~"), ".hermes")
+    return os.path.join(os.path.expanduser(home), "config.yaml")
+
+
 def hermes_is_running() -> bool:
     """True if any running process image name contains 'hermes'.
 
@@ -258,7 +282,10 @@ def main(argv: "list[str]") -> int:
     ap.add_argument("--root", required=True,
                     help=r"Install root, e.g. %%LOCALAPPDATA%%\RevitMCP\current")
     ap.add_argument("--config", default=None,
-                    help="Path to Hermes config.yaml (default: ~/.hermes/config.yaml)")
+                    # argparse %-expands help strings, so a literal percent
+                    # has to be doubled or add_argument raises at parser build.
+                    help="Path to Hermes config.yaml (default: %%HERMES_HOME%%, "
+                         "else %%LOCALAPPDATA%%\\hermes on Windows)")
     ap.add_argument("--python", required=True,
                     help=r"Interpreter Hermes should launch -- pyRevit's bundled "
                          r"CPython at bin\cengines\CPY*\python.exe")
@@ -277,12 +304,16 @@ def main(argv: "list[str]") -> int:
         if not os.path.isfile(path):
             die("{} not found: {}\nRun the payload copy step first.".format(label, path))
 
-    cfg = args.config or os.path.join(os.path.expanduser("~"), ".hermes", "config.yaml")
+    cfg = args.config or hermes_config_path()
     cfg = os.path.abspath(cfg)
 
     block_preview = build_block(args.name, python_exe, entry_py, "  ")
 
     if args.print_only:
+        # The target path is half the answer when diagnosing "Hermes shows no
+        # Revit tools": the block can be perfect and still land in a file the
+        # agent does not read.
+        print("# target: {}".format(cfg))
         print("mcp_servers:")
         print(block_preview)
         return 0

@@ -4,7 +4,7 @@ Structure Module for Revit MCP
 Handles grid creation and structural framing placement
 """
 
-from utils import get_element_name, find_family_symbol_safely, get_element_id_value, suppress_warnings
+from .utils import get_element_name, find_family_symbol_safely, get_element_id_value, suppress_warnings
 from pyrevit import routes, revit, DB
 import json
 import traceback

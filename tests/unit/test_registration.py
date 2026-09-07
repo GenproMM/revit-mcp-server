@@ -243,19 +243,29 @@ def test_revit_mcp_helpers_define_no_routes():
 def test_no_revit_mcp_module_imports_another_revit_mcp_module():
     """The premise that makes alphabetical registration order safe.
 
-    Every cross-module import goes to the flat `utils`/`textutils` helper. If a
+    Every cross-module import goes to the `utils`/`textutils` helper. If a
     domain ever imports another domain, registration order starts to matter and
     discovery's sorted() order would need revisiting.
+
+    The import form flipped on 2026-09-07 -- pyRevit attaches IronPython 3, so
+    the helpers are reached as `from .utils import ...` rather than flat. A
+    relative import is therefore no longer evidence of a violation on its own,
+    and this checks the import's *target* instead.
     """
-    relative_import = re.compile(r"^from \.\w+ import|^from revit_mcp\.\w+ import",
-                                 re.MULTILINE)
+    helpers = {"utils", "textutils", "registry"}
+    targets = re.compile(
+        r"^from \.(\w+) import|^from revit_mcp\.(\w+) import|^\s*from \. import (\w+)",
+        re.MULTILINE,
+    )
     offenders = []
     for name in _revit_mcp_modules():
         if name in ("registry",):  # documented exception: holds no Revit code
             continue
-        if relative_import.search(_source_of(name)):
-            offenders.append(name)
+        for match in targets.finditer(_source_of(name)):
+            target = match.group(1) or match.group(2) or match.group(3)
+            if target not in helpers:
+                offenders.append("{} -> {}".format(name, target))
     assert not offenders, (
-        "these modules import another revit_mcp module, which would make "
-        "registration order significant: {}".format(offenders)
+        "these modules import another revit_mcp domain, which would make "
+        "registration order significant: {}".format(sorted(offenders))
     )

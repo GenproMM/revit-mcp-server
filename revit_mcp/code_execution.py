@@ -4,12 +4,15 @@ Code Execution Module for Revit MCP
 Handles direct execution of IronPython code in Revit context.
 """
 from pyrevit import routes, revit, DB
-from utils import suppress_warnings
+from .utils import suppress_warnings
 import json
 import logging
 import sys
 import traceback
-from StringIO import StringIO
+try:  # IronPython 3 / Python 3
+    from io import StringIO
+except ImportError:  # IronPython 2.7
+    from StringIO import StringIO
 
 # Standard logger setup
 logger = logging.getLogger(__name__)

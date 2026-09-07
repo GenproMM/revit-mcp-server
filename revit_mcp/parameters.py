@@ -4,7 +4,10 @@ Parameters Module for Revit MCP
 Handles reading element properties and setting parameter values
 """
 
-from utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings
+from .utils import (
+    get_element_name, get_element_id_value, make_element_id, suppress_warnings,
+    sanitize_value,
+)
 from pyrevit import routes, revit, DB
 import json
 import traceback
@@ -13,24 +16,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _safe_str(value):
-    """Convert a value to a JSON-safe string, preserving non-ASCII text.
-
-    Differs from utils.sanitize_string() only in the empty-input contract: a
-    missing parameter value renders as "" rather than "Unnamed". Non-ASCII
-    (e.g. Cyrillic parameter names and values) is preserved — pyRevit's routes
-    JSON serializer escapes it as \\uXXXX. IronPython 2.7 compatible.
-    """
-    if value is None:
-        return ""
-    try:
-        if isinstance(value, unicode):
-            return value
-        if isinstance(value, str):
-            return value.decode("utf-8", "replace")
-        return unicode(value)
-    except Exception:
-        return ""
+# Lives in textutils so the text-type aliases are declared once and stay unit
+# tested; this module keeps the short local name its call sites already use.
+_safe_str = sanitize_value
 
 
 # A parameter's origin is encoded in the ForgeTypeId that

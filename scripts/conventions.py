@@ -34,6 +34,13 @@ PY3_ONLY_MODULES = {
     "statistics", "unittest.mock", "concurrent",
 }
 
+# Modules that live inside the revit_mcp package. Importing one of these
+# without a leading dot is the implicit relative import Python 3 removed.
+# `revit_mcp` itself is listed because `from revit_mcp import registry` works
+# only while the extension root happens to be on sys.path; `from . import
+# registry` does not depend on that.
+LOCAL_MODULES = {"utils", "textutils", "registry", "revit_mcp"}
+
 
 def _blank_strings_and_comments(source):
     """Blank string literals and comments so text checks only see code."""
@@ -132,16 +139,29 @@ def check_ironpython_dialect(label, source):
             "{}: {} do not exist in IronPython 2.7".format(label, banned)
         )
 
-    relative = [
-        ("." * n.level) + (n.module or "")
-        for n in ast.walk(tree)
-        if isinstance(n, ast.ImportFrom) and n.level > 0
-    ]
-    if relative:
+    # Helper imports must be RELATIVE. A flat `from utils import ...` inside
+    # the revit_mcp package is an implicit relative import, and Python 3
+    # removed those. pyRevit now attaches IronPython 3, so a flat import here
+    # raises ImportError at load: the domain is skipped, its tools never
+    # appear, and /status/ answers "Route does not exist" from pyRevit's own
+    # server rather than ours. Verified on the first pilot machine, where this
+    # took out 22 of 23 domains at once.
+    #
+    # The direction changed on 2026-09-07; the consistency requirement did not.
+    # pyRevit also puts the module directory on sys.path, so mixing both forms
+    # loads utils.py twice under two identities, each with its own state.
+    flat = sorted({
+        n.module for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom)
+        and n.level == 0
+        and n.module in LOCAL_MODULES
+    })
+    if flat:
         violations.append(
-            "{}: import helpers flat -- `from utils import ...`, not {}. "
-            "pyRevit puts the module directory on sys.path; mixing both forms "
-            "loads utils.py twice under two identities.".format(label, relative)
+            "{}: import package modules relatively -- `from .utils import ...`, "
+            "not {}. A flat import of a sibling is an implicit relative import, "
+            "which Python 3 removed, so the domain fails to load under "
+            "IronPython 3.".format(label, flat)
         )
     return violations
 

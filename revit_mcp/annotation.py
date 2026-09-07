@@ -4,7 +4,7 @@ Annotation Module for Revit MCP
 Handles dimensions and wall tagging
 """
 
-from utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings
+from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings
 from pyrevit import routes, revit, DB
 import json
 import traceback

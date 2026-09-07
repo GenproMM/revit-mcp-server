@@ -4,7 +4,7 @@ Transforms Module for Revit MCP
 Handles move, copy, rotate, and mirror operations on elements
 """
 
-from utils import get_element_id_value, make_element_id, suppress_warnings
+from .utils import get_element_id_value, make_element_id, suppress_warnings
 from pyrevit import routes, revit, DB
 from System.Collections.Generic import List
 import json

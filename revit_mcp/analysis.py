@@ -4,7 +4,7 @@ Analysis Module for Revit MCP
 Handles element filtering, room data, material quantities, and model statistics
 """
 
-from utils import get_element_name, normalize_string, get_element_id_value
+from .utils import get_element_name, normalize_string, get_element_id_value
 from pyrevit import routes, revit, DB
 import json
 import traceback

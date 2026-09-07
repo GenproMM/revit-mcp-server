@@ -5,7 +5,7 @@ Handles creation of line-based elements (walls, beams), surface-based
 elements (floors, roofs, ceilings), and levels.
 """
 
-from utils import get_element_name, get_element_id_value, suppress_warnings
+from .utils import get_element_name, get_element_id_value, suppress_warnings
 from pyrevit import routes, revit, DB
 from System.Collections.Generic import List
 import json

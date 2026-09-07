@@ -20,7 +20,7 @@ import json
 import logging
 import traceback
 
-from utils import get_element_name, get_element_id_value
+from .utils import get_element_name, get_element_id_value
 
 logger = logging.getLogger(__name__)
 

@@ -46,6 +46,31 @@ def sanitize_string(text):
         return "Unnamed"
 
 
+def sanitize_value(value):
+    """sanitize_string() with the empty-input contract parameter values need.
+
+    A missing parameter renders as "" rather than "Unnamed": for a *value*,
+    the word "Unnamed" would be indistinguishable from a parameter whose text
+    genuinely is that, and an unset parameter is meaningfully empty.
+
+    This lived in parameters.py as a hand-rolled copy that referenced `unicode`
+    directly. Under IronPython 3 that raised NameError inside its own
+    `except Exception`, so every parameter value silently serialized as "" --
+    no error, no log, just blank data. Sharing the guarded aliases above is
+    what stops that from happening again.
+    """
+    if value is None:
+        return ""
+    try:
+        if isinstance(value, _TEXT_TYPE):
+            return value
+        if isinstance(value, _BYTES_TYPE):
+            return value.decode("utf-8", "replace")
+        return _TEXT_TYPE(value)
+    except Exception:
+        return ""
+
+
 def normalize_string(text):
     """Whitespace-trimmed variant of sanitize_string()."""
     if text is None:

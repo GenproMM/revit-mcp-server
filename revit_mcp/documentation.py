@@ -4,7 +4,7 @@ Documentation Module for Revit MCP
 Handles sheet creation, schedule creation, and document export
 """
 
-from utils import get_element_name, get_element_id_value, suppress_warnings
+from .utils import get_element_name, get_element_id_value, suppress_warnings
 from pyrevit import routes, revit, DB
 import json
 import traceback

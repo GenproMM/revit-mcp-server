@@ -10,14 +10,29 @@ communicate over local HTTP. Mixing their idioms is the single most common way t
 | Side | Files | Runtime | Rules |
 |------|-------|---------|-------|
 | MCP server | `main.py`, `tools/`, `tests/` | CPython ≥3.11 (dev pin 3.13) | async/await, f-strings, `list[str]`, type hints |
-| Revit extension | `startup.py`, `revit_mcp/` | IronPython 2.7 inside pyRevit/Revit | Python 2 dialect only: `"{}".format(x)`, **no** f-strings, no `async`, no `pathlib`, no modern typing |
+| Revit extension | `startup.py`, `revit_mcp/` | IronPython **3** inside pyRevit/Revit | `"{}".format(x)`, **no** f-strings, no `async`, no `pathlib`, no modern typing |
+
+The Revit half ran under IronPython 2.7 until 2026-09-07; pyRevit now attaches
+IronPython 3 (engine `IPY342`), and the fleet is standardised on it. Write for the
+**intersection** of the two, not for Python 3: IronPython 3.4 sits at the Python 3.4
+language level, so f-strings (3.6+) are still a `SyntaxError` at extension load, and
+`scripts/conventions.py` still rejects them. What actually changed is import
+semantics — see below.
 
 Both halves keep an encoding cookie on line 1 (`# -*- coding: utf-8 -*-` / `UTF-8`) — IronPython needs it.
 
 `revit_mcp/utils.py` and `tools/utils.py` are **unrelated files that happen to share a name**.
-Route modules import helpers as bare `from utils import ...` (not `from .utils import ...`) because
-pyRevit puts the module directory on `sys.path` — which also means `revit_mcp/` modules cannot be
-imported under CPython at all.
+
+Route modules import package siblings **relatively**: `from .utils import ...`, never
+`from utils import ...`. A flat import of a sibling is an implicit relative import, which
+Python 3 removed — under IronPython 3 it raises `ImportError` at load, the domain is
+skipped, its tools never appear, and `/status/` answers `Route does not exist` from
+pyRevit's own routes server rather than ours. On 2026-09-07 this took out 22 of 23 domains
+on the first pilot machine while the extension itself reported a clean load.
+
+Keep the form consistent, not merely working: pyRevit also puts the module directory on
+`sys.path`, so mixing the two forms loads `utils.py` twice under two identities with
+separate state. `tests/unit/test_conventions.py` enforces this.
 
 ## Commands
 
@@ -156,8 +171,10 @@ parameter including `ctx`. `check_clashes` in `tools/clash_tools.py` is the refe
   repo**, so edits here are the deployed extension — no copy step, but also no staging buffer.
   To exercise a new route's logic without restarting Revit, POST the route file's own text to
   `/execute_code/`, `exec` it in a throwaway namespace with a fake `api` object that captures the
-  handler, then call the handler with `doc`. Prepend `revit_mcp/` to `sys.path` (its modules
-  import `from utils import …`) and strip `\r\n` — IronPython's `exec` rejects CRLF source.
+  handler, then call the handler with `doc`. Strip `\r\n` — IronPython's `exec` rejects CRLF
+  source. Since the modules now use `from .utils import …`, `exec` them with a package context
+  (`__package__ = "revit_mcp"` in the namespace, after `import revit_mcp`) rather than by
+  prepending `revit_mcp/` to `sys.path`, which no longer resolves a relative import.
 
 ## Reference documents
 

@@ -7,7 +7,7 @@ Handles API status and health check endpoints
 from pyrevit import routes
 import logging
 
-from utils import sanitize_string
+from .utils import sanitize_string
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def register_status_routes(api):
             # answer because the registry is unavailable would defeat its own
             # purpose, so registration reporting degrades rather than fails.
             try:
-                from revit_mcp import registry
+                from . import registry
 
                 registration = registry.snapshot(verbose=want_verbose)
                 degraded = registry.is_degraded()

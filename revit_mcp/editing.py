@@ -4,7 +4,7 @@ Editing Module for Revit MCP
 Handles element deletion, modification, and selection retrieval
 """
 
-from utils import get_element_name, make_element_id, get_element_id_value, suppress_warnings
+from .utils import get_element_name, make_element_id, get_element_id_value, suppress_warnings
 from pyrevit import routes, revit, DB
 import json
 import traceback

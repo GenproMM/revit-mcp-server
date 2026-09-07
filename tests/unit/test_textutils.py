@@ -15,7 +15,29 @@ accident.
 Needs no Revit.
 """
 
-from revit_mcp.textutils import normalize_string, sanitize_string
+import re
+
+from revit_mcp.textutils import normalize_string, sanitize_string, sanitize_value
+
+
+# --- sanitize_value: the parameters.py copy, now shared ---------------------
+#
+# The copy in parameters.py referenced `unicode` directly. Under IronPython 3
+# that is a NameError raised inside its own `except Exception`, so every
+# parameter value serialized as "" -- silently, with no log line. These tests
+# exist so the shared version cannot regress the same way.
+
+def test_sanitize_value_preserves_cyrillic():
+    assert sanitize_value("Стена базовая") == "Стена базовая"
+
+
+def test_sanitize_value_renders_missing_as_empty_not_unnamed():
+    assert sanitize_value(None) == ""
+
+
+def test_sanitize_value_converts_non_text_without_swallowing_it():
+    assert sanitize_value(42) == "42"
+    assert sanitize_value(3.5) == "3.5"
 
 
 # --- the bb7cda2 regression -------------------------------------------------
@@ -85,7 +107,7 @@ def test_normalize_matches_sanitize_then_strip():
 # --- utils.py re-export contract --------------------------------------------
 
 def test_utils_reexports_the_helpers():
-    """Route modules use `from utils import sanitize_string`; keep that working.
+    """Route modules use `from .utils import sanitize_string`; keep that working.
 
     revit_mcp/utils.py itself needs pyRevit and cannot be imported here, so the
     re-export is verified against the source text.
@@ -100,7 +122,10 @@ def test_utils_reexports_the_helpers():
     with open(utils_path, encoding="utf-8") as handle:
         source = handle.read()
 
-    assert "from textutils import sanitize_string, normalize_string" in source, (
-        "revit_mcp/utils.py must re-export the text helpers, or every route "
-        "module's `from utils import sanitize_string` breaks"
-    )
+    for name in ("sanitize_string", "normalize_string", "sanitize_value"):
+        assert re.search(
+            r"^from \.textutils import .*\b{}\b".format(name), source, re.MULTILINE
+        ), (
+            "revit_mcp/utils.py must re-export {}, or route modules' "
+            "`from .utils import {}` breaks".format(name, name)
+        )

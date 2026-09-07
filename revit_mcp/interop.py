@@ -4,7 +4,7 @@ Interop Module for Revit MCP
 Handles IFC export and external file linking/importing
 """
 
-from utils import get_element_name, get_element_id_value, suppress_warnings
+from .utils import get_element_name, get_element_id_value, suppress_warnings
 from pyrevit import routes, revit, DB
 import clr
 import json

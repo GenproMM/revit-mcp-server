@@ -7,7 +7,7 @@ Provides tools for color splashing elements based on parameter values
 # One flat import, matching every other route module. The relative form
 # (`from .utils import ...`) that used to sit below loaded revit_mcp/utils.py a
 # second time under a different module identity.
-from utils import get_element_id_value, suppress_warnings, normalize_string
+from .utils import get_element_id_value, suppress_warnings, normalize_string
 from pyrevit import routes, DB
 import json
 import logging

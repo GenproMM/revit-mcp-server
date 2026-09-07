@@ -315,7 +315,8 @@ uv run python scripts\intake_package.py "...\wall_report.zip" --apply
 | `ERROR: the server will not start under CPY…` | движок pyRevit у пользователя не тот, под который собраны колёса. Сравните с `payload\ENGINE` и пересоберите шаг 5 |
 | В Hermes нет инструментов Revit | `%LOCALAPPDATA%\RevitMCP\current\app\warm.py` запускается? Блок попал в тот файл, который Hermes читает? Запустите `configure_hermes.py --print-only` и сверьте строку `# target:` с `echo %HERMES_HOME%` (на Windows умолчание — `%LOCALAPPDATA%\hermes`, а **не** `~\.hermes`) |
 | Инструменты есть, но каждый вызов — ошибка | `http://localhost:48884/revit_mcp/status/` пусто → расширение не загрузилось |
-| Расширение не загрузилось | В `%APPDATA%\pyRevit\pyRevit_config.ini` строка `disabled` у `[revit-mcp-server.extension]`; путь расширения зарегистрирован; **Revit перезапущен полностью** |
+| Расширение не загрузилось | Решает лог, а не догадки: `%APPDATA%\pyRevit\<год>\pyRevit_<год>_<PID>_runtime.log`, строки `Found pyRevit assembly:`. Нашей сборки в списке нет — pyRevit его не собирал. Причина почти всегда `disabled = true` в `[revit-mcp-server.extension]` (`pyRevit_config.ini`), оставшийся от старой версии: `default_enabled` читается только при первом появлении секции, а ключ секции — имя папки, оно не менялось. Лечение: `pyrevit extensions enable revit-mcp-server` и полный перезапуск. `install.cmd` с 2026-09-07 делает это сам |
+| `/status/` отвечает `Route does not exist` | То же самое: маршруты не зарегистрированы, потому что расширение не загрузилось. Отвечает встроенный Routes-сервер pyRevit, а не наш код — предыдущая строка |
 | `health: degraded` | Читайте `failed_domains` — там имя сломанного домена и текст исключения |
 | Застряло на старой версии | `%LOCALAPPDATA%\RevitMCP\update.log`, затем ярлык «Update RevitMCP» вручную |
 
@@ -339,6 +340,23 @@ IronPython внутри Revit** с полным доступом к `doc`, `DB`,
 файловой системе. Единственное, что его сдерживает, — то, что Routes слушает
 петлевой интерфейс. `install.cmd` предупреждает, если не смог подтвердить
 `[routes] host = "127.0.0.1"`.
+
+**Проверять это надо по логу, а не по конфигу.** Предупреждение установщика
+означает лишь «не смог подтвердить», а факт пишется при старте сессии:
+
+```
+Routes server is listening on http://0.0.0.0:48884     ← открыт всей сети
+Routes server is listening on http://127.0.0.1:48884   ← только петля
+```
+
+Ищите эту строку в `%APPDATA%\pyRevit\<год>\pyRevit_<год>_<PID>_runtime.log`.
+На первой пилотной машине (2026-09-07) там оказался **`0.0.0.0`**: порт был
+открыт всей корпоративной сети. Через CLI это не чинится — у
+`pyrevit configs routes` есть только `enable/disable`, `port` и `coreapi`,
+подкоманды `host` нет. Остаются три рычага: дописать `host = "127.0.0.1"` в
+секцию `[routes]` файла `pyRevit_config.ini` при закрытом Revit (вопреки общему
+правилу не трогать его руками), правило файрвола на входящий 48884, либо
+`pyrevit configs routes disable`, когда станция не тестируется.
 
 На двух-трёх пилотных машинах это приемлемый риск. Раскатка на отдел — это
 раскатка того же риска на отдел, и её стоит согласовать с владельцем контура.

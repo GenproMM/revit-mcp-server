@@ -113,6 +113,19 @@ for %%o in (revit-mcp-server.extension revit-mcp-python.extension mcp-server-for
 rem coreapi is deliberately NOT enabled: it exposes pyRevit's own API surface
 rem for no benefit here.
 "!PYREVIT!" extensions paths add "%EXTPATH%" >nul 2>&1
+
+rem Clear a stale disable. pyRevit reads default_enabled only the FIRST time it
+rem sees an extension and keys the config section by folder name -- which has
+rem never changed. So a machine that once saw a build with
+rem default_enabled: "False" (or the GenproMCP-era extension) still carries
+rem   [revit-mcp-server.extension]
+rem   disabled = true
+rem and this install would land correctly and never load: no error, no UI, no
+rem routes, and /status/ answering "Route does not exist" from pyRevit's own
+rem server. Verified on the first pilot machine. publish-extension.cmd guards
+rem the other half of this -- what we publish -- but nothing else undoes what a
+rem previous version already wrote here.
+"!PYREVIT!" extensions enable revit-mcp-server >nul 2>&1
 rem GenproMCP is retired by this install: this server supersedes it.
 rem
 rem NOT because of a route-name collision -- the comment that used to say so
@@ -129,7 +142,7 @@ rem the gap by porting the operation (ExternalEvent controller, dialog
 rem watchdog, operation state machine) into revit_mcp/.
 "!PYREVIT!" extensions disable GenproMCP >nul 2>&1
 "!PYREVIT!" extensions disable GenproMCP.extension >nul 2>&1
-echo        routes enabled on 48884, extension path registered
+echo        routes enabled on 48884, extension path registered, extension enabled
 echo        GenproMCP disabled (superseded; see the note in install.cmd)
 
 rem Read-only sanity check. Routes must stay on loopback: /execute_code/ is

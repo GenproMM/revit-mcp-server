@@ -43,7 +43,15 @@ del "%PYVERFILE%" 2>nul
 if not defined PYVER (echo ERROR: could not query the pyRevit interpreter. & exit /b 1)
 
 set "OUT=%MCP_SHARE_ROOT%\payload"
-set "BUILD=%MCP_SHARE_ROOT%\payload.build"
+
+rem Staging is LOCAL, deliberately. The acceptance gate below spawns the server
+rem out of %BUILD%, and from the share that measures SMB round trips for ~1000
+rem module files instead of the server's cold start: 2.30 s over UNC against
+rem 0.91 s on local disk for the same commit, with a 2.0 s limit. Workstations
+rem run the payload from %LOCALAPPDATA%, never from the share, so local staging
+rem is also the honest measurement. It lets uv hardlink from its cache too.
+if not defined MCP_BUILD_DIR set "MCP_BUILD_DIR=%TEMP%\revitmcp-payload.build"
+set "BUILD=%MCP_BUILD_DIR%"
 
 rem --- version stamp -------------------------------------------------------
 rem PowerShell, not %date% -- cmd's date format is locale-dependent and this
@@ -57,6 +65,7 @@ echo === Building payload %VERSION%
 echo     repo   : %REPO%
 echo     python : %MCP_PYEXE%
 echo     engine : %MCP_ENGINE%  (CPython %PYVER%)
+echo     staging: %BUILD%
 echo     output : %OUT%
 echo(
 

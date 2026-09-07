@@ -47,8 +47,16 @@ relative to themselves (`%~dp0..`), so a local disk works just as well. Keeping
 it beside the published copies is convenience, not a requirement.
 
 `ext\`, `install\` and `payload\` are created by the publish scripts; do not
-create them by hand. `payload.build\` appears during a build and is removed at
-the end — if it survives, the build failed partway.
+create them by hand.
+
+**The payload is staged in `%TEMP%` on the build host, not on the share.** The
+acceptance gate spawns the server out of the staging directory, and over SMB that
+measures the share's round-trip latency for ~1000 module files rather than cold
+start — 2.30 s from the share against 0.91 s from local disk on the same commit,
+against a 2.0 s limit. Workstations mirror the payload to `%LOCALAPPDATA%` and
+run it from there, so local staging is what the gate ought to be measuring
+anyway. Override with `MCP_BUILD_DIR` if `%TEMP%` is unsuitable; a leftover
+`payload.build\` on the share is a relic of an older build.
 
 **First-time setup and pilot rollout: follow [SETUP-RUNBOOK.md](SETUP-RUNBOOK.md).**
 
@@ -84,12 +92,18 @@ On the build server (Windows x64, PyPI or an internal mirror, **and pyRevit
 installed** so the wheels match the fleet's interpreter):
 
 ```bat
-cd \\srv-dfs\BIM\RevitMCP\src\revit-mcp-server
+chcp 65001
+pushd "\\srv-dfs\BIM\RevitMCP\src\revit-mcp-server"
 git pull
 
 deploy\publish-extension.cmd     :: Revit half  -> live at each user's next Revit restart
 deploy\build-payload.cmd         :: CPython half -> live at each user's next logon
+popd
 ```
+
+`chcp 65001` first, in that same cmd session — see "A mis-decoded share root publishes
+into a twin tree" below. `pushd`, not `cd`: cmd cannot hold a UNC path as its working
+directory.
 
 Run whichever half you changed; running both is harmless. Neither requires any
 action from users.
@@ -169,9 +183,20 @@ seconds, and pyRevit's `startuplogtimeout = 10` will trip. If laptops appear,
 mirror the extension (~370 KB) locally in `update.cmd` and repoint
 `pyrevit extensions paths` — the machinery is already there.
 
+**A mis-decoded share root publishes into a twin tree.** `config.cmd` is UTF-8 and
+holds a Cyrillic `MCP_SHARE_ROOT`, but cmd parses batch files in the OEM code page
+(866 on a `ru` install). The literal arrives mangled, and `mkdir` — which creates
+intermediate directories — builds a whole parallel tree beside the real folder.
+The script still prints `Published`, because its closing `dir /b "%DEST%"` reads the
+same mangled variable. Run `chcp 65001` in the same session first, check that the
+`to:` line is readable before letting it proceed, and confirm `ext\` with a separate
+`dir` afterwards. Double-clicking from Explorer can never work: it spawns a fresh cmd
+at the default code page.
+
 **Use an ASCII, space-free share alias.** The Cyrillic path lands on IronPython
 2.7's `sys.path`, in the TOML config and in cache keys, on a `ru` locale fleet.
-Ask IT for a DFS link such as `\\srv-dfs\BIM\RevitMCP` and use only that.
+Ask IT for a DFS link such as `\\srv-dfs\BIM\RevitMCP` and use only that — it also
+retires the `chcp` dance above, since nothing non-ASCII would remain in the scripts.
 
 **`/execute_code/` is unauthenticated RCE.** Fleet-wide rollout is fleet-wide
 exposure; the only thing containing it is `[routes] host = "127.0.0.1"`.

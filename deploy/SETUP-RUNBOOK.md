@@ -225,6 +225,10 @@ type "\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\payload\ENGI
 
 ## 7. Что делает пользователь
 
+Полная пользовательская инструкция — [USER-GUIDE.md](USER-GUIDE.md): установка,
+обновление, настройка MCP в Гене (включая ручную) и разбор отказов. Дайте
+пользователю ссылку на неё, а в переписке — короткую выжимку ниже.
+
 Отправьте ему ровно это:
 
 > 1. Закрой Hermes полностью.
@@ -250,7 +254,7 @@ type "\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\payload\ENGI
 **На станции, в браузере** `http://localhost:48884/revit_mcp/status/?verbose=true`:
 
 - `"health": "healthy"` — не `degraded`;
-- `"domains_registered": 22`;
+- `"domains_registered": 23`;
 - нет ключа `failed_domains`;
 - `document_title` — имя открытой модели, и если оно русское, то читается
   правильно, а не `?????`.

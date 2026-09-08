@@ -123,6 +123,10 @@ It copies the payload, verifies the interpreter actually runs, configures
 pyRevit through `pyrevit.exe`, registers the server with Hermes, schedules
 updates and adds a Start Menu shortcut.
 
+**The document to hand users is [USER-GUIDE.md](USER-GUIDE.md)** (Russian):
+install, update, the Hermes MCP block including a manual merge, and a symptom
+table. Nothing in it requires admin rights or share write access.
+
 ## The update trigger
 
 `install.cmd` tries `schtasks /Create` first — a scheduled task is the better

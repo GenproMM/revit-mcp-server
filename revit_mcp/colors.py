@@ -7,9 +7,8 @@ Provides tools for color splashing elements based on parameter values
 # One flat import, matching every other route module. The relative form
 # (`from .utils import ...`) that used to sit below loaded revit_mcp/utils.py a
 # second time under a different module identity.
-from .utils import get_element_id_value, suppress_warnings, normalize_string
+from .utils import get_element_id_value, suppress_warnings, normalize_string, parse_request_data
 from pyrevit import routes, DB
-import json
 import logging
 import random
 from collections import defaultdict
@@ -1106,11 +1105,7 @@ def register_color_routes(api):
         }
         """
         try:
-            data = (
-                json.loads(request.data)
-                if isinstance(request.data, str)
-                else request.data
-            )
+            data = parse_request_data(request.data)
 
             category_name = data.get("category_name")
             parameter_name = data.get("parameter_name")
@@ -1144,11 +1139,7 @@ def register_color_routes(api):
         }
         """
         try:
-            data = (
-                json.loads(request.data)
-                if isinstance(request.data, str)
-                else request.data
-            )
+            data = parse_request_data(request.data)
 
             category_name = data.get("category_name")
 
@@ -1176,11 +1167,7 @@ def register_color_routes(api):
         }
         """
         try:
-            data = (
-                json.loads(request.data)
-                if isinstance(request.data, str)
-                else request.data
-            )
+            data = parse_request_data(request.data)
 
             category_name = data.get("category_name")
 

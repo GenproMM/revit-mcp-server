@@ -710,12 +710,13 @@ def register_placement_routes(api):
             type_name = data.get("type_name")
             new_type_name = data.get("new_type_name")
             parameters = data.get("parameters") or {}
+            add_shared = data.get("add_shared_parameters") or []
             reload_back = bool(data.get("reload", True))
 
-            if not parameters and not new_type_name:
+            if not parameters and not new_type_name and not add_shared:
                 return routes.make_response(
                     data={"error": "Nothing to do: pass parameters, new_type_name, "
-                                   "or both"},
+                                   "add_shared_parameters, or a combination"},
                     status=400,
                 )
 
@@ -809,6 +810,51 @@ def register_placement_routes(api):
                     except Exception as pe:
                         failed[param_name] = str(pe)
 
+                # Add shared parameters to the family
+                added_shared = {}
+                failed_shared = {}
+                if add_shared:
+                    app = doc.Application
+                    sp_filename = app.SharedParametersFilename
+                    if not sp_filename:
+                        failed_shared = {n: "no shared parameters file configured"
+                                         for n in add_shared}
+                    else:
+                        sp_file = app.OpenSharedParameterFile()
+                        # Build a lookup: name -> ExternalDefinition
+                        sp_defs = {}
+                        for grp in sp_file.Groups:
+                            for defn in grp.Definitions:
+                                sp_defs[defn.Name] = defn
+
+                        # Determine the category set for this family
+                        fam_category = target.FamilyCategory
+                        cat_set = DB.CategorySet()
+                        cat_set.Insert(fam_category)
+
+                        for param_name in add_shared:
+                            if param_name in added_shared or param_name in failed_shared:
+                                continue
+                            # Skip if already in the family
+                            if manager.get_Parameter(param_name) is not None:
+                                added_shared[param_name] = "already exists"
+                                continue
+                            ext_def = sp_defs.get(param_name)
+                            if ext_def is None:
+                                failed_shared[param_name] = (
+                                    "not found in shared parameters file")
+                                continue
+                            try:
+                                manager.AddParameter(
+                                    ext_def,
+                                    cat_set,
+                                    DB.BuiltInParameterGroup.PG_IDENTITY_DATA,
+                                    True,  # instance=False → type parameter
+                                )
+                                added_shared[param_name] = "added"
+                            except Exception as e:
+                                failed_shared[param_name] = str(e)
+
                 ft.Commit()
             except Exception as tx_error:
                 if ft.HasStarted() and not ft.HasEnded():
@@ -852,9 +898,12 @@ def register_placement_routes(api):
                 "available_types": available_types,
                 "parameters_applied": applied,
                 "parameters_failed": failed,
+                "shared_parameters_added": added_shared if add_shared else {},
+                "shared_parameters_failed": failed_shared if add_shared else {},
                 "reloaded": reloaded,
-                "message": "Edited family '{}' ({} parameter(s) applied, {} failed)"
-                           .format(family_name, len(applied), len(failed)),
+                "message": "Edited family '{}' ({} param(s) applied, {} failed, {} shared added)"
+                           .format(family_name, len(applied), len(failed),
+                                   len(added_shared)),
             })
 
         except Exception as e:

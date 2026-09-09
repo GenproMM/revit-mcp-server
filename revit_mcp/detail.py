@@ -4,9 +4,8 @@ Detail Module for Revit MCP
 Handles detail line creation for view-specific annotation
 """
 
-from .utils import get_element_name, get_element_id_value, suppress_warnings
+from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
 from pyrevit import routes, revit, DB
-import json
 import traceback
 import logging
 
@@ -27,7 +26,7 @@ def register_detail_routes(api):
                     data={"error": "No active Revit document"}, status=503
                 )
 
-            data = json.loads(request.data) if isinstance(request.data, str) else request.data
+            data = parse_request_data(request.data)
 
             start_point = data.get("start_point")
             end_point = data.get("end_point")

@@ -38,13 +38,14 @@ ROUTE_TEMPLATE = '''# -*- coding: utf-8 -*-
 """
 {title} module for Revit MCP.
 
-Runs under IronPython 2.7 inside the Revit process. Python 2 dialect only:
-"{{}}".format(x) instead of f-strings, no async, no pathlib, no type hints.
+Runs under IronPython 3 inside the Revit process, at the Python 3.4 language
+level: "{{}}".format(x) instead of f-strings, no async, no pathlib, no type
+hints. Package siblings are imported relatively -- a flat `from utils import`
+is an implicit relative import and fails to load.
 """
 
-from utils import get_element_name, get_element_id_value{suppress_import}
+from .utils import get_element_name, get_element_id_value{suppress_import}
 from pyrevit import routes, DB
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -234,11 +235,7 @@ def main():
         payload_block = (
             "\n            data = {}\n"
             "            if request and request.data:\n"
-            "                data = (\n"
-            "                    json.loads(request.data)\n"
-            "                    if isinstance(request.data, str)\n"
-            "                    else request.data\n"
-            "                )\n"
+            "                data = parse_request_data(request.data)\n"
             "            example = data.get(\"example\")\n"
         )
         call_block = (
@@ -254,7 +251,11 @@ def main():
         method=method,
         handler_signature=handler_signature,
         payload_block=payload_block,
-        suppress_import="" if args.get else ", make_element_id, suppress_warnings",
+        suppress_import=(
+            ""
+            if args.get
+            else ", make_element_id, parse_request_data, suppress_warnings"
+        ),
         mm_constant="" if args.no_mm else "\nMM_TO_FEET = 1.0 / 304.8\n",
     )
     tool_source = TOOL_TEMPLATE.format(

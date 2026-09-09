@@ -4,9 +4,8 @@ Editing Module for Revit MCP
 Handles element deletion, modification, and selection retrieval
 """
 
-from .utils import get_element_name, make_element_id, get_element_id_value, suppress_warnings
+from .utils import get_element_name, make_element_id, get_element_id_value, suppress_warnings, parse_request_data
 from pyrevit import routes, revit, DB
-import json
 import traceback
 import logging
 
@@ -31,7 +30,7 @@ def register_editing_routes(api):
                     data={"error": "No data provided"}, status=400
                 )
 
-            data = json.loads(request.data) if isinstance(request.data, str) else request.data
+            data = parse_request_data(request.data)
 
             element_ids = data.get("element_ids", [])
             if not element_ids:
@@ -124,7 +123,7 @@ def register_editing_routes(api):
                     data={"error": "No data provided"}, status=400
                 )
 
-            data = json.loads(request.data) if isinstance(request.data, str) else request.data
+            data = parse_request_data(request.data)
 
             element_id = data.get("element_id")
             parameters = data.get("parameters", {})

@@ -4,10 +4,9 @@ Interop Module for Revit MCP
 Handles IFC export and external file linking/importing
 """
 
-from .utils import get_element_name, get_element_id_value, suppress_warnings
+from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
 from pyrevit import routes, revit, DB
 import clr
-import json
 import os
 import traceback
 import logging
@@ -29,7 +28,7 @@ def register_interop_routes(api):
                     data={"error": "No active Revit document"}, status=503
                 )
 
-            data = json.loads(request.data) if isinstance(request.data, str) else request.data
+            data = parse_request_data(request.data)
 
             file_path = data.get("file_path")
             if not file_path:
@@ -134,7 +133,7 @@ def register_interop_routes(api):
                     data={"error": "No active Revit document"}, status=503
                 )
 
-            data = json.loads(request.data) if isinstance(request.data, str) else request.data
+            data = parse_request_data(request.data)
 
             file_path = data.get("file_path")
             if not file_path:

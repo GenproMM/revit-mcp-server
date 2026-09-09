@@ -89,6 +89,12 @@ def test_element_id_helpers_are_used(path):
 
 
 @pytest.mark.parametrize("path", REVIT_MCP_FILES, ids=_rel)
+def test_request_body_is_not_parsed_by_hand(path):
+    violations = conventions.check_request_parsing(_rel(path), _read(path))
+    assert not violations, _report(violations)
+
+
+@pytest.mark.parametrize("path", REVIT_MCP_FILES, ids=_rel)
 def test_route_registrar(path):
     violations = conventions.check_route_registrar(_rel(path), _read(path))
     assert not violations, _report(violations)
@@ -257,3 +263,20 @@ def test_clean_module_produces_no_violations():
     """A sanity anchor: the reference tool module must pass every checker."""
     path = os.path.join(TOOLS_DIR, "clash_tools.py")
     assert not conventions.check_tool_module("tools/clash_tools.py", _read(path))
+
+
+def test_request_parsing_detector_catches_the_old_idiom():
+    """The idiom that silently produced bytes on IronPython 3."""
+    source = (
+        "def h(doc, request):\n"
+        "    data = json.loads(request.data) if isinstance(request.data, str) "
+        "else request.data\n"
+    )
+    violations = conventions.check_request_parsing("revit_mcp/x.py", source)
+    assert len(violations) == 1
+    assert "parse_request_data" in violations[0]
+
+
+def test_request_parsing_detector_allows_the_helper():
+    source = "def h(doc, request):\n    data = parse_request_data(request.data)\n"
+    assert conventions.check_request_parsing("revit_mcp/x.py", source) == []

@@ -6,7 +6,12 @@ import logging
 # sanitize_string / normalize_string live in textutils so they can be imported
 # and unit tested under CPython 3 (this module cannot -- it needs pyRevit).
 # Re-exported here so route modules keep using `from utils import ...`.
-from .textutils import sanitize_string, normalize_string, sanitize_value  # noqa: F401
+from .textutils import (  # noqa: F401
+    normalize_string,
+    parse_request_data,
+    sanitize_string,
+    sanitize_value,
+)
 
 logger = logging.getLogger(__name__)
 

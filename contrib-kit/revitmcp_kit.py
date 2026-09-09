@@ -101,14 +101,15 @@ ROUTE_TEMPLATE = u'''# -*- coding: utf-8 -*-
 """
 {title} module for Revit MCP.
 
-IronPython 2.7 внутри процесса Revit. Только диалект Python 2:
-"{{}}".format(x) вместо f-строк, без async, без pathlib, без аннотаций типов.
-Код должен быть валиден и как Python 3 — иначе его нельзя проверить вне Revit.
+IronPython 3 внутри процесса Revit, на уровне языка Python 3.4: без f-строк
+("{{}}".format(x) вместо них), без async, без pathlib, без современных
+аннотаций типов. Код должен быть валиден и как обычный Python 3 — иначе его
+нельзя проверить вне Revit. Хелперы импортируются ОТНОСИТЕЛЬНО (from .utils
+import ...) — плоский `from utils import ...` не грузится под IronPython 3.
 """
 
-from utils import get_element_name, get_element_id_value{suppress_import}
+from .utils import get_element_name, get_element_id_value{suppress_import}
 from pyrevit import routes, DB
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -270,11 +271,7 @@ def cmd_new(args):
         payload_block = (
             "\n            data = {}\n"
             "            if request and request.data:\n"
-            "                data = (\n"
-            "                    json.loads(request.data)\n"
-            "                    if isinstance(request.data, str)\n"
-            "                    else request.data\n"
-            "                )\n"
+            "                data = parse_request_data(request.data)\n"
             "            example = data.get(\"example\")\n"
         )
         call_block = (
@@ -282,7 +279,7 @@ def cmd_new(args):
             "        response = await revit_post(\"/%s/\", data, ctx)" % args.domain
         )
         method = "POST"
-        suppress_import = ", make_element_id, suppress_warnings"
+        suppress_import = ", make_element_id, parse_request_data, suppress_warnings"
 
     os.makedirs(os.path.join(package_dir, "revit_mcp"))
     os.makedirs(os.path.join(package_dir, "tools"))
@@ -374,8 +371,9 @@ def cmd_check(args):
 
 PROBE_SOURCE = u'''# -*- coding: utf-8 -*-
 import json as _json
+import binascii as _binascii
 
-_src = "{hex}".decode("hex").decode("utf-8")
+_src = _binascii.unhexlify("{hex}").decode("utf-8")
 
 
 class _FakeRequest(object):
@@ -394,7 +392,12 @@ class _FakeAPI(object):
         return _decorator
 
 
-_ns = {{}}
+# Ваш маршрут импортирует хелперы относительно (from .utils import ...), а
+# относительный импорт работает только внутри настоящего пакета -- поэтому
+# сначала грузим сам revit_mcp (extension root уже на sys.path благодаря
+# pyRevit) и исполняем код с __package__, указывающим на него.
+import revit_mcp as _revit_mcp_pkg
+_ns = {{"__package__": "revit_mcp", "__name__": "revit_mcp._contrib_probe"}}
 exec(_src, _ns)
 
 _api = _FakeAPI()
@@ -447,7 +450,11 @@ def cmd_probe(args):
     request = urllib.request.Request(
         BRIDGE + "/execute_code/",
         data=body,
-        headers={"Content-Type": "application/json"},
+        # Тело — JSON, но объявлено как text/plain намеренно: тело с
+        # Content-Type: application/json pyRevit разбирает сам, и под
+        # IronPython 3 этот разбор падает ещё до вызова маршрута
+        # («the JSON object must be str, not 'bytes'»).
+        headers={"Content-Type": "text/plain; charset=utf-8"},
     )
 
     try:
@@ -504,6 +511,15 @@ def cmd_pack(args):
     if os.path.isfile(own_test):
         members["tests/test_{}.py".format(domain)] = own_test
 
+    # skills и дополнительные инструкции: папка необязательная, берём целиком
+    skills_dir = os.path.join(package_dir, "skills")
+    if os.path.isdir(skills_dir):
+        for current, _dirs, files in os.walk(skills_dir):
+            for name in files:
+                path = os.path.join(current, name)
+                rel = os.path.relpath(path, package_dir).replace(os.sep, "/")
+                members[rel] = path
+
     out = os.path.join(os.getcwd(), "{}.zip".format(domain))
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
         for arcname, path in sorted(members.items()):
@@ -512,8 +528,12 @@ def cmd_pack(args):
     print("")
     print("Собрано: {}".format(out))
     print("")
-    print("Положите файл в папку приёма:")
-    print(r"  \\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\inbox\ ")
+    print("Положите файл в свою папку приёма на Google Drive")
+    print("и отправьте ссылку на эту папку в Google-чате BIM-менеджеру:")
+    print("  e.ermolenko@genpro.ru")
+    print("")
+    print("Ссылку достаточно отправить один раз — дальше складывайте")
+    print("следующие пакеты в ту же папку. Подробности: INSTRUCTION.md, шаг 5.2.")
     print("")
     print("Дальше пакет проверяет и добавляет в репозиторий сопровождающий.")
     return 0

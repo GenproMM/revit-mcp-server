@@ -43,7 +43,7 @@ python revitmcp_kit.py new wall_report list_wall_report --get --author "Иван
 ```
 wall_report-tool/
   manifest.json                    кто автор, какие инструменты
-  revit_mcp/wall_report.py         маршрут внутри Revit (IronPython 2.7)
+  revit_mcp/wall_report.py         маршрут внутри Revit (IronPython 3)
   tools/wall_report_tools.py       инструмент для модели (Python 3)
   NOTES.md                         что сделали и как проверяли
 ```
@@ -59,11 +59,15 @@ python ../revitmcp_kit.py probe
 python ../revitmcp_kit.py pack
 ```
 
-Готовый `wall_report.zip` положите в папку приёма:
+Раскладка внутри пакета жёсткая: файл для работы с моделью — в `revit_mcp/`,
+новые инструменты для revit-mcp-server (`@mcp.tool()`) — в `tools/`, skills и
+дополнительные инструкции — в `skills/` (папка необязательная, создаётся
+вручную и попадает в архив целиком).
 
-```
-\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\inbox\
-```
+Готовый `wall_report.zip` положите в **свою папку на Google Drive** и отправьте
+ссылку на эту папку в Google-чате BIM-менеджеру **e.ermolenko@genpro.ru**
+(доступ «Читатель» на папку). Ссылка отправляется один раз — дальше складывайте
+следующие пакеты в ту же папку. Подробно — `INSTRUCTION.md`, шаг 5.2.
 
 Дальше пакет проверяет и добавляет в репозиторий сопровождающий. Авторство
 сохраняется — оно берётся из `manifest.json`.
@@ -89,9 +93,16 @@ python ../revitmcp_kit.py probe --payload '{"example": "OST_Walls"}'
 
 ## Главное, что ломается
 
-**f-строка в `revit_mcp/`.** Этот файл исполняется IronPython 2.7 внутри
-Revit — там нет f-строк. Только `"{}".format(x)`. Иначе домен не загрузится, и
-никакой внятной ошибки не будет. `check` это поймает.
+**f-строка в `revit_mcp/`.** Этот файл исполняется IronPython 3 внутри
+Revit на уровне языка Python 3.4 — там ещё нет f-строк (они появились в
+Python 3.6). Только `"{}".format(x)`. Иначе домен не загрузится, и никакой
+внятной ошибки не будет. `check` это поймает.
+
+**Плоский импорт хелпера вместо относительного.** `from utils import ...`
+внутри `revit_mcp/` — это неявный относительный импорт, которого в Python 3
+не существует. Под IronPython 3 он падает `ImportError` при загрузке, и
+домен пропадает молча. Нужно `from .utils import ...`. `check` это тоже
+поймает.
 
 **Транзакция без `suppress_warnings`.** Если ваш маршрут пишет в модель,
 оставьте блок транзакции ровно как в шаблоне. Без `suppress_warnings(t)` сразу

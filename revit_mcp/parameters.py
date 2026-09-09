@@ -6,10 +6,10 @@ Handles reading element properties and setting parameter values
 
 from .utils import (
     get_element_name, get_element_id_value, make_element_id, suppress_warnings,
+    parse_request_data,
     sanitize_value,
 )
 from pyrevit import routes, revit, DB
-import json
 import traceback
 import logging
 
@@ -410,7 +410,7 @@ def register_parameter_routes(api):
                     data={"error": "No active Revit document"}, status=503
                 )
 
-            data = json.loads(request.data) if isinstance(request.data, str) else request.data
+            data = parse_request_data(request.data)
 
             element_id = data.get("element_id")
             parameter_name = data.get("parameter_name")

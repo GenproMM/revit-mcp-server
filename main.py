@@ -2,6 +2,7 @@
 import os
 import sys
 import httpx
+import json
 import anyio
 from mcp.server.fastmcp import FastMCP, Image, Context
 import base64
@@ -74,10 +75,18 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Contex
         if method == "GET":
             response = await client.get(endpoint, params=params, timeout=timeout)
         else:  # POST
+            # The body is JSON, but it is deliberately declared text/plain.
+            # pyRevit parses an application/json body itself, before any route
+            # handler runs, and that parse is broken under IronPython 3: it
+            # passes the raw bytes to a 3.5-level json.loads, which rejects them
+            # with "the JSON object must be str, not 'bytes'" and answers 500.
+            # Declaring text/plain leaves the body untouched for the route to
+            # parse -- see revit_mcp/textutils.py:parse_request_data, which is
+            # the other half of this contract.
             response = await client.post(
                 endpoint,
-                json=data,
-                headers={"Content-Type": "application/json"},
+                content=json.dumps(data).encode("utf-8"),
+                headers={"Content-Type": "text/plain; charset=utf-8"},
                 timeout=timeout,
             )
 

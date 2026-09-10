@@ -113,7 +113,7 @@ Set-Alias python "C:\Users\ВашеИмя\AppData\Roaming\pyRevit\bin\cengines\C
 Возьмите `revitmcp-contrib-kit.zip` из папки:
 
 ```
-\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\contrib-kit\
+\\srv-dfs\BIM\06_RevitMCP\contrib-kit\
 ```
 
 Распакуйте **целиком** в удобное место, например `C:\work\revitmcp-kit`. Не
@@ -462,7 +462,7 @@ python ..\revitmcp_kit.py pack
 ### 7.2. Положите в папку приёма
 
 ```
-\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\inbox\
+\\srv-dfs\BIM\06_RevitMCP\inbox\
 ```
 
 Просто скопируйте туда `.zip`. Всё.

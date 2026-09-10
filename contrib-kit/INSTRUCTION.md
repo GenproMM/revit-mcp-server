@@ -88,7 +88,7 @@ C:\Users\ВашеИмя\AppData\Roaming\pyRevit\bin\cengines\CPY3123\python.exe
 Возьмите `revitmcp-contrib-kit.zip` из папки:
 
 ```
-\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\contrib-kit\
+\\srv-dfs\BIM\06_RevitMCP\contrib-kit\
 ```
 
 Распакуйте **целиком** в удобное место, например `C:\work\revitmcp-kit`.

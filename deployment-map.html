@@ -808,7 +808,7 @@
     <div class="pathmap">
       <div>
         <h4>1 · Рабочая копия Git</h4>
-        <span class="where">…\827_RevitMCP\revit-mcp-server\ — или локальный диск, скрипту всё равно</span>
+        <span class="where">…\06_RevitMCP\revit-mcp-server\ — или локальный диск, скрипту всё равно</span>
         <ul>
           <li><b>revit_mcp/</b> маршруты, IronPython, исполняются внутри Revit</li>
           <li><b>tools/</b> инструменты MCP, CPython 3.11+</li>
@@ -821,7 +821,7 @@
       </div>
       <div>
         <h4>2 · Опубликованные копии</h4>
-        <span class="where">…\827_RevitMCP\ext\ и …\827_RevitMCP\payload\</span>
+        <span class="where">…\06_RevitMCP\ext\ и …\06_RevitMCP\payload\</span>
         <ul>
           <li><b>ext\revit-mcp-server.extension\</b> Revit-половина, обрезанная.
             Грузится станциями <strong>прямо отсюда</strong> по UNC</li>
@@ -917,7 +917,7 @@
             <td><code>publish-extension.cmd</code></td>
             <td><code>extension.json</code>, <code>startup.py</code>,
                 <code>LICENSE</code>, вся <code>revit_mcp\</code> рекурсивно</td>
-            <td><code>…\827_RevitMCP\ext\revit-mcp-server.extension\</code></td>
+            <td><code>…\06_RevitMCP\ext\revit-mcp-server.extension\</code></td>
             <td>при следующем запуске Revit</td>
           </tr>
           <tr>
@@ -925,7 +925,7 @@
             <td><code>main.py</code>, <code>server.py</code>, <code>gate.py</code>,
                 <code>warm.py</code>, <code>tools\</code> и <code>tests\</code>
                 рекурсивно, плюс собранные колёса</td>
-            <td><code>…\827_RevitMCP\payload\</code></td>
+            <td><code>…\06_RevitMCP\payload\</code></td>
             <td>при следующем входе в систему</td>
           </tr>
         </tbody>
@@ -1039,7 +1039,7 @@
       </div>
       <div>
         <h4>Папка приёма</h4>
-        <span class="where">\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\inbox\</span>
+        <span class="where">\\srv-dfs\BIM\06_RevitMCP\inbox\</span>
         <ul>
           <li><b>Запись</b> разрешена разработчикам</li>
           <li><b>Чтение</b> — сопровождающему</li>
@@ -1199,7 +1199,7 @@
       <div>
         <dt>Общая папка</dt>
         <dd>Сетевой каталог на сервере компании, здесь
-          <code>\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\</code>. Для
+          <code>\\srv-dfs\BIM\06_RevitMCP\</code>. Для
           пользователей — только чтение. ИТ и разработчики называют это
           «шара» (от английского <em>share</em>) или «SMB-шара» — это одно и
           то же. <code>srv-dfs</code> — имя сервера, точнее DFS-пространства

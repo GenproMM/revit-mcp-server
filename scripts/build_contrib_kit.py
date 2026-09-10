@@ -70,7 +70,7 @@ def main():
     print("conventions.py sha256: {}".format(digest))
     print("")
     print("Publish it where contributors can reach it, next to the inbox:")
-    print(r"  \\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\contrib-kit\ ")
+    print(r"  \\srv-dfs\BIM\06_RevitMCP\contrib-kit\ ")
     print("")
     print("Rebuild whenever scripts/conventions.py changes -- an outdated kit")
     print("passes packages that intake will reject.")

@@ -42,7 +42,7 @@ RevitMCP даёт ИИ-помощнику доступ к открытой мо�
 Путь к папке на сервере:
 
 ```
-\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\
+\\srv-dfs\BIM\06_RevitMCP\
 ```
 
 Если вкладки pyRevit в Revit нет — сначала pyRevit, установщик без него
@@ -65,7 +65,7 @@ RevitMCP даёт ИИ-помощнику доступ к открытой мо�
 `install.cmd` двойным щелчком.**
 
 ```
-\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP\install\install.cmd
+\\srv-dfs\BIM\06_RevitMCP\install\install.cmd
 ```
 
 Откроется чёрное окно консоли и пройдёт несколько шагов: установщик копирует

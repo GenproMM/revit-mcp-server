@@ -112,6 +112,31 @@ for %%o in (revit-mcp-server.extension revit-mcp-python.extension mcp-server-for
 "!PYREVIT!" configs routes port 48884 >nul 2>&1
 rem coreapi is deliberately NOT enabled: it exposes pyRevit's own API surface
 rem for no benefit here.
+rem Unregister the retired share root before adding the current one. The old
+rem root sat inside \\srv-dfs\BIM\01_Ресурсы плагинов, a git repository owned by
+rem the domain admins: pyRevit opens every registered extension path as a repo,
+rem libgit2 climbs to that .git, and the ownership check throws
+rem   "repository path '//srv-dfs/BIM/01_Ресурсы плагинов' is not owned by
+rem    current user"
+rem in the user's face. Adding the new path does not remove the old one, so a
+rem machine installed before 2026-09-09 would keep the fault after moving.
+rem
+rem The path is never spelled out here. The folder above it is Cyrillic, cmd
+rem parses this file in the console codepage (866 on a Russian Windows, and a
+rem double-click always gives us that), so a literal would arrive mangled and
+rem the forget would silently miss. Instead the exact string is read back from
+rem pyRevit's own config -- where it is already correctly encoded -- and matched
+rem on its ASCII segment. Reading that file is fine; only writing it by hand is
+rem forbidden, and the forget itself still goes through pyrevit.exe.
+rem "pyrevit extensions paths" with no argument prints usage, not the list,
+rem which is why the config is the source here.
+rem Drop this block once every workstation has re-run the installer.
+rem The whole match-and-forget runs inside Python: the path must never round
+rem trip through a cmd variable, because that is where the console codepage
+rem would mangle it. Python holds the string and hands it straight to
+rem pyrevit.exe as an argv element.
+"%MCP_PYEXE%" "%~dp0forget_retired_path.py" "!PYREVIT!" 827_RevitMCP
+
 "!PYREVIT!" extensions paths add "%EXTPATH%" >nul 2>&1
 
 rem Clear a stale disable. pyRevit reads default_enabled only the FIRST time it

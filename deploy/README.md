@@ -42,7 +42,7 @@ WORKSTATION (user profile only — no admin, no UAC)
 ```
 
 `MCP_SHARE_ROOT` is set in `config.cmd`; on the reference fleet it is
-`\\srv-dfs\BIM\01_Ресурсы плагинов\827_RevitMCP`. The working copy may live
+`\\srv-dfs\BIM\06_RevitMCP`. The working copy may live
 anywhere — `publish-extension.cmd` and `build-payload.cmd` derive the repo root
 relative to themselves (`%~dp0..`), so a local disk works just as well. Keeping
 it beside the published copies is convenience, not a requirement.

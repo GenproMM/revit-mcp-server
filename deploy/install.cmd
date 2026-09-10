@@ -18,8 +18,9 @@ rem Exported for the PowerShell blocks below (scheduled task + shortcut).
 set "MCP_UPDATE=%SHARE%\install\update.cmd"
 
 rem We ship no interpreter: pyRevit is a hard prerequisite for every user and
-rem installs an embeddable CPython at bin\cengines\CPY*\python.exe. Reusing it
-rem keeps an unsigned python.exe out of the user profile entirely.
+rem installs an embeddable CPython under bin\. Reusing it keeps an unsigned
+rem python.exe out of the user profile entirely. find-python.cmd knows both
+rem layouts (4.8's bin\engines\, 5+'s bin\cengines\) and grades the version.
 call "%~dp0find-python.cmd"
 
 echo(
@@ -32,8 +33,25 @@ echo(
 
 if not defined MCP_PYEXE (
     echo  ERROR: pyRevit's CPython engine was not found.
-    echo  Looked for bin\cengines\CPY*\python.exe under the usual pyRevit
-    echo  install paths. pyRevit is required before installing RevitMCP.
+    echo  Looked for bin\cengines\CPY*\python.exe and bin\engines\CPY*\python.exe
+    echo  under the usual pyRevit install paths. pyRevit is required before
+    echo  installing RevitMCP.
+    goto :fail
+)
+
+rem pyRevit 4.8 ships CPython 3.8 (bin\engines\CPY385); the payload wheels are
+rem built for 3.11+. Stop here with the actual reason rather than letting the
+rem install run on to warm.py, which would fail with an opaque ImportError.
+if not "%MCP_ENGINE_OK%"=="1" (
+    echo  ERROR: pyRevit's CPython engine on this machine is too old.
+    echo(
+    echo    found  : %MCP_PYEXE%
+    echo    engine : %MCP_ENGINE%  ^(CPython %MCP_PYVER%^)
+    echo    needed : CPython 3.11 or newer
+    echo(
+    echo  This is pyRevit 4.8, which bundles CPython 3.8. RevitMCP needs the
+    echo  interpreter that pyRevit 5.x and later ship ^(CPY3123, CPython 3.12^).
+    echo  Update pyRevit, then run this installer again.
     goto :fail
 )
 

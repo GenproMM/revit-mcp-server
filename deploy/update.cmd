@@ -107,7 +107,13 @@ rem --- warm the new tree BEFORE it goes live -------------------------------
 rem A fresh path means a cold file cache, no __pycache__ for app\, and a first
 rem Defender scan of unsigned binaries. Without this the first Hermes session
 rem after every update takes seconds and looks hung.
-if defined MCP_PYEXE (
+rem MCP_ENGINE_OK is 0 on pyRevit 4.8, whose CPython 3.8 cannot import a
+rem payload built for 3.11+. install.cmd refuses such a machine outright, so
+rem reaching here means pyRevit was downgraded under a working install: warm
+rem would then fail on the ABI, not on this version, and roll back a good payload.
+if not "%MCP_ENGINE_OK%"=="1" (
+    call :log "WARNING: %MCP_ENGINE% is CPython %MCP_PYVER%, below the 3.11 the payload needs; skipping the import check"
+) else if defined MCP_PYEXE (
     "%MCP_PYEXE%" -m compileall -q "%NEW%\app" >nul 2>&1
     "%MCP_PYEXE%" "%NEW%\app\warm.py" >nul 2>&1
     if errorlevel 1 (

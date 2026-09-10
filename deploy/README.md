@@ -69,6 +69,24 @@ installs an embeddable CPython at `bin\cengines\CPY<version>\python.exe`
 more importantly, keeps an unsigned `python.exe` out of the user profile
 entirely — which is exactly what AppLocker/WDAC default rules block.
 
+**The engine folder is named differently across pyRevit generations, and the
+minimum version is 3.11.** pyRevit 4.8 puts its interpreter in `bin\engines\`
+without the leading `c` and bundles CPython **3.8**, which is below the `>=3.11`
+of `pyproject.toml` and cannot run the payload at all. pyRevit 5.x and 6.5.3
+both use `bin\cengines\CPY3123` (CPython 3.12).
+
+| pyRevit | path | CPython | supported |
+|---|---|---|---|
+| 4.8 | `bin\engines\CPY385\python.exe` | 3.8 | no — upgrade pyRevit |
+| 5.x | `bin\cengines\CPY3123\python.exe` | 3.12 | yes |
+| 6.5.3 | `bin\cengines\CPY3123\python.exe` | 3.12 | yes |
+
+`find-python.cmd` probes both layouts (`cengines\` first, so a machine carrying
+both lands on the supported one), then asks the interpreter its own version and
+exports `MCP_ENGINE_OK`. `install.cmd` refuses a too-old engine up front with
+the version it found, rather than letting the install proceed to `warm.py` and
+fail there on an opaque `ImportError`.
+
 Two consequences follow from it being the *embeddable* distribution, and both
 are load-bearing:
 
@@ -215,6 +233,8 @@ exposure; the only thing containing it is `[routes] host = "127.0.0.1"`.
 | Tools present, every call errors | `http://localhost:48884/revit_mcp/status/` in a browser — empty means the extension did not load |
 | Extension did not load | `[revit-mcp-server.extension] disabled` in `pyRevit_config.ini`; extension path registered; Revit fully restarted (Reload is not enough) |
 | Server will not start | Compare `payload\ENGINE` with the machine's `bin\cengines\CPY*` — a pyRevit engine bump needs a payload rebuild |
+| `pyRevit's CPython engine was not found` | pyRevit is genuinely absent, or installed somewhere `find-python.cmd` does not probe. Both `bin\cengines\CPY*` and `bin\engines\CPY*` are searched |
+| `pyRevit's CPython engine ... is too old` | pyRevit 4.8, whose CPython 3.8 is below the payload's 3.11 minimum. Upgrade pyRevit to 5.x or later; there is no payload that runs on 3.8 |
 | Stuck on an old version | `%LOCALAPPDATA%\RevitMCP\update.log`; run the "Update RevitMCP" shortcut by hand |
 
 ## Rollback

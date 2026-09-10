@@ -26,20 +26,26 @@ where uv >nul 2>&1 || (echo ERROR: uv not found on PATH. & exit /b 1)
 
 if not defined MCP_PYEXE (
     echo ERROR: could not find pyRevit's CPython engine on this machine.
-    echo        Looked for bin\cengines\CPY*\python.exe under the usual pyRevit
-    echo        install locations. pyRevit must be installed on the build host
-    echo        so the wheels are built for the same interpreter the fleet runs.
+    echo        Looked for bin\cengines\CPY*\python.exe and bin\engines\CPY*\python.exe
+    echo        under the usual pyRevit install locations. pyRevit must be
+    echo        installed on the build host so the wheels are built for the same
+    echo        interpreter the fleet runs.
     exit /b 1
 )
 
-rem Ask the interpreter itself rather than parsing the engine folder name --
-rem CPY3123 is unambiguous only because the minor is two digits. Not via
-rem for /f with backticks: that re-parses the quotes and mangles the -c string.
-set "PYVERFILE=%TEMP%\mcp-pyver-%RANDOM%.txt"
-"%MCP_PYEXE%" -c "import sys;f=open(r'%PYVERFILE%','w');f.write(str(sys.version_info[0])+'.'+str(sys.version_info[1]));f.close()"
-set "PYVER="
-if exist "%PYVERFILE%" set /p PYVER=<"%PYVERFILE%"
-del "%PYVERFILE%" 2>nul
+rem Never build a payload against pyRevit 4.8's CPython 3.8: the result would
+rem install nowhere. pyproject.toml requires 3.11+.
+if not "%MCP_ENGINE_OK%"=="1" (
+    echo ERROR: %MCP_ENGINE% is CPython %MCP_PYVER%; the payload requires 3.11 or newer.
+    echo        %MCP_PYEXE%
+    echo        Build on a host running pyRevit 5.x or later.
+    exit /b 1
+)
+
+rem find-python.cmd already asked the interpreter itself (parsing the engine
+rem folder name is unsafe -- CPY3123 is unambiguous only because the minor is
+rem two digits, and CPY385 is exactly where that guess goes wrong).
+set "PYVER=%MCP_PYVER%"
 if not defined PYVER (echo ERROR: could not query the pyRevit interpreter. & exit /b 1)
 
 set "OUT=%MCP_SHARE_ROOT%\payload"

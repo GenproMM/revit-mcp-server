@@ -32,6 +32,21 @@ def register_code_execution_routes(api):
         }
         """
         try:
+            # During OpenAndActivateDocument, pyRevit can invoke the route
+            # once with a stale/null injected document. Prefer the current
+            # pyRevit document when it is available, and fail cleanly while
+            # Revit is between documents instead of constructing a transaction
+            # with None and taking down the bridge.
+            if not doc:
+                try:
+                    doc = revit.doc
+                except Exception:
+                    doc = None
+            if not doc:
+                return routes.make_response(
+                    data={"error": "No active Revit document"}, status=503
+                )
+
             # Parse the request data
             data = parse_request_data(request.data)
             code_to_execute = data.get("code", "")

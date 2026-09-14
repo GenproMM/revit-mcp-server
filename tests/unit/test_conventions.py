@@ -280,3 +280,15 @@ def test_request_parsing_detector_catches_the_old_idiom():
 def test_request_parsing_detector_allows_the_helper():
     source = "def h(doc, request):\n    data = parse_request_data(request.data)\n"
     assert conventions.check_request_parsing("revit_mcp/x.py", source) == []
+
+
+def test_code_execution_rejects_missing_document_before_transaction():
+    """A model switch can briefly leave pyRevit's injected doc as None."""
+    path = os.path.join(REVIT_MCP_DIR, "code_execution.py")
+    source = _read(path)
+    transaction_at = source.index("DB.Transaction(doc")
+    prefix = source[:transaction_at]
+    assert "doc = revit.doc" in prefix
+    guard_at = prefix.index("if not doc")
+    assert guard_at < transaction_at
+    assert "No active Revit document" in prefix[guard_at:]

@@ -21,10 +21,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# A workset counts as a link workset (and is closed) when its name contains this
-# substring, compared case-insensitively. The convention is a project naming
-# rule, not something recorded in the file.
-DEFAULT_LINK_WORKSET_PATTERNS = ["#_RVT_LINK"]
+# Central/workshared models open detached with all user worksets closed by
+# default. The sentinel is handled by _matches_any and is not a workset name.
+DEFAULT_LINK_WORKSET_PATTERNS = ["__ALL_USER_WORKSETS__"]
 
 # "preserve" is the Revit dialog option "Detach and preserve worksets".
 _DETACH_MODES = {
@@ -42,6 +41,8 @@ def _get_host_app():
 
 def _matches_any(name, patterns):
     """True when name contains any of patterns, case-insensitively."""
+    if "__ALL_USER_WORKSETS__" in patterns:
+        return True
     upper = (name or "").upper()
     for pattern in patterns:
         if pattern and pattern.upper() in upper:
@@ -49,14 +50,36 @@ def _matches_any(name, patterns):
     return False
 
 
-def _extract_file_info(file_path):
+def _is_revit_server_path(file_path):
+    """True for a Revit Server user-visible path (RSN://...)."""
+    return bool(file_path) and str(file_path).strip().lower().startswith("rsn://")
+
+
+def _to_model_path(file_path):
+    """Convert a local or Revit Server user-visible path to ModelPath."""
+    return DB.ModelPathUtils.ConvertUserVisiblePathToModelPath(file_path)
+
+
+def _model_exists(file_path, model_path):
+    """Check local files on disk and RSN models through Revit's API."""
+    if not _is_revit_server_path(file_path):
+        return os.path.exists(file_path)
+    # RSN models are remote and therefore never satisfy os.path.exists().
+    # The actual Revit API calls below validate the ModelPath and return the
+    # useful server/open error when the model cannot be resolved.
+    return True
+
+
+def _extract_file_info(file_path, model_path=None):
     """
     Read a .rvt header without opening the file. Values are None when Revit
     cannot report them.
     """
     result = {"is_workshared": None, "is_central": None, "saved_in_version": None}
     try:
-        info = DB.BasicFileInfo.Extract(file_path)
+        if model_path is None:
+            model_path = _to_model_path(file_path)
+        info = DB.BasicFileInfo.Extract(model_path)
         if info is None:
             return result
         try:
@@ -179,7 +202,8 @@ def register_worksharing_routes(api):
                     data={"error": "file_path is required (full path to a .rvt file)"},
                     status=400,
                 )
-            if not os.path.exists(file_path):
+            model_path = _to_model_path(file_path)
+            if not _model_exists(file_path, model_path):
                 # A path mangled by backslash escapes is by far the most common
                 # cause here, and a bare "not found" sends people hunting for a
                 # Unicode bug that does not exist. Say which it is.
@@ -196,8 +220,7 @@ def register_worksharing_routes(api):
             if patterns is None:
                 patterns = DEFAULT_LINK_WORKSET_PATTERNS
 
-            file_info = _extract_file_info(file_path)
-            model_path = DB.ModelPathUtils.ConvertUserVisiblePathToModelPath(file_path)
+            file_info = _extract_file_info(file_path, model_path)
             worksets, error = _preview_worksets(model_path)
 
             if error:
@@ -261,7 +284,8 @@ def register_worksharing_routes(api):
                     data={"error": "file_path is required (full path to a .rvt file)"},
                     status=400,
                 )
-            if not os.path.exists(file_path):
+            model_path = _to_model_path(file_path)
+            if not _model_exists(file_path, model_path):
                 # A path mangled by backslash escapes is by far the most common
                 # cause here, and a bare "not found" sends people hunting for a
                 # Unicode bug that does not exist. Say which it is.
@@ -295,8 +319,7 @@ def register_worksharing_routes(api):
                     data={"error": "Revit Application unavailable"}, status=503
                 )
 
-            file_info = _extract_file_info(file_path)
-            model_path = DB.ModelPathUtils.ConvertUserVisiblePathToModelPath(file_path)
+            file_info = _extract_file_info(file_path, model_path)
 
             options = DB.OpenOptions()
             if audit:

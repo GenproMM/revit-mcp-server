@@ -2,7 +2,7 @@
 """Worksharing tools — opening models with detach and workset configuration"""
 
 from mcp.server.fastmcp import Context
-from .utils import format_response
+from .utils import describe_broken_path, format_response
 
 
 def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
@@ -32,12 +32,19 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
         workset changes are not reflected.
 
         Args:
-            file_path: Full path to the .rvt file, e.g. "C:\\Models\\Tower.rvt"
+            file_path: Full path to the .rvt file. Escape backslashes
+                ("G:\\\\Models\\\\Tower.rvt") or use forward slashes
+                ("G:/Models/Tower.rvt"); a single backslash before a digit or
+                letter becomes a control character and the file is reported
+                missing. Non-ASCII names (Cyrillic etc.) are fully supported.
             close_worksets_matching: Substrings marking link worksets, matched
                 case-insensitively. Defaults to ["#_RVT_LINK"]. Pass [] to
                 preview with nothing closed.
             ctx: MCP context for logging
         """
+        problem = describe_broken_path(file_path)
+        if problem:
+            return format_response({"error": problem})
         data = {"file_path": file_path}
         if close_worksets_matching is not None:
             data["close_worksets_matching"] = close_worksets_matching
@@ -79,7 +86,11 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
         document; use save_document with a file_path to persist it.
 
         Args:
-            file_path: Full path to the .rvt file, e.g. "C:\\Models\\Tower.rvt"
+            file_path: Full path to the .rvt file. Escape backslashes
+                ("G:\\\\Models\\\\Tower.rvt") or use forward slashes
+                ("G:/Models/Tower.rvt"); a single backslash before a digit or
+                letter becomes a control character and the file is reported
+                missing. Non-ASCII names (Cyrillic etc.) are fully supported.
             detach: "preserve" keeps worksets (default), "discard" drops them,
                 "none" opens the central file itself without detaching
             close_worksets_matching: Substrings marking worksets to leave closed,
@@ -90,6 +101,9 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
             audit: Run Revit's audit while opening — slow, for suspect files
             ctx: MCP context for logging
         """
+        problem = describe_broken_path(file_path)
+        if problem:
+            return format_response({"error": problem})
         data = {
             "file_path": file_path,
             "detach": detach,

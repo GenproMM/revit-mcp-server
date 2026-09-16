@@ -17,7 +17,7 @@ import time
 
 from mcp.server.fastmcp import Context
 
-from .utils import format_response
+from .utils import describe_broken_path, format_response
 
 # Autodesk installs to a predictable path; REVIT_EXE overrides it for anything
 # unusual (a network install, a non-default drive).
@@ -233,9 +233,11 @@ def register_process_tools(mcp, revit_get, revit_post=None, revit_image=None):
         args = [exe]
         if model_path:
             if not os.path.isfile(model_path):
-                return format_response(
-                    {"error": "Model not found on this machine: %s" % model_path}
-                )
+                problem = describe_broken_path(model_path)
+                message = "Model not found on this machine: %s" % model_path
+                if problem:
+                    message = "%s -- %s" % (message, problem)
+                return format_response({"error": message})
             args.append(model_path)
 
         await _say(ctx, "Starting Revit %s%s" % (

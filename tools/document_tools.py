@@ -2,7 +2,7 @@
 """Document tools — saving and persistence"""
 
 from mcp.server.fastmcp import Context
-from .utils import format_response
+from .utils import describe_broken_path, format_response
 
 
 def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
@@ -38,6 +38,10 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
                 workshared model.
             ctx: MCP context for logging
         """
+        # file_path is optional here: only validate one that was given.
+        problem = describe_broken_path(file_path) if file_path else None
+        if problem:
+            return format_response({"error": problem})
         data = {"file_path": file_path, "overwrite": overwrite}
         if as_central is not None:
             data["as_central"] = as_central

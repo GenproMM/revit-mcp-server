@@ -3,7 +3,7 @@
 
 from mcp.server.fastmcp import Context
 from typing import Dict, Any
-from .utils import format_response
+from .utils import describe_broken_path, format_response
 
 
 def register_family_tools(mcp, revit_get, revit_post, revit_image=None):
@@ -128,6 +128,9 @@ def register_family_tools(mcp, revit_get, revit_post, revit_image=None):
                 "C:\\ProgramData\\Autodesk\\RVT 2027\\Libraries\\English\\Furniture\\Chair.rfa"
             ctx: MCP context for logging
         """
+        problem = describe_broken_path(file_path)
+        if problem:
+            return format_response({"error": problem})
         response = await revit_post("/load_family/", {"file_path": file_path}, ctx)
         return format_response(response)
 

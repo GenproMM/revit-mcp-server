@@ -105,3 +105,53 @@ def format_response(response):
     else:
         # If response is already a string (error case from _revit_call)
         return str(response)
+
+
+# Deliberately duplicated from revit_mcp/textutils.py. The two halves of this
+# repo never share an interpreter, so tools/ cannot import from revit_mcp/;
+# see the Two-Runtime Rule in CLAUDE.md. Keep the two copies in step.
+_ESCAPE_CULPRITS = {
+    "\x07": "\\a",
+    "\x08": "\\b",
+    "\x0c": "\\f",
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+    "\x0b": "\\v",
+    "\0": "\\0",
+}
+
+
+def describe_broken_path(path: str):
+    """Return a diagnosis if `path` carries mangled escapes, else None.
+
+    A Windows path typed into a non-raw string literal loses every backslash
+    that forms a recognised escape, so "C:\10_bim\new.rvt" arrives carrying a
+    backspace and a newline. No legal Windows path contains a control
+    character, which makes their presence unambiguous evidence.
+
+    A Cyrillic path makes this look like an encoding fault, which it is not:
+    non-ASCII survives the bridge intact because json.dumps escapes it to
+    \\uXXXX and json.loads restores it.
+    """
+    if not isinstance(path, str):
+        return None
+
+    hits = []
+    for index, char in enumerate(path):
+        code = ord(char)
+        if code < 32 or code == 127:
+            culprit = _ESCAPE_CULPRITS.get(char, "\\x{:02x}".format(code))
+            hits.append("U+{:04X} at position {} (from a literal {})".format(
+                code, index, culprit))
+    if not hits:
+        return None
+
+    return (
+        "The path contains control characters, which means its backslashes were "
+        "consumed as escape sequences before it arrived: {}. Resend the path with "
+        "doubled backslashes (\"G:\\\\folder\\\\file.rvt\"), as a raw string "
+        "(r\"G:\\folder\\file.rvt\"), or with forward slashes (\"G:/folder/file.rvt\"). "
+        "This is not a Unicode problem: Cyrillic and other non-ASCII path names "
+        "transfer correctly.".format("; ".join(hits))
+    )

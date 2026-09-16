@@ -15,7 +15,7 @@ is roughly ten extra discipline models and ten times the memory.
 
 from pyrevit import routes, DB
 from .utils import parse_request_data
-from .textutils import sanitize_string
+from .textutils import sanitize_string, describe_broken_path
 import os
 import logging
 
@@ -180,8 +180,15 @@ def register_worksharing_routes(api):
                     status=400,
                 )
             if not os.path.exists(file_path):
+                # A path mangled by backslash escapes is by far the most common
+                # cause here, and a bare "not found" sends people hunting for a
+                # Unicode bug that does not exist. Say which it is.
+                problem = describe_broken_path(file_path)
+                error = "Model not found: {}".format(file_path)
+                if problem:
+                    error = "{} -- {}".format(error, problem)
                 return routes.make_response(
-                    data={"error": "Model not found: {}".format(file_path)},
+                    data={"error": error},
                     status=404,
                 )
 
@@ -255,8 +262,15 @@ def register_worksharing_routes(api):
                     status=400,
                 )
             if not os.path.exists(file_path):
+                # A path mangled by backslash escapes is by far the most common
+                # cause here, and a bare "not found" sends people hunting for a
+                # Unicode bug that does not exist. Say which it is.
+                problem = describe_broken_path(file_path)
+                error = "Model not found: {}".format(file_path)
+                if problem:
+                    error = "{} -- {}".format(error, problem)
                 return routes.make_response(
-                    data={"error": "Model not found: {}".format(file_path)},
+                    data={"error": error},
                     status=404,
                 )
 

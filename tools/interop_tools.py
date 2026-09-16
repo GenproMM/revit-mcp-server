@@ -2,7 +2,7 @@
 """Interop tools — IFC export and external file linking"""
 
 from mcp.server.fastmcp import Context
-from .utils import format_response
+from .utils import describe_broken_path, format_response
 
 
 def register_interop_tools(mcp, revit_get, revit_post, revit_image=None):
@@ -29,6 +29,9 @@ def register_interop_tools(mcp, revit_get, revit_post, revit_image=None):
             view_name: Export only elements visible in this view (optional)
             ctx: MCP context for logging
         """
+        problem = describe_broken_path(file_path)
+        if problem:
+            return format_response({"error": problem})
         data = {
             "file_path": file_path,
             "ifc_version": ifc_version,
@@ -57,6 +60,9 @@ def register_interop_tools(mcp, revit_get, revit_post, revit_image=None):
             position: Optional placement offset {"x", "y", "z"} in mm
             ctx: MCP context for logging
         """
+        problem = describe_broken_path(file_path)
+        if problem:
+            return format_response({"error": problem})
         data = {"file_path": file_path, "mode": mode}
         if position is not None:
             data["position"] = position

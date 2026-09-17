@@ -13,8 +13,19 @@ _DEFAULT_CLOSE_WORKSETS = ["__ALL_USER_WORKSETS__"]
 
 
 def _is_revit_server_path(file_path: str) -> bool:
-    """Return whether file_path is an RSN Revit Server URI."""
-    return isinstance(file_path, str) and file_path.strip().lower().startswith("rsn://")
+    """
+    Return whether file_path is an RSN Revit Server URI.
+
+    Both separators count. Users copy these paths out of Revit and out of
+    Windows dialogs, so the backslash spelling turns up as often as the
+    canonical "RSN://server/Model.rvt", and the number of
+    separators after the colon varies with how the path was escaped on the way
+    in. Treating only the canonical spelling as Revit Server is what sends a
+    perfectly good path down the local-file branch.
+    """
+    if not isinstance(file_path, str):
+        return False
+    return file_path.strip().lower().replace("\\", "/").startswith("rsn:/")
 
 
 @lru_cache(maxsize=1)
@@ -41,13 +52,49 @@ def _revit_server_models() -> tuple[tuple[str, str, str], ...]:
     return tuple(models)
 
 
+def _revit_server_path_parts(file_path: str) -> list[str]:
+    """
+    Split an RSN URI into its non-empty segments after the scheme.
+
+    Normalisation happens before the scheme is stripped: a path written with
+    backslashes ("RSN://srv/Project/Model.rvt" vs a backslash-separated spelling) is
+    the same location, and slicing first would leave the separators in place.
+    """
+    if not _is_revit_server_path(file_path):
+        return []
+    normalized = file_path.strip().replace("\\", "/")
+    remainder = normalized.split(":", 1)[1] if ":" in normalized else ""
+    return [part for part in remainder.split("/") if part]
+
+
+def _is_complete_revit_server_path(file_path: str) -> bool:
+    """
+    True for an RSN URI that already names a server and a path on it, i.e.
+    RSN://<server>/<folder>/<Model>.rvt. Such a URI is what Revit itself
+    consumes, so it needs no journal lookup.
+    """
+    if not _is_revit_server_path(file_path):
+        return False
+    parts = _revit_server_path_parts(file_path)
+    return len(parts) >= 2 and parts[-1].lower().endswith(".rvt")
+
+
 def _resolve_revit_server_path(file_path: str) -> str:
-    """Resolve an RSN URI by model filename using the shared journal."""
+    """
+    Resolve an RSN URI by model filename using the shared journal.
+
+    A URI that already carries a server and a path is passed straight through:
+    the journal is a convenience for "RSN://Model.rvt" shorthand, and letting an
+    unreachable share turn a perfectly good path into an error is what makes the
+    bridge look as though it cannot open RSN paths at all.
+    """
     if not _is_revit_server_path(file_path):
         return file_path
+    if _is_complete_revit_server_path(file_path):
+        return "RSN://" + "/".join(_revit_server_path_parts(file_path))
 
-    normalized = file_path.strip().replace("\\", "/")
-    requested_name = normalized.rstrip("/").rsplit("/", 1)[-1].lower()
+    parts = _revit_server_path_parts(file_path)
+    requested_name = (parts[-1] if parts else "").lower()
     matches = [model for model in _revit_server_models() if model[2].lower() == requested_name]
     if not matches:
         raise FileNotFoundError(
@@ -70,7 +117,13 @@ def _resolve_path_or_error(file_path: str) -> tuple[str, str | None]:
     """Resolve RSN input, returning a tool-friendly error instead of raising."""
     try:
         return _resolve_revit_server_path(file_path), None
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        if _is_revit_server_path(file_path):
+            return file_path, (
+                "{}. The model journal at {} is the only way to expand an "
+                "RSN:// shorthand; pass the full RSN://<server>/<folder>/<Model>.rvt "
+                "path to skip it.".format(exc, _MODEL_JOURNAL)
+            )
         return file_path, str(exc)
 
 
@@ -141,6 +194,8 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
         close_worksets_matching: list[str] = None,
         activate: bool = True,
         audit: bool = False,
+        local_path: str = None,
+        overwrite_local: bool = True,
         ctx: Context = None,
     ) -> str:
         """Open a Revit model from disk, detaching from central and choosing worksets.
@@ -157,6 +212,14 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
         A model that is not workshared is opened plainly, with neither detach nor
         workset configuration, because Revit rejects both on such a file; the
         response says so via is_workshared.
+
+        detach="none" on a central model — including every Revit Server
+        (RSN://) model — does NOT open the central itself. A local copy is
+        created first, the equivalent of the Open dialog's "Create New Local"
+        checkbox, and that copy is opened, so edits and synchronising behave
+        the way they do for a normal user. The response reports is_local_copy
+        and local_path. This is the mode to use when the work is meant to be
+        synchronised back to central.
 
         Returns the opened document's title, the detach mode actually applied,
         whether it became the active document, and the worksets opened vs closed.
@@ -178,7 +241,14 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
                 letter becomes a control character and the file is reported
                 missing. Non-ASCII names (Cyrillic etc.) are fully supported.
             detach: "preserve" keeps worksets (default), "discard" drops them,
-                "none" opens the central file itself without detaching
+                "none" opens a freshly created local copy of the central,
+                still attached to it and able to synchronise back
+            local_path: Where to write the local copy when detach="none".
+                Defaults to Revit's own convention,
+                Documents/<ModelName>_<username>.rvt. Ignored otherwise.
+            overwrite_local: Replace an existing local copy at that path
+                (default True). False makes an existing local copy an error
+                instead of silently discarding its unsynchronised changes.
             close_worksets_matching: Substrings marking worksets to leave closed,
                 matched case-insensitively. The default sentinel
                 ["__ALL_USER_WORKSETS__"] closes every user workset. Pass an
@@ -202,7 +272,10 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
             "detach": detach,
             "activate": activate,
             "audit": audit,
+            "overwrite_local": overwrite_local,
         }
+        if local_path:
+            data["local_path"] = local_path
         data["close_worksets_matching"] = (
             _DEFAULT_CLOSE_WORKSETS
             if close_worksets_matching is None

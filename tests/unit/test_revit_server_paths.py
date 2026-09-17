@@ -10,6 +10,7 @@ paths at all.
 import pytest
 
 from tools.worksharing_tools import (
+    _MODEL_JOURNAL,
     _is_complete_revit_server_path,
     _is_revit_server_path,
     _resolve_revit_server_path,
@@ -68,3 +69,10 @@ def test_local_path_is_passed_through_untouched():
     local = r"C:\Models\Tower.rvt"
     assert not _is_revit_server_path(local)
     assert _resolve_revit_server_path(local) == local
+
+
+def test_journal_uses_required_corporate_unc_path():
+    assert _MODEL_JOURNAL == (
+        r"\\srv-dfs\BIM\01_Ресурсы плагинов\10_Облегченные модели"
+        r"\RevitModelLiteProcessorJournal.json"
+    )

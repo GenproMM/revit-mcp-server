@@ -8,7 +8,7 @@ from mcp.server.fastmcp import Context
 from .utils import describe_broken_path, format_response
 
 
-_MODEL_JOURNAL = "//srv-dfs/BIM/01_Ресурсы плагинов/10_Облегченные модели/RevitModelLiteProcessorJournal.json"
+_MODEL_JOURNAL = r"\\srv-dfs\BIM\01_Ресурсы плагинов\10_Облегченные модели\RevitModelLiteProcessorJournal.json"
 _DEFAULT_CLOSE_WORKSETS = ["__ALL_USER_WORKSETS__"]
 
 

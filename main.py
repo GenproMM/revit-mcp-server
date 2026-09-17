@@ -35,6 +35,13 @@ def _get_client() -> httpx.AsyncClient:
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(
             base_url=BASE_URL,
+            # The MCP subprocess inherits Windows proxy settings from the
+            # desktop agent.  httpx may then send localhost traffic through
+            # that proxy unless NO_PROXY happens to be configured, which the
+            # pyRevit Routes HTTP/1.0 server surfaces as an empty ReadError.
+            # The bridge is strictly local, so environment proxies must never
+            # participate in these requests.
+            trust_env=False,
             limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
         )
     return _http_client

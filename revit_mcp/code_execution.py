@@ -4,7 +4,7 @@ Code Execution Module for Revit MCP
 Handles direct execution of IronPython code in Revit context.
 """
 from pyrevit import routes, revit, DB
-from .utils import suppress_warnings, parse_request_data
+from .utils import suppress_warnings, parse_request_data, commit_and_report
 import logging
 import sys
 import traceback
@@ -62,7 +62,7 @@ def register_code_execution_routes(api):
             # Create a transaction for any model modifications
             t = DB.Transaction(doc, "MCP Code Execution: {}".format(description))
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 # Capture stdout to return any print statements
@@ -100,8 +100,40 @@ def register_code_execution_routes(api):
                 output = captured_output.getvalue()
                 captured_output.close()
 
-                # Commit the transaction
-                t.Commit()
+                # Commit the transaction and find out what REALLY happened.
+                # t.Commit() can return TransactionStatus.RolledBack silently
+                # (via _FailureSwallower vetoing an error-severity failure);
+                # never discard that return value and report success anyway.
+                commit_result = commit_and_report(t, swallower)
+
+                if not commit_result["committed"]:
+                    logger.error(
+                        "Code execution transaction did not commit "
+                        "(status={}): {}".format(
+                            commit_result["transaction_status"], description
+                        )
+                    )
+                    return routes.make_response(
+                        data={
+                            "status": "rolled_back",
+                            "description": description,
+                            "output": (
+                                output
+                                if output
+                                else "Code executed successfully (no output)"
+                            ),
+                            "code_executed": code_to_execute,
+                            "transaction_status": commit_result["transaction_status"],
+                            "failures": commit_result["failures"],
+                            "message": (
+                                "The code ran without raising an exception, but "
+                                "Revit rolled the transaction back at Commit() "
+                                "because of the error-severity failure(s) listed "
+                                "in 'failures'. No changes were saved to the model."
+                            ),
+                        },
+                        status=409,
+                    )
 
                 return routes.make_response(
                     data={
@@ -113,6 +145,7 @@ def register_code_execution_routes(api):
                             else "Code executed successfully (no output)"
                         ),
                         "code_executed": code_to_execute,
+                        "transaction_status": commit_result["transaction_status"],
                     }
                 )
 

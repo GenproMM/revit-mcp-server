@@ -20,18 +20,63 @@ class _FailureSwallower(DB.IFailuresPreprocessor):
     """Resolve Revit failures during a transaction without ever showing a modal
     dialog. Warnings are deleted (the operation proceeds); if any error-severity
     failure is present, the transaction is rolled back. Either way the headless
-    Routes server keeps running instead of hanging on a dialog."""
+    Routes server keeps running instead of hanging on a dialog.
+
+    Every failure message is logged, and any rollback verdict is recorded on
+    `self.rolled_back` / `self.failures` so the caller (suppress_warnings'
+    transaction owner) can surface it instead of reporting a false success.
+    Previously this rollback was completely silent: a route would call
+    t.Commit(), get back TransactionStatus.RolledBack, discard that return
+    value, and still answer {"status": "success"} to the client while the
+    edit vanished from the model. See debug session param-write-rolls-back.
+    """
+
+    def __init__(self):
+        self.rolled_back = False
+        self.failures = []
 
     def PreprocessFailures(self, failuresAccessor):
         try:
             # Delete all warnings so they don't block (operation continues).
             failuresAccessor.DeleteAllWarnings()
             # If any genuine errors remain, roll back rather than go modal.
+            has_error = False
             for f in failuresAccessor.GetFailureMessages():
-                if f.GetSeverity() == DB.FailureSeverity.Error:
-                    return DB.FailureProcessingResult.ProceedWithRollBack
+                try:
+                    severity = f.GetSeverity()
+                    description = f.GetDescriptionText()
+                except Exception:
+                    severity = None
+                    description = "<failure text unavailable>"
+                is_error = severity == DB.FailureSeverity.Error
+                if is_error:
+                    has_error = True
+                failing_ids = []
+                try:
+                    for fid in f.GetFailingElements():
+                        failing_ids.append(get_element_id_value(fid))
+                except Exception:
+                    pass
+                entry = {
+                    "severity": str(severity),
+                    "description": description,
+                    "failing_element_ids": failing_ids,
+                }
+                self.failures.append(entry)
+                log_fn = logger.error if is_error else logger.warning
+                log_fn(
+                    "Transaction failure (severity=%s): %s (elements=%s)",
+                    entry["severity"], description, failing_ids,
+                )
+            if has_error:
+                self.rolled_back = True
+                logger.error(
+                    "Transaction rolled back due to %d error-severity failure(s).",
+                    sum(1 for x in self.failures if x["severity"] == str(DB.FailureSeverity.Error)),
+                )
+                return DB.FailureProcessingResult.ProceedWithRollBack
         except Exception:
-            pass
+            logger.exception("_FailureSwallower.PreprocessFailures itself raised")
         return DB.FailureProcessingResult.Continue
 
 
@@ -45,15 +90,49 @@ def suppress_warnings(transaction):
 
     Warnings are auto-deleted (operation proceeds); errors roll the transaction
     back cleanly. Call right after transaction.Start(). Best-effort — never raises.
+
+    Returns the `_FailureSwallower` instance so the caller can inspect
+    `.rolled_back` / `.failures` after `transaction.Commit()`, alongside the
+    Commit() return value itself. Returns None if setup failed (best-effort) --
+    callers should still check the TransactionStatus from Commit() in that case.
     """
     try:
+        swallower = _FailureSwallower()
         opts = transaction.GetFailureHandlingOptions()
         opts.SetForcedModalHandling(False)
         opts.SetClearAfterRollback(True)
-        opts.SetFailuresPreprocessor(_FailureSwallower())
+        opts.SetFailuresPreprocessor(swallower)
         transaction.SetFailureHandlingOptions(opts)
+        return swallower
     except Exception:
-        pass
+        logger.exception("suppress_warnings failed to install failure handling options")
+        return None
+
+
+def commit_and_report(transaction, swallower=None):
+    """Commit `transaction` and return a dict describing what really happened.
+
+    Never trust a route's own "status": "success" after calling
+    transaction.Commit() without checking this. Commit() returns a
+    TransactionStatus that silently comes back RolledBack when
+    _FailureSwallower vetoes the transaction -- discarding that return value
+    (the previous behavior in code_execution.py, parameters.py and
+    editing.py) makes a rollback indistinguishable from a real commit.
+
+    Returns:
+        {
+            "committed": bool,               # True only if status == Committed
+            "transaction_status": str,        # str(TransactionStatus)
+            "failures": [ {severity, description, failing_element_ids}, ... ],
+        }
+    """
+    status = transaction.Commit()
+    failures = list(swallower.failures) if swallower is not None else []
+    return {
+        "committed": status == DB.TransactionStatus.Committed,
+        "transaction_status": str(status),
+        "failures": failures,
+    }
 
 
 def get_element_name(element):

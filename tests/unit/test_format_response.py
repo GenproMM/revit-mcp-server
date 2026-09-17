@@ -144,3 +144,44 @@ def test_cyrillic_survives_rendering():
 
 def test_empty_dict_reports_success_rather_than_an_error():
     assert "ERROR DETAILS" not in format_response({})
+
+
+# --- the rolled-back-transaction contract (debug: param-write-rolls-back) ----
+#
+# Routes that mutate the model answer HTTP 409 with status="rolled_back" when
+# Revit silently rolls the transaction back at Commit(). These tests pin the
+# path that makes that visible to the model, because it is load-bearing and
+# non-obvious: _revit_call (main.py) collapses EVERY non-200 to an
+# "Error: <code> - <body>" string, so a rolled-back write reaches
+# format_response as a string and passes through verbatim -- failures included.
+#
+# The dict-shaped test below documents the flip side deliberately: if a future
+# change ever makes _revit_call return parsed JSON for non-200 responses, a
+# "rolled_back" status is NOT in format_response's failure set and the silent
+# false-success bug comes straight back. That test failing is the intended
+# alarm, not a nuisance -- fix _revit_call, or add "rolled_back" to the set.
+
+def test_rolled_back_409_reaches_the_model_as_a_visible_error():
+    body = (
+        'Error: 409 - {"status": "rolled_back", "transaction_status": '
+        '"RolledBack", "failures": [{"severity": "Error", "description": '
+        '"Constraints are not satisfied"}]}'
+    )
+    out = format_response(body)
+    assert out == body
+    assert "rolled_back" in out
+    assert "Constraints are not satisfied" in out
+
+
+def test_rolled_back_dict_is_not_yet_a_recognized_failure_signal():
+    """Alarm test: documents why the 409 status code carries the signal.
+
+    format_response classifies a dict as an error only on a truthy "error" key
+    or status in error/failed/failure/exception. "rolled_back" is in none of
+    those, so a rolled-back payload arriving as a DICT would be rendered as
+    success. Today that cannot happen (non-200 never parses to a dict). If this
+    assertion ever starts failing, the transport changed -- re-verify that a
+    rolled-back write still surfaces as a failure before relaxing it.
+    """
+    out = format_response({"status": "rolled_back", "transaction_status": "RolledBack"})
+    assert "ERROR DETAILS" not in out

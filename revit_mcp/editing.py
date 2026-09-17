@@ -4,7 +4,7 @@ Editing Module for Revit MCP
 Handles element deletion, modification, and selection retrieval
 """
 
-from .utils import get_element_name, make_element_id, get_element_id_value, suppress_warnings, parse_request_data
+from .utils import get_element_name, make_element_id, get_element_id_value, suppress_warnings, parse_request_data, commit_and_report
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -150,7 +150,7 @@ def register_editing_routes(api):
             # Start transaction
             t = DB.Transaction(doc, "Modify Element via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 changes = []
@@ -224,7 +224,36 @@ def register_editing_routes(api):
                             "reason": "set failed: {}".format(str(set_err)),
                         })
 
-                t.Commit()
+                # t.Commit() can return TransactionStatus.RolledBack silently
+                # when _FailureSwallower vetoes an error-severity failure --
+                # never discard that return value and report success anyway.
+                # See debug session param-write-rolls-back.
+                commit_result = commit_and_report(t, swallower)
+
+                if not commit_result["committed"]:
+                    logger.error(
+                        "modify_element transaction did not commit "
+                        "(status={}) for element {}".format(
+                            commit_result["transaction_status"], element_id
+                        )
+                    )
+                    return routes.make_response(
+                        data={
+                            "status": "rolled_back",
+                            "element_id": element_id,
+                            "attempted_changes": changes,
+                            "failed": failed,
+                            "transaction_status": commit_result["transaction_status"],
+                            "failures": commit_result["failures"],
+                            "message": (
+                                "Parameter Set() calls succeeded in-transaction, "
+                                "but Revit rolled the transaction back at Commit() "
+                                "because of the error-severity failure(s) listed "
+                                "in 'failures'. No changes were saved to the model."
+                            ),
+                        },
+                        status=409,
+                    )
 
                 message = "Modified {} parameter{} on element {}".format(
                     len(changes),
@@ -238,6 +267,7 @@ def register_editing_routes(api):
                         "element_id": element_id,
                         "changes": changes,
                         "failed": failed,
+                        "transaction_status": commit_result["transaction_status"],
                         "message": message,
                     }
                 )

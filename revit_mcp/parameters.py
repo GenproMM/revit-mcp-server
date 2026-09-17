@@ -8,6 +8,7 @@ from .utils import (
     get_element_name, get_element_id_value, make_element_id, suppress_warnings,
     parse_request_data,
     sanitize_value,
+    commit_and_report,
 )
 from pyrevit import routes, revit, DB
 import traceback
@@ -476,7 +477,7 @@ def register_parameter_routes(api):
 
             t = DB.Transaction(doc, "Set Parameter via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 # Set value based on storage type
@@ -489,7 +490,38 @@ def register_parameter_routes(api):
                 elif param.StorageType == DB.StorageType.ElementId:
                     param.Set(make_element_id(value))
 
-                t.Commit()
+                # t.Commit() can return TransactionStatus.RolledBack silently
+                # when _FailureSwallower vetoes an error-severity failure on
+                # this element -- never discard that return value and report
+                # success anyway. See debug session param-write-rolls-back.
+                commit_result = commit_and_report(t, swallower)
+
+                if not commit_result["committed"]:
+                    logger.error(
+                        "set_parameter transaction did not commit "
+                        "(status={}) for element {} parameter '{}'".format(
+                            commit_result["transaction_status"], element_id,
+                            parameter_name,
+                        )
+                    )
+                    return routes.make_response(
+                        data={
+                            "status": "rolled_back",
+                            "element_id": int(element_id),
+                            "parameter_name": parameter_name,
+                            "old_value": old_value,
+                            "attempted_value": str(value),
+                            "transaction_status": commit_result["transaction_status"],
+                            "failures": commit_result["failures"],
+                            "message": (
+                                "Set() succeeded in-transaction, but Revit rolled "
+                                "the transaction back at Commit() because of the "
+                                "error-severity failure(s) listed in 'failures'. "
+                                "The parameter value was NOT changed."
+                            ),
+                        },
+                        status=409,
+                    )
 
                 new_value = _get_param_value_display(param, doc)
 
@@ -500,6 +532,7 @@ def register_parameter_routes(api):
                         "parameter_name": parameter_name,
                         "old_value": old_value,
                         "new_value": str(value),
+                        "transaction_status": commit_result["transaction_status"],
                         "message": "Set '{}' from '{}' to '{}' on element {}".format(
                             parameter_name, old_value, value, element_id
                         ),

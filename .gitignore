@@ -23,10 +23,10 @@ gsd-core/
 *.gsd.json
 
 # Obsidian knowledge vault (local notes, not part of the codebase)
-rvt-mcp_Obsidian/
-*_Obsidian/
-.obsidian/
-.obsidian-git/
+# rvt-mcp_Obsidian/
+# *_Obsidian/
+# .obsidian/
+# .obsidian-git/
 .trash/
 *.canvas
 workspace.json

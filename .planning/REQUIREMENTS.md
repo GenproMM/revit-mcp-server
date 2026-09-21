@@ -124,17 +124,65 @@
 
 ## Traceability
 
-Какие фазы покрывают какие требования. Заполняется при создании дорожной карты.
+Какие фазы покрывают какие требования.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (заполняется roadmapper) | | |
+| SER-01 | Phase 1 | Pending |
+| SER-02 | Phase 1 | Pending |
+| SER-03 | Phase 1 | Pending |
+| SER-04 | Phase 1 | Pending |
+| SER-05 | Phase 1 | Pending |
+| IDENT-05 | Phase 1 | Pending |
+| SEC-01 | Phase 2 | Pending |
+| SEC-02 | Phase 2 | Pending |
+| SEC-03 | Phase 2 | Pending |
+| SEC-04 | Phase 2 | Pending |
+| SEC-05 | Phase 2 | Pending |
+| SEC-06 | Phase 2 | Pending |
+| SEC-07 | Phase 2 | Pending |
+| SEC-08 | Phase 2 | Pending |
+| INTG-01 | Phase 2 | Pending |
+| INTG-02 | Phase 2 | Pending |
+| INTG-03 | Phase 2 | Pending |
+| INTG-04 | Phase 2 | Pending |
+| INTG-05 | Phase 2 | Pending |
+| INTG-06 | Phase 2 | Pending |
+| INTG-07 | Phase 2 | Pending |
+| INTG-08 | Phase 2 | Pending |
+| TRUTH-01 | Phase 3 | Pending |
+| TRUTH-02 | Phase 3 | Pending |
+| TRUTH-03 | Phase 3 | Pending |
+| TRUTH-04 | Phase 3 | Pending |
+| IDENT-01 | Phase 4 | Pending |
+| IDENT-02 | Phase 4 | Pending |
+| IDENT-03 | Phase 4 | Pending |
+| IDENT-04 | Phase 4 | Pending |
+| AMBIG-01 | Phase 4 | Pending |
+| AMBIG-02 | Phase 4 | Pending |
+| AMBIG-03 | Phase 4 | Pending |
+| AMBIG-04 | Phase 4 | Pending |
+| MDOC-01 | Phase 4 | Pending |
+| MDOC-02 | Phase 4 | Pending |
+| MDOC-03 | Phase 4 | Pending |
+| MDOC-04 | Phase 4 | Pending |
+| MDOC-05 | Phase 4 | Pending |
+| AUDIT-01 | Phase 5 | Pending |
+| AUDIT-02 | Phase 5 | Pending |
+| AUDIT-03 | Phase 5 | Pending |
+| AUDIT-04 | Phase 5 | Pending |
+| AUDIT-05 | Phase 5 | Pending |
+| AUDIT-06 | Phase 5 | Pending |
+| AUDIT-07 | Phase 5 | Pending |
+| AUDIT-08 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 42 total
-- Mapped to phases: 0
-- Unmapped: 42 ⚠️
+- v1 requirements: 47 total (corrected from an earlier 42 during roadmap creation — recounted
+  directly against the checklist items under each of the eight v1 headings above:
+  IDENT 5 + AMBIG 4 + MDOC 5 + SEC 8 + INTG 8 + SER 5 + TRUTH 4 + AUDIT 8 = 47)
+- Mapped to phases: 47
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-21*
-*Last updated: 2026-09-21 after initial definition*
+*Last updated: 2026-09-21 after roadmap creation (traceability filled, requirement count corrected)*

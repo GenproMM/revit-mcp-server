@@ -1,4 +1,6 @@
-# Phase 2: Secret gate and payload integrity (unit-verified) - Context
+# Phase 3 (was 2): Secret gate and payload integrity (unit-verified) - Context
+
+> **Renumbered 2026-09-30** (roadmap reorder, `01-CONTEXT.md` D-01): this was Phase 2. Old→new: 1→1, 2→3 (secret/integrity logic), 3→4 (honest outcomes), 4→2 (identity/ambiguity/multi-document) + 5 (live secret/integrity wiring, split out), 5→6 (audit). Phase numbers inside this document use the OLD numbering. Live enforcement is now Phase 5, not Phase 4.
 
 **Gathered:** 2026-09-23
 **Status:** Ready for planning

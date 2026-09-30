@@ -1,4 +1,4 @@
-# Phase 3: Honest outcomes on every mutating route - Discussion Log
+# Phase 4 (was 3): Honest outcomes on every mutating route - Discussion Log
 
 > **Audit trail only.** Do not use as input to planning, research, or execution agents.
 > Decisions are captured in CONTEXT.md — this log preserves the alternatives considered.

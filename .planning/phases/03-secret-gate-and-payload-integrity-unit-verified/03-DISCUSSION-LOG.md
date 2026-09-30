@@ -1,4 +1,4 @@
-# Phase 2: Secret gate and payload integrity (unit-verified) - Discussion Log
+# Phase 3 (was 2): Secret gate and payload integrity (unit-verified) - Discussion Log
 
 > **Audit trail only.** Do not use as input to planning, research, or execution agents.
 > Decisions are captured in CONTEXT.md — this log preserves the alternatives considered.

@@ -134,47 +134,47 @@
 | SER-04 | Phase 1 | Pending |
 | SER-05 | Phase 1 | Pending |
 | IDENT-05 | Phase 1 | Pending |
-| SEC-01 | Phase 2 | Pending |
-| SEC-02 | Phase 2 | Pending |
-| SEC-03 | Phase 2 | Pending |
-| SEC-04 | Phase 2 | Pending |
-| SEC-05 | Phase 2 | Pending |
-| SEC-06 | Phase 2 | Pending |
-| SEC-07 | Phase 2 | Pending |
-| SEC-08 | Phase 2 | Pending |
-| INTG-01 | Phase 2 | Pending |
-| INTG-02 | Phase 2 | Pending |
-| INTG-03 | Phase 2 | Pending |
-| INTG-04 | Phase 2 | Pending |
-| INTG-05 | Phase 2 | Pending |
-| INTG-06 | Phase 2 | Pending |
-| INTG-07 | Phase 2 | Pending |
-| INTG-08 | Phase 2 | Pending |
-| TRUTH-01 | Phase 3 | Pending |
-| TRUTH-02 | Phase 3 | Pending |
-| TRUTH-03 | Phase 3 | Pending |
-| TRUTH-04 | Phase 3 | Pending |
-| IDENT-01 | Phase 4 | Pending |
-| IDENT-02 | Phase 4 | Pending |
-| IDENT-03 | Phase 4 | Pending |
-| IDENT-04 | Phase 4 | Pending |
-| AMBIG-01 | Phase 4 | Pending |
-| AMBIG-02 | Phase 4 | Pending |
-| AMBIG-03 | Phase 4 | Pending |
-| AMBIG-04 | Phase 4 | Pending |
-| MDOC-01 | Phase 4 | Pending |
-| MDOC-02 | Phase 4 | Pending |
-| MDOC-03 | Phase 4 | Pending |
-| MDOC-04 | Phase 4 | Pending |
-| MDOC-05 | Phase 4 | Pending |
-| AUDIT-01 | Phase 5 | Pending |
-| AUDIT-02 | Phase 5 | Pending |
-| AUDIT-03 | Phase 5 | Pending |
-| AUDIT-04 | Phase 5 | Pending |
-| AUDIT-05 | Phase 5 | Pending |
-| AUDIT-06 | Phase 5 | Pending |
-| AUDIT-07 | Phase 5 | Pending |
-| AUDIT-08 | Phase 5 | Pending |
+| SEC-01 | Phase 3 | Pending |
+| SEC-02 | Phase 3 | Pending |
+| SEC-03 | Phase 3 | Pending |
+| SEC-04 | Phase 3 | Pending |
+| SEC-05 | Phase 3 | Pending |
+| SEC-06 | Phase 3 | Pending |
+| SEC-07 | Phase 3 | Pending |
+| SEC-08 | Phase 3 | Pending |
+| INTG-01 | Phase 3 | Pending |
+| INTG-02 | Phase 3 | Pending |
+| INTG-03 | Phase 3 | Pending |
+| INTG-04 | Phase 3 | Pending |
+| INTG-05 | Phase 3 | Pending |
+| INTG-06 | Phase 3 | Pending |
+| INTG-07 | Phase 3 | Pending |
+| INTG-08 | Phase 3 | Pending |
+| TRUTH-01 | Phase 4 | Pending |
+| TRUTH-02 | Phase 4 | Pending |
+| TRUTH-03 | Phase 4 | Pending |
+| TRUTH-04 | Phase 4 | Pending |
+| IDENT-01 | Phase 2 | Pending |
+| IDENT-02 | Phase 2 | Pending |
+| IDENT-03 | Phase 2 | Pending |
+| IDENT-04 | Phase 2 | Pending |
+| AMBIG-01 | Phase 2 | Pending |
+| AMBIG-02 | Phase 2 | Pending |
+| AMBIG-03 | Phase 2 | Pending |
+| AMBIG-04 | Phase 2 | Pending |
+| MDOC-01 | Phase 2 | Pending |
+| MDOC-02 | Phase 2 | Pending |
+| MDOC-03 | Phase 2 | Pending |
+| MDOC-04 | Phase 2 | Pending |
+| MDOC-05 | Phase 2 | Pending |
+| AUDIT-01 | Phase 6 | Pending |
+| AUDIT-02 | Phase 6 | Pending |
+| AUDIT-03 | Phase 6 | Pending |
+| AUDIT-04 | Phase 6 | Pending |
+| AUDIT-05 | Phase 6 | Pending |
+| AUDIT-06 | Phase 6 | Pending |
+| AUDIT-07 | Phase 6 | Pending |
+| AUDIT-08 | Phase 6 | Pending |
 
 **Coverage:**
 - v1 requirements: 47 total (corrected from an earlier 42 during roadmap creation — recounted
@@ -185,4 +185,4 @@
 
 ---
 *Requirements defined: 2026-09-21*
-*Last updated: 2026-09-21 after roadmap creation (traceability filled, requirement count corrected)*
+*Last updated: 2026-09-30 after roadmap reorder (Phase 1 discussion D-01): IDENT-01..04/AMBIG/MDOC → Phase 2, SEC/INTG → Phase 3 (logic; live enforcement in Phase 5), TRUTH → Phase 4, AUDIT → Phase 6*

@@ -1,4 +1,8 @@
-# Phase 4: Live identity, ambiguity refusal, and multi-document addressing - Context
+# Phase 2 (was 4): Live identity, ambiguity refusal, and multi-document addressing - Context
+
+> **Renumbered 2026-09-30** (roadmap reorder, `01-CONTEXT.md` D-01): this was Phase 4. Old→new: 1→1, 2→3 (secret/integrity logic), 3→4 (honest outcomes), 4→2 (identity/ambiguity/multi-document) + 5 (live secret/integrity wiring, split out), 5→6 (audit). Phase numbers inside this document use the OLD numbering.
+> **Split:** the secret-gate and integrity-check wiring decisions below (parts of D-01..D-05: secret in the `_mcp` envelope, 401/integrity checks in the POST wrapper) now belong to **Phase 5** and must not be planned here; the `document` part of the `_mcp` envelope stays in Phase 2. Move them into a Phase 5 context when Phase 5 is discussed.
+> **Open tension to resolve in a Phase 2 discussion:** D-14 ("verification, not retargeting" — addressed document must be active, else 412) vs the user's 2026-09-30 goal of comparing documents in one session without disturbing the engineer's active view. This context was produced with `--auto`; re-run `/gsd-discuss-phase 2` before planning.
 
 **Gathered:** 2026-09-23
 **Status:** Ready for planning

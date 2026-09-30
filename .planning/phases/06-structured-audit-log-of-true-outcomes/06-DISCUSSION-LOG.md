@@ -1,4 +1,4 @@
-# Phase 5: Structured audit log of true outcomes - Discussion Log
+# Phase 6 (was 5): Structured audit log of true outcomes - Discussion Log
 
 > **Audit trail only.** Do not use as input to planning, research, or execution agents.
 > Decisions are captured in CONTEXT.md — this log preserves the alternatives considered.

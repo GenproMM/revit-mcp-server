@@ -1,4 +1,6 @@
-# Phase 5: Structured audit log of true outcomes - Context
+# Phase 6 (was 5): Structured audit log of true outcomes - Context
+
+> **Renumbered 2026-09-30** (roadmap reorder, `01-CONTEXT.md` D-01): this was Phase 5. Old→new: 1→1, 2→3 (secret/integrity logic), 3→4 (honest outcomes), 4→2 (identity/ambiguity/multi-document) + 5 (live secret/integrity wiring, split out), 5→6 (audit). Phase numbers inside this document use the OLD numbering.
 
 **Gathered:** 2026-09-23
 **Status:** Ready for planning

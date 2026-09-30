@@ -1,4 +1,4 @@
-# Phase 4: Live identity, ambiguity refusal, and multi-document addressing - Discussion Log
+# Phase 2 (was 4): Live identity, ambiguity refusal, and multi-document addressing - Discussion Log
 
 > **Audit trail only.** Do not use as input to planning, research, or execution agents.
 > Decisions are captured in CONTEXT.md — this log preserves the alternatives considered.

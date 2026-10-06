@@ -145,6 +145,19 @@ cross-document half.
   `bridge.py` docstring as the rationale for what the lock buys — does not block the phase.
 - **D-24:** `python tests/test_init_latency.py` stays < 2.0 s — `bridge.py` imports nothing heavier than `httpx`.
 
+### Resolved at plan time (2026-10-06, after RESEARCH.md)
+- **D-25:** D-18 reads the **staggered** bench run as acceptance: instance B is launched only after
+  instance A answers `/status/`. D-18 fires only if the staggered launch still puts both on 48884.
+  A truly simultaneous launch is also run and its outcome recorded as a launch-order finding;
+  staggered start becomes the documented procedure for multi-instance setups.
+- **D-26:** The two-entry setup (`revit-a` / `revit-b`) is scoped to the **stdio** transport in
+  this phase — docs and live acceptance use stdio only. HTTP/SSE multi-entry needs a configurable
+  MCP listen port (hardcoded 8000) and is deferred; the docs say so explicitly.
+- **D-27:** If the D-23 experiment shows a read hijacking a pending mutation through pyRevit's
+  shared handler, execution **stops at a checkpoint for the user** — options: (a) accept and
+  document, (b) lock every API-context route and exempt only `/status/` and `/model_info/`
+  (changes SER-02's meaning), (c) Revit-side fix in a later phase. Not chosen unilaterally.
+
 ### Claude's Discretion
 - Lock primitive details and where exactly the read-only allowlist lives (a set in `bridge.py`,
   a flag at the `revit_post` call site, …), as long as D-08's fail-safe default and its unit test hold.
@@ -227,6 +240,7 @@ cross-document half.
   only if D-18 triggers or the fleet regularly runs more than two instances.
 - Runtime target-switch tool — rejected (shared state under `stateless_http`).
 - `contrib-kit/revitmcp_kit.py` with a hardcoded `48884` — separate client, not part of IDENT-05.
+- Configurable MCP listen port (hardcoded 8000) so two HTTP/SSE-transport entries can coexist — see D-26.
 
 </deferred>
 

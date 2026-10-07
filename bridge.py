@@ -145,17 +145,48 @@ async def _send(method: str, endpoint: str, data: Optional[Dict],
     return response.json() if response.status_code == 200 else "Error: {} - {}".format(response.status_code, response.text)
 
 
+def _queue_busy_message(timeout: float) -> str:
+    """The wording for a mutation that waited out its bound without being sent.
+
+    The model decides whether to retry from this text alone, so it must say in
+    so many words that nothing reached Revit. It starts with a letter after
+    "Error: " because tools/process_tools.py reads "Error: <digits>" as an HTTP
+    status.
+    """
+    return (
+        "Error: Revit queue busy - another mutation from this MCP server held "
+        "the queue for longer than this call's timeout ({}s). The request was "
+        "NOT sent to Revit: nothing was sent and nothing was changed. It is "
+        "safe to retry once the other operation has finished.".format(timeout)
+    )
+
+
 async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = None,
                       timeout: float = 30.0, params: Dict = None) -> Union[Dict, str]:
     """Internal function handling all HTTP calls.
 
     Every POST is treated as a mutation and runs inside the lock (fail-safe
     default); GET never touches it.
+
+    A locked call's wait for the lock is bounded by the call's own timeout, and
+    that bound stops applying the moment the lock is held. The request then gets
+    its full timeout counted from acquisition, so queueing never shrinks a
+    call's own budget (SER-04). Worst case is about twice the call timeout.
     """
+    budget = None  # must exist before the except clause reads it
     try:
         if method == "POST":
-            async with _get_lock():
-                return await _send(method, endpoint, data, timeout, params)
+            async with asyncio.timeout(timeout) as budget:
+                async with _get_lock():
+                    # Lock held: the wait bound no longer applies.
+                    budget.reschedule(None)
+                    return await _send(method, endpoint, data, timeout, params)
         return await _send(method, endpoint, data, timeout, params)
+    except TimeoutError:
+        # Only our own wait deadline means "queue busy"; any other TimeoutError
+        # must not be mislabelled, and tool functions rely on never seeing a raise.
+        if budget is not None and budget.expired():
+            return _queue_busy_message(timeout)
+        return "Error: TimeoutError"
     except Exception as e:
         return f"Error: {e}"

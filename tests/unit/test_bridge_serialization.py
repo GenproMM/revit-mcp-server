@@ -49,11 +49,13 @@ class _Gate(object):
 
     def __init__(self):
         self.seen = []
+        self.timeouts = {}
         self.p1_started = asyncio.Event()
         self.release = asyncio.Event()
 
     async def handler(self, request):
         self.seen.append(request.url.path)
+        self.timeouts[request.url.path] = dict(request.extensions["timeout"])
         if request.url.path.endswith("/p1/"):
             self.p1_started.set()
             await self.release.wait()
@@ -221,3 +223,66 @@ def test_port_literal_only_in_default():
 def test_port_target_attribute_on_revit_get():
     expected = "{}:{}".format(bridge.REVIT_HOST, bridge.REVIT_PORT)
     assert bridge.revit_get.revit_target == bridge.REVIT_TARGET == expected
+
+
+# --- Bounded queue wait (SER-04) ---------------------------------------------
+
+@pytest.mark.anyio
+async def test_budget_not_shrunk_by_queue_wait():
+    gate = _Gate()
+    _install_client(gate.handler)
+
+    first = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+    # The holder lets go at about 60 percent of the second call's bound.
+    asyncio.get_running_loop().call_later(0.3, gate.release.set)
+
+    second = await asyncio.wait_for(bridge.revit_post("/p2/", {}, timeout=0.5), 2.0)
+    await asyncio.wait_for(first, 1.0)
+
+    assert second == {"path": "/revit_mcp/p2/"}
+    # The wait is not subtracted: httpx got the caller's whole timeout.
+    assert gate.timeouts["/revit_mcp/p2/"] == {
+        "connect": 0.5, "read": 0.5, "write": 0.5, "pool": 0.5,
+    }
+
+
+@pytest.mark.anyio
+async def test_queue_bound_returns_not_sent_without_sending():
+    gate = _Gate()
+    _install_client(gate.handler)
+
+    first = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+
+    result = await asyncio.wait_for(bridge.revit_post("/p2/", {}, timeout=0.1), 2.0)
+
+    assert isinstance(result, str)
+    assert "NOT sent to Revit" in result
+    assert "nothing was sent" in result
+    assert "nothing was changed" in result
+    assert gate.seen == ["/revit_mcp/p1/"]
+
+    gate.release.set()
+    await asyncio.wait_for(first, 1.0)
+    assert gate.seen == ["/revit_mcp/p1/"]
+    assert bridge._get_lock().locked() is False
+
+
+@pytest.mark.anyio
+async def test_queue_bound_message_is_an_error_string():
+    from tools.utils import format_response
+
+    gate = _Gate()
+    _install_client(gate.handler)
+
+    first = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+    result = await asyncio.wait_for(bridge.revit_post("/p2/", {}, timeout=0.1), 2.0)
+    gate.release.set()
+    await asyncio.wait_for(first, 1.0)
+
+    assert result.startswith("Error: ")
+    after = result[len("Error: "):]
+    assert after and not after[0].isdigit()
+    assert format_response(result) == result

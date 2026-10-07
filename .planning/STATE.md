@@ -4,16 +4,16 @@ milestone: v0.1
 current_phase: 01
 current_phase_name: Serialization and configurable addressing
 status: executing
-stopped_at: Completed-01-03-PLAN.md
-last_updated: "2026-10-07T06:56:33.973Z"
+stopped_at: "Completed 01-04-PLAN.md (halted: d27-b re-plan)"
+last_updated: "2026-10-07T09:38:35.274Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 01 execution started
-state_head: d50d951ca0a441adb3abe15c60110c296b154935
+state_head: e44b4dd9b8f6cd5504833cbcefdbbc3b8e00df1d
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 3
+  completed_plans: 4
 milestone_name: Доверенный мост
 ---
 
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 01 (Serialization and configurable addressing) — EXECUTING
-Plan: 4 of 5
-Status: Ready to execute
+Plan: 5 of 5
+Status: Halted - re-plan required (01-04, d27-b); do not run 01-05 as written
 Last activity: 2026-10-07 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P01 | 2 min | 2 tasks | 5 files |
 | Phase 01 P02 | 3 min | 3 tasks | 2 files |
 | Phase 01 P03 | 4min | 2 tasks | 7 files |
+| Phase 01 P04 | 90min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - Phase 2 context (`--auto`, pre-reorder) must be re-discussed before planning: split-out secret wiring and the "verification, not retargeting" tension.
 - [Phase 01]: 01-01: every POST locked (fail-safe) until the read-only allowlist lands in 01-02; empty REVIT_PORT is refused, not defaulted
 - [Phase 01]: 01-02: post-send transport failures are reported as outcome UNKNOWN; only Connect/ConnectTimeout/PoolTimeout say not sent — A model that believes a maybe-applied change failed retries blindly
+- [Phase 01]: 01-04: D-18 not triggered (staggered Revit pair: PIDs 11088/35780 on 48884/48885); D-27 -> d27-b (lock every handler route, exempt only /status/, /model_info/ stays locked; d27-c Revit-side fix later); A5 -> a5-a (harness is SC5 evidence, two-entry scheme not documented for users, per-call addressing plus per-target lock go to Phase 2 IDENT-01)
 
 ### Pending Todos
 
@@ -88,6 +90,7 @@ None yet.
 - Phase 3's success criteria are unit-verified only, not live-enforced — SEC/INTG requirements only become true in the live system once Phase 5 wires them in. This is intentional (build-before-wire ordering).
 - Several implementation details need live verification before/within their phase, per research: whether `CryptographicOperations.FixedTimeEquals` exists on pyRevit's hosted CLR (Phase 3/5, SEC-04), exact `pyrevit configs routes port` CLI semantics (Phase 1, IDENT-05), what Revit's external-event queue does today with two overlapping mutating requests (Phase 1, SER scope), whether pyRevit distinguishes extension-reload from fresh-process-start (relevant if any future restore work reads this milestone's integrity findings), and Revit's native worksharing history granularity (Phase 6, AUDIT ambition).
 - Requirement count in REQUIREMENTS.md's Coverage section was stale (42) versus the actual 47 v1 requirement items; corrected during roadmap creation.
+- Phase 1 halted for re-planning after 01-04 (d27-b); run /gsd-plan-phase 1 --gaps
 
 ## Deferred Items
 
@@ -99,6 +102,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T06:56:33.931Z
-Stopped at: Completed-01-03-PLAN.md
+Last session: 2026-10-07T09:38:35.230Z
+Stopped at: Completed 01-04-PLAN.md (halted: d27-b re-plan)
 Resume file: None

@@ -286,3 +286,186 @@ async def test_queue_bound_message_is_an_error_string():
     after = result[len("Error: "):]
     assert after and not after[0].isdigit()
     assert format_response(result) == result
+
+
+# --- Release on every exit, failure honesty, wait message (SER-03, D-13, D-14) --
+
+class _Ctx(object):
+    """A fake MCP context that records info() lines, or raises from them."""
+
+    def __init__(self, fail=False):
+        self.messages = []
+        self.fail = fail
+
+    async def info(self, message):
+        if self.fail:
+            raise RuntimeError("no active request context")
+        self.messages.append(message)
+
+
+def _routing_handler(behaviours, seen=None):
+    """A MockTransport handler: path suffix -> exception to raise, else a 200."""
+
+    async def handler(request):
+        if seen is not None:
+            seen.append(request.url.path)
+        for suffix, factory in behaviours.items():
+            if request.url.path.endswith(suffix):
+                raise factory(request)
+        return httpx.Response(200, json={"path": request.url.path})
+
+    return handler
+
+
+@pytest.mark.anyio
+async def test_releases_after_handler_exception():
+    _install_client(_routing_handler({"/boom/": lambda req: RuntimeError("boom")}))
+
+    result = await bridge.revit_post("/boom/", {})
+    assert result == "Error: boom"
+    assert bridge._get_lock().locked() is False
+
+    assert await asyncio.wait_for(bridge.revit_post("/next/", {}), 1.0) == {"path": "/revit_mcp/next/"}
+
+
+@pytest.mark.anyio
+async def test_releases_after_post_send_timeout():
+    _install_client(
+        _routing_handler({"/slow/": lambda req: httpx.ReadTimeout("", request=req)})
+    )
+
+    result = await bridge.revit_post("/slow/", {})
+    assert "outcome UNKNOWN" in result
+    assert "may have been applied" in result
+    assert "Verify" in result
+    assert bridge._get_lock().locked() is False
+
+    assert await asyncio.wait_for(bridge.revit_post("/next/", {}), 1.0) == {"path": "/revit_mcp/next/"}
+
+
+@pytest.mark.anyio
+async def test_releases_after_cancellation_of_holder():
+    gate = _Gate()
+    _install_client(gate.handler)
+
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+    holder.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await holder
+
+    assert bridge._get_lock().locked() is False
+    assert await asyncio.wait_for(bridge.revit_post("/p2/", {}), 1.0) == {"path": "/revit_mcp/p2/"}
+
+
+@pytest.mark.anyio
+async def test_releases_cancelled_waiter_is_never_sent():
+    gate = _Gate()
+    _install_client(gate.handler)
+
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+    waiter = asyncio.ensure_future(bridge.revit_post("/waiter/", {}))
+    await asyncio.sleep(0.05)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    gate.release.set()
+    assert await asyncio.wait_for(holder, 1.0) == {"path": "/revit_mcp/p1/"}
+    assert gate.seen == ["/revit_mcp/p1/"]
+    assert bridge._get_lock().locked() is False
+    assert await asyncio.wait_for(bridge.revit_post("/p2/", {}), 1.0) == {"path": "/revit_mcp/p2/"}
+
+
+@pytest.mark.anyio
+async def test_releases_queued_posts_in_arrival_order():
+    gate = _Gate()
+    _install_client(gate.handler)
+
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+    queued = []
+    for name in ("q1", "q2", "q3", "q4"):
+        queued.append(asyncio.ensure_future(bridge.revit_post("/{}/".format(name), {})))
+        await asyncio.sleep(0.02)
+
+    gate.release.set()
+    await asyncio.wait_for(asyncio.gather(holder, *queued), 2.0)
+    assert gate.seen == [
+        "/revit_mcp/p1/", "/revit_mcp/q1/", "/revit_mcp/q2/", "/revit_mcp/q3/", "/revit_mcp/q4/",
+    ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "error_class",
+    [httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout],
+)
+async def test_outcome_unknown_not_claimed_on_connect_error(error_class):
+    _install_client(_routing_handler({"/x/": lambda req: error_class("", request=req)}))
+
+    result = await bridge.revit_post("/x/", {})
+    assert result.startswith("Error: ")
+    assert "was not sent to Revit" in result
+    assert "UNKNOWN" not in result
+    assert bridge._get_lock().locked() is False
+
+
+@pytest.mark.anyio
+async def test_outcome_unknown_error_text_never_empty():
+    _install_client(
+        _routing_handler({"/slow/": lambda req: httpx.ReadTimeout("", request=req)})
+    )
+
+    got = await bridge.revit_get("/slow/")
+    assert got == "Error: ReadTimeout"
+
+    posted = await bridge.revit_post("/slow/", {})
+    assert posted.startswith("Error: ")
+    assert posted[len("Error: "):].strip() != ""
+    assert not posted[len("Error: "):][0].isdigit()
+
+
+@pytest.mark.anyio
+async def test_wait_message_once_when_queued():
+    gate = _Gate()
+    _install_client(gate.handler)
+    ctx = _Ctx()
+
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+    second = asyncio.ensure_future(bridge.revit_post("/p2/", {}, ctx=ctx))
+    await asyncio.sleep(0.05)
+    assert ctx.messages == [bridge.WAIT_MESSAGE]
+
+    gate.release.set()
+    await asyncio.wait_for(asyncio.gather(holder, second), 2.0)
+    assert ctx.messages == [bridge.WAIT_MESSAGE]
+
+
+@pytest.mark.anyio
+async def test_wait_message_absent_when_free():
+    gate = _Gate()
+    _install_client(gate.handler)
+    ctx = _Ctx()
+
+    result = await asyncio.wait_for(bridge.revit_post("/p2/", {}, ctx=ctx), 1.0)
+    assert result == {"path": "/revit_mcp/p2/"}
+    assert ctx.messages == []
+
+
+@pytest.mark.anyio
+async def test_wait_message_failure_does_not_fail_call():
+    gate = _Gate()
+    _install_client(gate.handler)
+    ctx = _Ctx(fail=True)
+
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+    second = asyncio.ensure_future(bridge.revit_post("/p2/", {}, ctx=ctx))
+    await asyncio.sleep(0.05)
+    gate.release.set()
+
+    r1, r2 = await asyncio.wait_for(asyncio.gather(holder, second), 2.0)
+    assert r2 == {"path": "/revit_mcp/p2/"}

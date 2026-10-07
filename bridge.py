@@ -116,7 +116,7 @@ async def revit_image(endpoint: str, ctx: Any = None) -> Union[Any, str]:
         else:
             return f"Error: {response.status_code} - {response.text}"
     except Exception as e:
-        return f"Error: {e}"
+        return _error_text(e)
 
 
 async def _send(method: str, endpoint: str, data: Optional[Dict],
@@ -143,6 +143,59 @@ async def _send(method: str, endpoint: str, data: Optional[Dict],
         )
 
     return response.json() if response.status_code == 200 else "Error: {} - {}".format(response.status_code, response.text)
+
+
+# The only failures where the request certainly never left this process. Every
+# other transport error (ReadTimeout, WriteTimeout, ReadError,
+# RemoteProtocolError, ...) may have reached Revit before it surfaced.
+_NOT_SENT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+# The one progress line a call emits when it has to wait for the lock (D-14).
+WAIT_MESSAGE = (
+    "Waiting for the previous mutation from this MCP server to finish before "
+    "sending this one to Revit."
+)
+
+
+async def _say(ctx: Any, message: str) -> None:
+    """Best-effort progress log.
+
+    Duplicated from tools/process_tools.py: the bridge must not import tools.
+    ctx.info() raises when there is no active request context; losing a
+    progress line must never fail the call.
+    """
+    if not ctx:
+        return
+    try:
+        await ctx.info(message)
+    except Exception:
+        pass
+
+
+def _error_text(e: Exception) -> str:
+    """"Error: <reason>" that is never bare: httpx timeouts stringify to ''."""
+    return "Error: {}".format(str(e) or type(e).__name__)
+
+
+def _transport_failure_message(e: httpx.TransportError, timeout: float) -> str:
+    """Honest wording for a transport failure on a locked POST (D-13).
+
+    A pre-send failure certainly changed nothing. Anything else may have been
+    applied, and the text must never say it was not: a model that believes a
+    maybe-applied change failed will retry blindly and apply it twice. Both
+    start with a letter after "Error: " (process_tools reads digits as HTTP).
+    """
+    name = type(e).__name__
+    if isinstance(e, _NOT_SENT_ERRORS):
+        return (
+            "Error: {} - could not reach Revit at {}; the request was not sent "
+            "to Revit and nothing was changed.".format(name, REVIT_TARGET)
+        )
+    return (
+        "Error: {} - the request was sent to Revit but no complete response "
+        "arrived within {}s; outcome UNKNOWN - the change may have been applied "
+        "in Revit. Verify the model state before retrying.".format(name, timeout)
+    )
 
 
 def _queue_busy_message(timeout: float) -> str:
@@ -176,11 +229,20 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = 
     budget = None  # must exist before the except clause reads it
     try:
         if method == "POST":
+            # Emitted before the wait bound starts, so the message's own
+            # latency does not consume it. Once per call, best-effort.
+            if _get_lock().locked():
+                await _say(ctx, WAIT_MESSAGE)
             async with asyncio.timeout(timeout) as budget:
                 async with _get_lock():
                     # Lock held: the wait bound no longer applies.
                     budget.reschedule(None)
-                    return await _send(method, endpoint, data, timeout, params)
+                    try:
+                        return await _send(method, endpoint, data, timeout, params)
+                    except httpx.TransportError as e:
+                        # Returned, not raised: async with releases the lock on
+                        # every exit. Never hold it waiting for Revit (SER-03).
+                        return _transport_failure_message(e, timeout)
         return await _send(method, endpoint, data, timeout, params)
     except TimeoutError:
         # Only our own wait deadline means "queue busy"; any other TimeoutError
@@ -189,4 +251,4 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = 
             return _queue_busy_message(timeout)
         return "Error: TimeoutError"
     except Exception as e:
-        return f"Error: {e}"
+        return _error_text(e)

@@ -150,7 +150,7 @@ def test_utils_reexports_the_helpers():
 # pyRevit parses an application/json body itself and, under IronPython 3, dies
 # doing it: routes/server/server.py hands raw bytes to a 3.5-level json.loads.
 # That happens in pyRevit's own engine, which the extension cannot patch (tried
-# and measured on 2026-09-07), so main.py declares text/plain instead and the
+# and measured on 2026-09-07), so bridge.py declares text/plain instead and the
 # body arrives here unparsed. Every shape below was observed live.
 
 class _IronPython3Json(object):
@@ -274,14 +274,14 @@ def test_no_route_module_parses_the_body_by_hand():
 
 
 def test_the_client_does_not_ask_pyrevit_to_parse_the_body():
-    """main.py's content type is the other half of the contract."""
+    """bridge.py's content type is the other half of the contract."""
     import os
 
-    main_path = os.path.join(
+    bridge_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "main.py",
+        "bridge.py",
     )
-    with open(main_path, encoding="utf-8") as handle:
+    with open(bridge_path, encoding="utf-8") as handle:
         source = handle.read()
 
     post_call = source[source.index("else:  # POST"):]

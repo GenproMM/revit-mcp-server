@@ -1,12 +1,8 @@
 # -*- coding: utf-8 -*-
-import os
 import sys
-import httpx
-import json
+from bridge import revit_get, revit_post, revit_image
 import anyio
-from mcp.server.fastmcp import FastMCP, Image, Context
-import base64
-from typing import Optional, Dict, Any, Union
+from mcp.server.fastmcp import FastMCP
 
 # Create a generic MCP server for interacting with Revit
 # Use stateless_http=True and json_response=True for better compatibility
@@ -17,90 +13,6 @@ mcp = FastMCP(
     stateless_http=True,
     json_response=True
 )
-
-# Configuration
-REVIT_HOST = os.environ.get("REVIT_HOST", "localhost")
-REVIT_PORT = 48884  # Default pyRevit Routes port
-BASE_URL = f"http://{REVIT_HOST}:{REVIT_PORT}/revit_mcp"
-
-# Shared HTTP client with keep-alive connection pooling. Reusing a single
-# AsyncClient across all tool calls avoids the per-request TCP/handshake cost
-# of creating a new client each time — meaningful when a session fires dozens
-# of calls at the local Routes server.
-_http_client: Optional[httpx.AsyncClient] = None
-
-
-def _get_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(
-            base_url=BASE_URL,
-            # The MCP subprocess inherits Windows proxy settings from the
-            # desktop agent.  httpx may then send localhost traffic through
-            # that proxy unless NO_PROXY happens to be configured, which the
-            # pyRevit Routes HTTP/1.0 server surfaces as an empty ReadError.
-            # The bridge is strictly local, so environment proxies must never
-            # participate in these requests.
-            trust_env=False,
-            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
-        )
-    return _http_client
-
-
-async def revit_get(endpoint: str, ctx: Context = None, **kwargs) -> Union[Dict, str]:
-    """Simple GET request to Revit API"""
-    return await _revit_call("GET", endpoint, ctx=ctx, **kwargs)
-
-
-async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Context = None, **kwargs) -> Union[Dict, str]:
-    """Simple POST request to Revit API"""
-    return await _revit_call("POST", endpoint, data=data, ctx=ctx, **kwargs)
-
-
-async def revit_image(endpoint: str, ctx: Context = None) -> Union[Image, str]:
-    """GET request that returns an Image object"""
-    try:
-        client = _get_client()
-        response = await client.get(endpoint, timeout=60.0)
-
-        if response.status_code == 200:
-            data = response.json()
-            image_bytes = base64.b64decode(data["image_data"])
-            return Image(data=image_bytes, format="png")
-        else:
-            return f"Error: {response.status_code} - {response.text}"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Context = None, 
-                     timeout: float = 30.0, params: Dict = None) -> Union[Dict, str]:
-    """Internal function handling all HTTP calls"""
-    try:
-        client = _get_client()
-
-        if method == "GET":
-            response = await client.get(endpoint, params=params, timeout=timeout)
-        else:  # POST
-            # The body is JSON, but it is deliberately declared text/plain.
-            # pyRevit parses an application/json body itself, before any route
-            # handler runs, and that parse is broken under IronPython 3: it
-            # passes the raw bytes to a 3.5-level json.loads, which rejects them
-            # with "the JSON object must be str, not 'bytes'" and answers 500.
-            # Declaring text/plain leaves the body untouched for the route to
-            # parse -- see revit_mcp/textutils.py:parse_request_data, which is
-            # the other half of this contract.
-            response = await client.post(
-                endpoint,
-                content=json.dumps(data).encode("utf-8"),
-                headers={"Content-Type": "text/plain; charset=utf-8"},
-                timeout=timeout,
-            )
-
-        return response.json() if response.status_code == 200 else f"Error: {response.status_code} - {response.text}"
-    except Exception as e:
-        return f"Error: {e}"
-
 
 # Register all tools BEFORE the main block
 from tools import register_tools

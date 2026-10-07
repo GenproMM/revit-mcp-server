@@ -22,6 +22,13 @@ def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
         and the tools belonging to those domains will not work until Revit is
         restarted.
 
+        The last line is always "MCP target: host:port" - the pyRevit Routes
+        address this MCP server entry is configured to talk to (REVIT_HOST /
+        REVIT_PORT). It is reported even when the call fails, so a connection
+        error names the port that was tried. The port identifies a launch slot,
+        not a model: compare the "Document:" line to confirm which Revit
+        answered.
+
         Uses a short 10-second timeout, so it fails fast rather than hanging.
         If Revit itself may be closed, use get_revit_process_status instead —
         this call goes through the bridge, which only exists inside Revit.
@@ -29,8 +36,17 @@ def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
         Args:
             ctx: MCP context for logging
         """
+        # The transport is injected; its target is read off the callable so this
+        # module never imports it (D-06).
+        target = getattr(revit_get, "revit_target", None)
         response = await revit_get("/status/", ctx, timeout=10.0)
-        return format_response(response)
+        text = format_response(response)
+        if target:
+            # Appended after formatting so it survives format_response reducing
+            # a dict with a "message" key to the message alone, and so it is
+            # present on error strings (503, refused connection) too.
+            text = "{}\nMCP target: {}".format(text, target)
+        return text
 
     @mcp.tool()
     async def get_revit_model_info(ctx: Context) -> str:

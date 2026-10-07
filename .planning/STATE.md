@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 milestone: v0.1
 current_phase: 01
-current_phase_name: serialization-and-configurable-addressing
+current_phase_name: Serialization and configurable addressing
 status: executing
-stopped_at: Phase 1 context revised interactively; roadmap reordered to 6 phases
-last_updated: "2026-10-07T06:32:52.684Z"
-last_activity: 2026-09-30
-last_activity_desc: Roadmap created for milestone v0.1, 47/47 requirements mapped
-state_head: a940c94600cda5450fb73412f4cd5996a5e06fbe
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-10-07T06:48:38.199Z"
+last_activity: 2026-10-07
+last_activity_desc: Phase 01 execution started
+state_head: 5fa70da1e85190abc39ab2cf064f9f295dc92da2
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 0
+  completed_plans: 1
 milestone_name: Доверенный мост
 ---
 
@@ -24,14 +24,14 @@ milestone_name: Доверенный мост
 See: .planning/PROJECT.md (updated 2026-09-21)
 
 **Core value:** Ассистент может достоверно читать и изменять модель Revit — и инженер может доверять тому, что ответ сервера описывает то, что действительно произошло.
-**Current focus:** Phase 1 — Serialization and configurable addressing
+**Current focus:** Phase 01 — Serialization and configurable addressing
 
 ## Current Position
 
-Phase: 01 (serialization-and-configurable-addressing) — READY TO EXECUTE
-Plan: TBD — not yet planned
+Phase: 01 (Serialization and configurable addressing) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-09-30 — Phase 1 context revised with the user; roadmap reordered (old Phase 4 split into new 2 and 5)
+Last activity: 2026-10-07 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -55,6 +55,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 2 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -69,6 +74,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - ~~Live-Revit wiring converged into a single phase~~ — superseded 2026-09-30: identity/ambiguity/multi-document moved up to Phase 2 so one assistant session can address specific documents across Revit instances early; live secret/integrity wiring is Phase 5. Two restart-cycle phases accepted (Phase 1 `01-CONTEXT.md` D-01).
 - One MCP server entry = one Revit instance (`REVIT_PORT`); cross-instance work = several entries in one session (Phase 1 D-02/D-03). If the two-Revit bench shows no port auto-increment, stop and revisit addressing (D-18).
 - Phase 2 context (`--auto`, pre-reorder) must be re-discussed before planning: split-out secret wiring and the "verification, not retargeting" tension.
+- [Phase 01]: 01-01: every POST locked (fail-safe) until the read-only allowlist lands in 01-02; empty REVIT_PORT is refused, not defaulted
 
 ### Pending Todos
 
@@ -90,6 +96,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-23T18:52:14.357Z
-Stopped at: Phases 1-5 context gathered (--auto, recommended decisions)
-Resume file: .planning/phases/01-serialization-and-configurable-addressing/01-CONTEXT.md
+Last session: 2026-10-07T06:48:38.161Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None

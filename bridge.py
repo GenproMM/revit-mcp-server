@@ -17,10 +17,39 @@ import asyncio
 import httpx
 from typing import Optional, Dict, Any, Union
 
-# Configuration
+DEFAULT_REVIT_PORT = 48884  # Default pyRevit Routes port
+
+
+class RevitConfigError(ValueError):
+    """The deployment configuration names no usable Revit target."""
+
+
+def _resolve_port(value: Optional[str]) -> int:
+    """Strictly parse REVIT_PORT.
+
+    None (variable unset) is the default. Anything else must be an ASCII
+    integer in 1..65535; an empty or malformed value is refused rather than
+    defaulted, because a typo must never land a mutation on a different Revit
+    instance.
+    """
+    if value is None:
+        return DEFAULT_REVIT_PORT
+    text = str(value).strip()
+    if not (text.isascii() and text.isdigit()):
+        raise RevitConfigError(
+            "REVIT_PORT must be an integer in 1..65535, got {!r}".format(value)
+        )
+    port = int(text)
+    if not 1 <= port <= 65535:
+        raise RevitConfigError("REVIT_PORT out of range 1..65535: {}".format(port))
+    return port
+
+
+# Configuration. Read once at import: one Revit target per MCP server process.
 REVIT_HOST = os.environ.get("REVIT_HOST", "localhost")
-REVIT_PORT = 48884  # Default pyRevit Routes port
+REVIT_PORT = _resolve_port(os.environ.get("REVIT_PORT"))
 BASE_URL = f"http://{REVIT_HOST}:{REVIT_PORT}/revit_mcp"
+REVIT_TARGET = "{}:{}".format(REVIT_HOST, REVIT_PORT)
 
 # Shared HTTP client with keep-alive connection pooling. Reusing a single
 # AsyncClient across all tool calls avoids the per-request TCP/handshake cost
@@ -60,6 +89,11 @@ def _get_lock() -> asyncio.Lock:
 async def revit_get(endpoint: str, ctx: Any = None, **kwargs) -> Union[Dict, str]:
     """Simple GET request to Revit API"""
     return await _revit_call("GET", endpoint, ctx=ctx, **kwargs)
+
+
+# Seam read with getattr by the status tool: tool modules never import the
+# transport, and the registrar signature is pinned by scripts/conventions.py.
+revit_get.revit_target = REVIT_TARGET
 
 
 async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None, **kwargs) -> Union[Dict, str]:

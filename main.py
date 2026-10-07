@@ -1,6 +1,15 @@
 # -*- coding: utf-8 -*-
 import sys
-from bridge import revit_get, revit_post, revit_image
+try:
+    from bridge import revit_get, revit_post, revit_image
+except ValueError as exc:
+    # Refuse rather than fall back: a mistyped REVIT_PORT must never route
+    # mutations to a different Revit instance. stderr only -- stdout is the
+    # stdio protocol stream.
+    sys.stderr.write(
+        "revit-mcp: refusing to start: {} (no fallback to the default port)\n".format(exc)
+    )
+    sys.exit(2)
 import anyio
 from mcp.server.fastmcp import FastMCP
 

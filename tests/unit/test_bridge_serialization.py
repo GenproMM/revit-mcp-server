@@ -117,3 +117,107 @@ def test_main_delegates_transport_to_bridge():
     assert "from bridge import revit_get, revit_post, revit_image" in source
     assert "def _revit_call" not in source
     assert "def _get_client" not in source
+
+
+# --- REVIT_PORT (IDENT-05) ---------------------------------------------------
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (None, 48884),
+        ("48885", 48885),
+        (" 48885 ", 48885),
+        ("1", 1),
+        ("65535", 65535),
+    ],
+)
+def test_port_accepts(value, expected):
+    assert bridge._resolve_port(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        " ",
+        "abc",
+        "0",
+        "65536",
+        "-1",
+        "+1",
+        "48884.0",
+        "4_8884",
+        "0x10",
+        u"٤٨٨٨٤",  # Arabic-Indic digits
+    ],
+)
+def test_port_refuses(value):
+    assert issubclass(bridge.RevitConfigError, ValueError)
+    with pytest.raises(bridge.RevitConfigError):
+        bridge._resolve_port(value)
+
+
+def test_port_reaches_base_url():
+    env = dict(os.environ)
+    env["REVIT_HOST"] = "127.0.0.1"
+    env["REVIT_PORT"] = "48885"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import bridge; print(bridge.BASE_URL); print(bridge.revit_get.revit_target)",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.split()
+    assert lines == ["http://127.0.0.1:48885/revit_mcp", "127.0.0.1:48885"]
+
+
+def test_port_refusal_writes_stderr_only():
+    env = dict(os.environ)
+    env["REVIT_PORT"] = "abc"
+    result = subprocess.run(
+        [sys.executable, "main.py"],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+    )
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert b"REVIT_PORT" in result.stderr
+    assert b"refusing to start" in result.stderr
+
+
+def test_port_literal_only_in_default():
+    import ast
+
+    with open(os.path.join(REPO_ROOT, "bridge.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+
+    allowed = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if "DEFAULT_REVIT_PORT" in names:
+                allowed.add(id(node.value))
+
+    offenders = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and node.value == 48884
+        and id(node) not in allowed
+    ]
+    assert offenders == [], "literal 48884 outside DEFAULT_REVIT_PORT at lines {}".format(offenders)
+
+
+def test_port_target_attribute_on_revit_get():
+    expected = "{}:{}".format(bridge.REVIT_HOST, bridge.REVIT_PORT)
+    assert bridge.revit_get.revit_target == bridge.REVIT_TARGET == expected

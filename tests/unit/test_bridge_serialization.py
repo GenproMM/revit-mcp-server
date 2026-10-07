@@ -469,3 +469,118 @@ async def test_wait_message_failure_does_not_fail_call():
 
     r1, r2 = await asyncio.wait_for(asyncio.gather(holder, second), 2.0)
     assert r2 == {"path": "/revit_mcp/p2/"}
+
+
+# --- Read-only POST allowlist (SER-02, D-08, D-09) -----------------------------
+
+_FIVE_READ_ONLY = {
+    "ai_filter",
+    "material_quantities",
+    "clash_check",
+    "list_category_parameters",
+    "model_worksets",
+}
+
+
+def _tool_post_endpoints():
+    """Every literal revit_post("/route/") endpoint in tools/*.py, as route keys."""
+    import glob
+    import re
+
+    pattern = re.compile(r'revit_post\(\s*"(/[^"]+)"')
+    keys = set()
+    for path in glob.glob(os.path.join(REPO_ROOT, "tools", "*.py")):
+        with open(path, encoding="utf-8") as handle:
+            for match in pattern.finditer(handle.read()):
+                keys.add(bridge._route_key(match.group(1)))
+    # A scan that finds nothing would pass every assertion below vacuously.
+    assert len(keys) >= 30, "drift scan found only {} endpoints".format(len(keys))
+    return keys
+
+
+def test_allowlist_is_exactly_the_five_read_only_routes():
+    assert set(bridge.READ_ONLY_POST) == _FIVE_READ_ONLY
+
+
+def test_allowlist_never_contains_execute_open_save():
+    assert set(bridge.NEVER_UNLOCKED) == {"execute_code", "open_model", "save_document"}
+    assert set(bridge.READ_ONLY_POST).isdisjoint(bridge.NEVER_UNLOCKED)
+
+
+def test_allowlist_never_unlocked_routes_stay_locked_even_if_listed(monkeypatch):
+    monkeypatch.setattr(
+        bridge,
+        "READ_ONLY_POST",
+        frozenset(set(bridge.READ_ONLY_POST) | set(bridge.NEVER_UNLOCKED)),
+    )
+    for route in ("execute_code", "open_model", "save_document"):
+        assert bridge._is_locked("POST", "/{}/".format(route)) is True
+
+
+def test_allowlist_unknown_post_is_locked():
+    for endpoint in ("/made_up_route/", "made_up_route", "/made_up_route/?x=1"):
+        assert bridge._is_locked("POST", endpoint) is True
+    for endpoint in ("/ai_filter/", "ai_filter", "/ai_filter/?x=1"):
+        assert bridge._is_locked("POST", endpoint) is False
+
+
+def test_allowlist_get_is_never_locked():
+    endpoints = ["/status/", "/made_up_route/", "/execute_code/", "/open_model/", "/save_document/"]
+    endpoints += ["/{}/".format(route) for route in _FIVE_READ_ONLY]
+    for endpoint in endpoints:
+        assert bridge._is_locked("GET", endpoint) is False
+
+
+def test_allowlist_entries_are_real_tool_endpoints():
+    posted = _tool_post_endpoints()
+    for route in set(bridge.READ_ONLY_POST) | set(bridge.NEVER_UNLOCKED):
+        assert route in posted, "{} is not posted to by any tool".format(route)
+
+
+def test_allowlist_every_other_tool_post_is_locked():
+    for route in _tool_post_endpoints():
+        expected_locked = route not in bridge.READ_ONLY_POST
+        assert bridge._is_locked("POST", "/{}/".format(route)) is expected_locked, route
+
+
+@pytest.mark.anyio
+async def test_image_reads_pass_while_locked():
+    import base64
+
+    gate = _Gate()
+    original = gate.handler
+
+    async def handler(request):
+        if "/get_view/" in request.url.path:
+            payload = base64.b64encode(b"\x89PNG-bytes").decode("ascii")
+            return httpx.Response(200, json={"image_data": payload})
+        return await original(request)
+
+    _install_client(handler)
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+
+    image = await asyncio.wait_for(bridge.revit_image("/get_view/Level 1"), 1.0)
+    assert not isinstance(image, str), image
+
+    gate.release.set()
+    await asyncio.wait_for(holder, 1.0)
+
+
+@pytest.mark.anyio
+async def test_allowlisted_post_reads_pass_while_locked():
+    gate = _Gate()
+    _install_client(gate.handler)
+    ctx = _Ctx()
+
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+
+    plain = await asyncio.wait_for(bridge.revit_post("/ai_filter/", {}, ctx=ctx), 1.0)
+    queried = await asyncio.wait_for(bridge.revit_post("/ai_filter/?x=1", {}), 1.0)
+    assert plain == {"path": "/revit_mcp/ai_filter/"}
+    assert queried == {"path": "/revit_mcp/ai_filter/"}
+    assert ctx.messages == []  # it never waited, so it never said it would
+
+    gate.release.set()
+    await asyncio.wait_for(holder, 1.0)

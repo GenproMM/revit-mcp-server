@@ -145,6 +145,44 @@ async def _send(method: str, endpoint: str, data: Optional[Dict],
     return response.json() if response.status_code == 200 else "Error: {} - {}".format(response.status_code, response.text)
 
 
+# POST routes that opt OUT of the mutation lock because their Revit-side handler
+# opens no Transaction and changes no session state. Adding a route here
+# requires reading its handler in revit_mcp/ to confirm both, and updating
+# test_allowlist_is_exactly_the_five_read_only_routes. Unlocked reads still pass
+# through pyRevit's single shared request handler: this server does not queue
+# them behind mutations, which is not the same as reads being isolated from
+# them (plan 01-04 measures that).
+READ_ONLY_POST = frozenset({
+    "ai_filter",
+    "material_quantities",
+    "clash_check",
+    "list_category_parameters",
+    "model_worksets",
+})
+
+# Never unlockable, even by a mistaken edit of READ_ONLY_POST: arbitrary code
+# can mutate anything, and open/save change session state (D-09).
+NEVER_UNLOCKED = frozenset({"execute_code", "open_model", "save_document"})
+
+
+def _route_key(endpoint: str) -> str:
+    """"/ai_filter/?x=1" -> "ai_filter": tolerate query strings and slashes."""
+    return endpoint.split("?", 1)[0].strip("/")
+
+
+def _is_locked(method: str, endpoint: str) -> bool:
+    """Whether a call must wait its turn in the mutation queue.
+
+    Fail-safe: an unclassified POST waits rather than racing. GET never locks.
+    """
+    if method != "POST":
+        return False
+    key = _route_key(endpoint)
+    if key in NEVER_UNLOCKED:
+        return True
+    return key not in READ_ONLY_POST
+
+
 # The only failures where the request certainly never left this process. Every
 # other transport error (ReadTimeout, WriteTimeout, ReadError,
 # RemoteProtocolError, ...) may have reached Revit before it surfaced.
@@ -219,7 +257,7 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = 
     """Internal function handling all HTTP calls.
 
     Every POST is treated as a mutation and runs inside the lock (fail-safe
-    default); GET never touches it.
+    default) unless its route is on the read-only allowlist; GET never touches it.
 
     A locked call's wait for the lock is bounded by the call's own timeout, and
     that bound stops applying the moment the lock is held. The request then gets
@@ -228,7 +266,7 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = 
     """
     budget = None  # must exist before the except clause reads it
     try:
-        if method == "POST":
+        if _is_locked(method, endpoint):
             # Emitted before the wait bound starts, so the message's own
             # latency does not consume it. Once per call, best-effort.
             if _get_lock().locked():

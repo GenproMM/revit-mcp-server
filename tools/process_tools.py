@@ -182,8 +182,17 @@ def register_process_tools(mcp, revit_get, revit_post=None, revit_image=None):
         Limitations: launches on the machine the MCP server runs on, which is the
         user's own workstation. It cannot open a model that needs credentials, and
         it cannot dismiss a startup dialog - if Revit stops on one, the wait times
-        out. Only one Revit is started; a second instance would bind a different
-        Routes port and be unreachable anyway.
+        out.
+
+        Which Revit this means: the call probes and waits on this MCP entry's
+        own Routes port (REVIT_PORT, default 48884). On an entry configured for
+        another port it therefore launches a new Revit even while one is
+        already running on 48884. pyRevit gives each new Revit the first port
+        not already registered by a running Revit, counting up from 48884, so
+        start instances one at a time, each after the previous one answers, or
+        two can end up sharing 48884. If no Revit holds 48884, a Revit launched
+        from an entry configured for 48885 takes 48884 and this call waits
+        until its timeout.
 
         Args:
             version: Revit release to launch, e.g. "2027". Defaults to the newest

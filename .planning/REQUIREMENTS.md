@@ -56,8 +56,8 @@
 
 - [ ] **SER-01**: Мутирующие вызовы этого MCP-сервера не уходят в Revit параллельно
 - [ ] **SER-02**: Удержание очереди мутацией не блокирует `/status/` и читающие вызовы
-- [ ] **SER-03**: Исключение, таймаут или отмена внутри сериализованного участка освобождают очередь
-- [ ] **SER-04**: Ожидание в очереди не приводит к тому, что вызов получает меньше своего бюджета времени
+- [x] **SER-03**: Исключение, таймаут или отмена внутри сериализованного участка освобождают очередь
+- [x] **SER-04**: Ожидание в очереди не приводит к тому, что вызов получает меньше своего бюджета времени
 - [ ] **SER-05**: Область действия сериализации документирована честно — она покрывает вызовы этого процесса и не является гарантией против второго клиента
 
 ### Честный результат (TRUTH)
@@ -130,8 +130,8 @@
 |-------------|-------|--------|
 | SER-01 | Phase 1 | Pending |
 | SER-02 | Phase 1 | Pending |
-| SER-03 | Phase 1 | Pending |
-| SER-04 | Phase 1 | Pending |
+| SER-03 | Phase 1 | Complete |
+| SER-04 | Phase 1 | Complete |
 | SER-05 | Phase 1 | Pending |
 | IDENT-05 | Phase 1 | Pending |
 | SEC-01 | Phase 3 | Pending |
@@ -177,6 +177,7 @@
 | AUDIT-08 | Phase 6 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 47 total (corrected from an earlier 42 during roadmap creation — recounted
   directly against the checklist items under each of the eight v1 headings above:
   IDENT 5 + AMBIG 4 + MDOC 5 + SEC 8 + INTG 8 + SER 5 + TRUTH 4 + AUDIT 8 = 47)

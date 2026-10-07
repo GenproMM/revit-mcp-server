@@ -55,7 +55,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. Setting `REVIT_PORT` changes which port this server talks to, exercised live with two Revit instances started together: each of 48884 and 48885 has exactly one listener with a different PID, and one assistant session with two MCP entries gets each entry's own `host:port` and `document_title` from `get_revit_status`. If both instances land on 48884, the phase is not accepted and addressing is revisited before Phase 2.
   6. The documented scope of serialization is explicit and honest: it covers calls issued through this one process only; it is not represented anywhere as a guarantee against a second client, curl, or `/execute_code/` called directly.
 
-**Plans:** 1/5 plans executed
+**Plans:** 2/5 plans executed
 
 Plans:
 **Wave 1**
@@ -64,7 +64,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md — bounded queue wait with full send budget, honest not-sent / outcome-unknown errors, read-only allowlist (wave 2)
+- [x] 01-02-PLAN.md — bounded queue wait with full send budget, honest not-sent / outcome-unknown errors, read-only allowlist (wave 2)
 - [ ] 01-03-PLAN.md — `get_revit_status` names its target, two-entry harness, payload ships `bridge.py` (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -165,7 +165,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Serialization and configurable addressing | 1/5 | In Progress|  |
+| 1. Serialization and configurable addressing | 2/5 | In Progress|  |
 | 2. Live identity, ambiguity refusal, and multi-document addressing | 0/TBD | Not started | - |
 | 3. Secret gate and payload integrity (unit-verified) | 0/TBD | Not started | - |
 | 4. Honest outcomes on every mutating route | 0/TBD | Not started | - |

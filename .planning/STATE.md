@@ -4,16 +4,16 @@ milestone: v0.1
 current_phase: 01
 current_phase_name: Serialization and configurable addressing
 status: executing
-stopped_at: Completed 01-08-PLAN.md
-last_updated: "2026-10-14T08:11:35.241Z"
+stopped_at: Completed 01-06-PLAN.md
+last_updated: "2026-10-14T08:16:23.321Z"
 last_activity: 2026-10-14
 last_activity_desc: Phase 01 execution started
-state_head: d77b18461e2b7ae3dbe7408264cca115065207ae
+state_head: c739b571fe4877db71baec99285fbcdfc04dd8d5
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
 milestone_name: Доверенный мост
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 ## Current Position
 
 Phase: 01 (Serialization and configurable addressing) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-10-14 — Phase 01 execution started
 
@@ -64,6 +64,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P03 | 4min | 2 tasks | 7 files |
 | Phase 01 P04 | 90min | 3 tasks | 2 files |
 | Phase 01 P08 | 15 min | 3 tasks | 6 files |
+| Phase 01 P06 | 4 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 01]: 01-02: post-send transport failures are reported as outcome UNKNOWN; only Connect/ConnectTimeout/PoolTimeout say not sent — A model that believes a maybe-applied change failed retries blindly
 - [Phase 01]: 01-04: D-18 not triggered (staggered Revit pair: PIDs 11088/35780 on 48884/48885); D-27 -> d27-b (lock every handler route, exempt only /status/, /model_info/ stays locked; d27-c Revit-side fix later); A5 -> a5-a (harness is SC5 evidence, two-entry scheme not documented for users, per-call addressing plus per-target lock go to Phase 2 IDENT-01)
 - [Phase 01]: D-28 (d27-b narrowed): every call through pyRevit's handler takes the lock, only GET /status/ exempt; D-29 (a5-a): two-instance harness is SC5 evidence, per-call target selection and per-target lock move to Phase 2; D-30: d27-c is backlog item 999.1; D-31: plan 01-05 superseded — 01-04 bench measured cross-wired mutation and read in pyRevit's shared handler; user decisions at the 01-04 gate and the re-planning run
+- [Phase 01]: 01-06: d27-b applied - every call from this process except GET /status/ takes the lock; revit_image shares the _serialized path; /model_info/ stays locked until its overlap is measured live — 01-04 bench measured cross-wired-read and cross-wired-mutation through pyRevit's shared handler
 
 ### Pending Todos
 
@@ -104,6 +106,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T08:11:35.192Z
-Stopped at: Completed 01-08-PLAN.md
+Last session: 2026-10-14T08:16:13.395Z
+Stopped at: Completed 01-06-PLAN.md
 Resume file: None

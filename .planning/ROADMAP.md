@@ -55,7 +55,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. Setting `REVIT_PORT` changes which port this server talks to, exercised live with two Revit instances started one after the other: each of 48884 and 48885 has exactly one listener with a different PID, and two stdio server processes (the two-instance harness `tests/test_two_instance_targets.py`) each get their own `host:port` and `document_title` from `get_revit_status`; per decision a5-a the harness stands in for the original one-session two-entry check, because users share one `revit` entry and cannot copy it, so a two-entry session is not a user-facing setup. If a staggered start puts both instances on 48884, the phase is not accepted and addressing is revisited before Phase 2.
   6. The documented scope of serialization is explicit and honest: it covers calls issued through this one server process only; it is not represented anywhere as a guarantee against another MCP server process (a second assistant session), curl, or `/execute_code/` called directly; and the docs say overlapping sessions against one Revit can still cross-wire until backlog item 999.1 (d27-c) lands.
 
-**Plans:** 5/7 plans executed (01-05 superseded)
+**Plans:** 6/7 plans executed (01-05 superseded)
 
 Plans:
 **Wave 1**
@@ -78,7 +78,7 @@ Plans:
 **Gap closure after the 01-04 bench** *(run with `/gsd-execute-phase 1 --gaps-only`)*
 
 - [x] 01-08-PLAN.md — planning record: SER-02 narrowed, ROADMAP SC2/SC5/SC6, Phase 2 per-target lock note, d27-c in Backlog, debug lead (gap, wave 1)
-- [ ] 01-06-PLAN.md — d27-b in `bridge.py`: every call except GET `/status/` takes the lock (`/model_info/`, GET reads, `revit_image` included); D-08 allowlist removed (gap, wave 3)
+- [x] 01-06-PLAN.md — d27-b in `bridge.py`: every call except GET `/status/` takes the lock (`/model_info/`, GET reads, `revit_image` included); D-08 allowlist removed (gap, wave 3)
 - [ ] 01-07-PLAN.md — honest-scope docs pinned by tests: process-local lock, only `/status/` unlocked, cross-wiring until d27-c, `REVIT_PORT` as a deployment setting (gap, wave 4, after 01-06 and 01-08)
 
 ### Phase 2: Live identity, ambiguity refusal, and multi-document addressing
@@ -172,7 +172,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Serialization and configurable addressing | 5/7 | In Progress|  |
+| 1. Serialization and configurable addressing | 6/7 | In Progress|  |
 | 2. Live identity, ambiguity refusal, and multi-document addressing | 0/TBD | Not started | - |
 | 3. Secret gate and payload integrity (unit-verified) | 0/TBD | Not started | - |
 | 4. Honest outcomes on every mutating route | 0/TBD | Not started | - |

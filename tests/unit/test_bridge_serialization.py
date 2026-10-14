@@ -83,7 +83,7 @@ async def test_second_post_waits_for_the_first():
 
 
 @pytest.mark.anyio
-async def test_get_reads_pass_while_locked():
+async def test_status_passes_while_locked():
     gate = _Gate()
     _install_client(gate.handler)
 
@@ -471,9 +471,11 @@ async def test_wait_message_failure_does_not_fail_call():
     assert r2 == {"path": "/revit_mcp/p2/"}
 
 
-# --- Read-only POST allowlist (SER-02, D-08, D-09) -----------------------------
+# --- Lock coverage (d27-b, D-09) -----------------------------------------------
+# On the 01-04 bench overlapping requests through pyRevit's shared request
+# handler were cross-wired, so every call takes the lock except GET /status/.
 
-_FIVE_READ_ONLY = {
+_FORMER_READ_ONLY_POST = {
     "ai_filter",
     "material_quantities",
     "clash_check",
@@ -498,49 +500,54 @@ def _tool_post_endpoints():
     return keys
 
 
-def test_allowlist_is_exactly_the_five_read_only_routes():
-    assert set(bridge.READ_ONLY_POST) == _FIVE_READ_ONLY
-
-
-def test_allowlist_never_contains_execute_open_save():
+def test_unlocked_is_exactly_get_status():
+    assert bridge.UNLOCKED_GET == frozenset({"status"})
+    assert not hasattr(bridge, "READ_ONLY_POST")
     assert set(bridge.NEVER_UNLOCKED) == {"execute_code", "open_model", "save_document"}
-    assert set(bridge.READ_ONLY_POST).isdisjoint(bridge.NEVER_UNLOCKED)
+    assert set(bridge.NEVER_UNLOCKED).isdisjoint(bridge.UNLOCKED_GET)
 
 
-def test_allowlist_never_unlocked_routes_stay_locked_even_if_listed(monkeypatch):
+def test_unlocked_status_forms_are_unlocked_for_get_only():
+    for endpoint in ("/status/", "status", "/status/?verbose=true"):
+        assert bridge._is_locked("GET", endpoint) is False, endpoint
+        assert bridge._is_locked("POST", endpoint) is True, endpoint
+        assert bridge._is_locked("PUT", endpoint) is True, endpoint
+
+
+def test_unlocked_model_info_is_locked():
+    # Not measured on the 01-04 bench, so it stays behind the lock.
+    assert bridge._is_locked("GET", "/model_info/") is True
+
+
+def test_unlocked_former_allowlist_routes_are_locked():
+    for route in sorted(_FORMER_READ_ONLY_POST):
+        for endpoint in ("/{}/".format(route), "/{}/?x=1".format(route)):
+            assert bridge._is_locked("POST", endpoint) is True, endpoint
+
+
+def test_unlocked_get_reads_are_locked():
+    for endpoint in ("/list_levels/", "/element_properties/123", "/model_info/"):
+        assert bridge._is_locked("GET", endpoint) is True, endpoint
+
+
+def test_unlocked_never_unlocked_stay_locked_even_if_listed(monkeypatch):
     monkeypatch.setattr(
         bridge,
-        "READ_ONLY_POST",
-        frozenset(set(bridge.READ_ONLY_POST) | set(bridge.NEVER_UNLOCKED)),
+        "UNLOCKED_GET",
+        frozenset(set(bridge.UNLOCKED_GET) | set(bridge.NEVER_UNLOCKED)),
     )
     for route in ("execute_code", "open_model", "save_document"):
-        assert bridge._is_locked("POST", "/{}/".format(route)) is True
+        for method in ("GET", "POST"):
+            assert bridge._is_locked(method, "/{}/".format(route)) is True, (method, route)
 
 
-def test_allowlist_unknown_post_is_locked():
-    for endpoint in ("/made_up_route/", "made_up_route", "/made_up_route/?x=1"):
-        assert bridge._is_locked("POST", endpoint) is True
-    for endpoint in ("/ai_filter/", "ai_filter", "/ai_filter/?x=1"):
-        assert bridge._is_locked("POST", endpoint) is False
-
-
-def test_allowlist_get_is_never_locked():
-    endpoints = ["/status/", "/made_up_route/", "/execute_code/", "/open_model/", "/save_document/"]
-    endpoints += ["/{}/".format(route) for route in _FIVE_READ_ONLY]
-    for endpoint in endpoints:
-        assert bridge._is_locked("GET", endpoint) is False
-
-
-def test_allowlist_entries_are_real_tool_endpoints():
-    posted = _tool_post_endpoints()
-    for route in set(bridge.READ_ONLY_POST) | set(bridge.NEVER_UNLOCKED):
-        assert route in posted, "{} is not posted to by any tool".format(route)
-
-
-def test_allowlist_every_other_tool_post_is_locked():
-    for route in _tool_post_endpoints():
-        expected_locked = route not in bridge.READ_ONLY_POST
-        assert bridge._is_locked("POST", "/{}/".format(route)) is expected_locked, route
+def test_unlocked_unknown_empty_and_prefix_routes_are_locked():
+    for method in ("GET", "POST"):
+        for endpoint in (
+            "/made_up_route/", "made_up_route", "/made_up_route/?x=1",
+            "/", "", "/status_report/", "/status/extra/",
+        ):
+            assert bridge._is_locked(method, endpoint) is True, (method, endpoint)
 
 
 @pytest.mark.anyio
@@ -568,7 +575,24 @@ async def test_image_reads_pass_while_locked():
 
 
 @pytest.mark.anyio
-async def test_allowlisted_post_reads_pass_while_locked():
+async def test_get_read_waits_while_locked():
+    gate = _Gate()
+    _install_client(gate.handler)
+
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+
+    read = asyncio.ensure_future(bridge.revit_get("/list_levels/"))
+    await asyncio.sleep(0.05)
+    assert "/revit_mcp/list_levels/" not in gate.seen
+
+    gate.release.set()
+    await asyncio.wait_for(asyncio.gather(holder, read), 2.0)
+    assert gate.seen == ["/revit_mcp/p1/", "/revit_mcp/list_levels/"]
+
+
+@pytest.mark.anyio
+async def test_former_allowlist_post_waits_while_locked():
     gate = _Gate()
     _install_client(gate.handler)
     ctx = _Ctx()
@@ -576,11 +600,65 @@ async def test_allowlisted_post_reads_pass_while_locked():
     holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
     await asyncio.wait_for(gate.p1_started.wait(), 1.0)
 
-    plain = await asyncio.wait_for(bridge.revit_post("/ai_filter/", {}, ctx=ctx), 1.0)
-    queried = await asyncio.wait_for(bridge.revit_post("/ai_filter/?x=1", {}), 1.0)
-    assert plain == {"path": "/revit_mcp/ai_filter/"}
-    assert queried == {"path": "/revit_mcp/ai_filter/"}
-    assert ctx.messages == []  # it never waited, so it never said it would
+    waiting = asyncio.ensure_future(bridge.revit_post("/ai_filter/", {}, ctx=ctx))
+    await asyncio.sleep(0.05)
+    assert "/revit_mcp/ai_filter/" not in gate.seen
+    assert ctx.messages == [bridge.WAIT_MESSAGE]
 
     gate.release.set()
-    await asyncio.wait_for(holder, 1.0)
+    await asyncio.wait_for(asyncio.gather(holder, waiting), 2.0)
+    assert gate.seen == ["/revit_mcp/p1/", "/revit_mcp/ai_filter/"]
+    assert ctx.messages == [bridge.WAIT_MESSAGE]
+
+
+@pytest.mark.anyio
+async def test_get_post_send_failure_is_not_outcome_unknown():
+    # A read changes nothing, so its failure is never a possibly-applied change.
+    _install_client(
+        _routing_handler({"/slow/": lambda req: httpx.ReadTimeout("", request=req)})
+    )
+
+    result = await bridge.revit_get("/slow/")
+    assert result == "Error: ReadTimeout"
+    assert "UNKNOWN" not in result
+    assert bridge._get_lock().locked() is False
+
+
+class _FakeMCP(object):
+    """Collects the functions registered through @mcp.tool()."""
+
+    def __init__(self):
+        self.tools = {}
+
+    def tool(self):
+        def decorator(func):
+            self.tools[func.__name__] = func
+            return func
+
+        return decorator
+
+
+@pytest.mark.anyio
+async def test_d27b_tool_path_model_info_waits_status_does_not():
+    from tools.status_tools import register_status_tools
+
+    gate = _Gate()
+    _install_client(gate.handler)
+
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+
+    mcp = _FakeMCP()
+    register_status_tools(mcp, bridge.revit_get)
+
+    status = await asyncio.wait_for(mcp.tools["get_revit_status"](None), 1.0)
+    assert status.splitlines()[-1].startswith("MCP target: ")
+    assert "/revit_mcp/status/" in gate.seen
+
+    info = asyncio.ensure_future(mcp.tools["get_revit_model_info"](None))
+    await asyncio.sleep(0.05)
+    assert "/revit_mcp/model_info/" not in gate.seen
+
+    gate.release.set()
+    await asyncio.wait_for(asyncio.gather(holder, info), 2.0)
+    assert gate.seen.index("/revit_mcp/p1/") < gate.seen.index("/revit_mcp/model_info/")

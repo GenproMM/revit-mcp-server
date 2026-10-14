@@ -31,7 +31,7 @@ instead of one, and the `startup.py` chokepoint is touched twice.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Serialization and configurable addressing** - Every call from this server except `/status/` queues instead of racing, `/status/` stays responsive throughout, and the Revit port this server talks to is a deployment setting instead of a hardcoded constant — one server process per Revit instance; choosing a Revit per call is Phase 2
+- [x] **Phase 1: Serialization and configurable addressing** - Every call from this server except `/status/` queues instead of racing, `/status/` stays responsive throughout, and the Revit port this server talks to is a deployment setting instead of a hardcoded constant — one server process per Revit instance; choosing a Revit per call is Phase 2 (completed 2026-10-14)
 - [ ] **Phase 2: Live identity, ambiguity refusal, and multi-document addressing** - Every response names the document and process that handled it, two listeners on one port produce an explicit refusal instead of a coin-flip, and an engineer can list, address, and switch between documents open in one Revit session
 - [ ] **Phase 3: Secret gate and payload integrity (unit-verified)** - The shared-secret compare and the file-manifest integrity check are built and unit-tested on both runtimes, plus the build pipeline that generates the secret and the manifest, ready to wire in
 - [ ] **Phase 4: Honest outcomes on every mutating route** - Every mutating route, including the two known stragglers, reports what actually happened in Revit rather than an assumed success
@@ -55,7 +55,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. Setting `REVIT_PORT` changes which port this server talks to, exercised live with two Revit instances started one after the other: each of 48884 and 48885 has exactly one listener with a different PID, and two stdio server processes (the two-instance harness `tests/test_two_instance_targets.py`) each get their own `host:port` and `document_title` from `get_revit_status`; per decision a5-a the harness stands in for the original one-session two-entry check, because users share one `revit` entry and cannot copy it, so a two-entry session is not a user-facing setup. If a staggered start puts both instances on 48884, the phase is not accepted and addressing is revisited before Phase 2.
   6. The documented scope of serialization is explicit and honest: it covers calls issued through this one server process only; it is not represented anywhere as a guarantee against another MCP server process (a second assistant session), curl, or `/execute_code/` called directly; and the docs say overlapping sessions against one Revit can still cross-wire until backlog item 999.1 (d27-c) lands.
 
-**Plans:** 7/7 plans executed (01-05 superseded)
+**Plans:** 7/7 plans complete
 
 Plans:
 **Wave 1**
@@ -172,7 +172,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Serialization and configurable addressing | 7/7 | In Progress|  |
+| 1. Serialization and configurable addressing | 7/7 | Complete    | 2026-10-14 |
 | 2. Live identity, ambiguity refusal, and multi-document addressing | 0/TBD | Not started | - |
 | 3. Secret gate and payload integrity (unit-verified) | 0/TBD | Not started | - |
 | 4. Honest outcomes on every mutating route | 0/TBD | Not started | - |

@@ -1,19 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.1
-current_phase: 01
-current_phase_name: Serialization and configurable addressing
-status: executing
-stopped_at: Completed 01-07-PLAN.md
-last_updated: "2026-10-14T08:22:21.865Z"
+current_phase: 02
+current_phase_name: Live identity, ambiguity refusal, and multi-document addressing
+status: planning
+stopped_at: Phase 1 complete, ready to plan Phase 02
+last_updated: "2026-10-14T11:46:12.753Z"
 last_activity: 2026-10-14
-last_activity_desc: Phase 01 execution started
-state_head: 804b4981d274d1470341910e9dc9f77fc63ce6e8
+last_activity_desc: Phase 1 complete, transitioned to Phase 02
+state_head: dcae56d868fe7eba6d32ee99124c666e2640bf93
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 7
   completed_plans: 7
+  percent: 17
 milestone_name: Доверенный мост
 ---
 
@@ -21,25 +22,25 @@ milestone_name: Доверенный мост
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-21)
+See: .planning/PROJECT.md (updated 2026-10-14)
 
 **Core value:** Ассистент может достоверно читать и изменять модель Revit — и инженер может доверять тому, что ответ сервера описывает то, что действительно произошло.
-**Current focus:** Phase 01 — Serialization and configurable addressing
+**Current focus:** Phase 02 — Live identity, ambiguity refusal, and multi-document addressing
 
 ## Current Position
 
-Phase: 01 (Serialization and configurable addressing) — EXECUTING
-Plan: 7 of 7 (01-05 superseded; 01-04 halted/summarised)
-Status: All plans executed; ready for phase verification
-Last activity: 2026-10-14 — Completed 01-07-PLAN.md
+Phase: 02 — Live identity, ambiguity refusal, and multi-document addressing
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-14 — Phase 1 complete, transitioned to Phase 02
 
-Progress: [██████████] 100%
+Progress: [██░░░░░░░░] 17%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 7
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -47,7 +48,7 @@ Progress: [██████████] 100%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 1 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -78,7 +79,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - Two-listener detection stays in v0.1 (Phase 2) despite research suggesting v1.x — it is load-bearing for the still-open `param-write-rolls-back` investigation.
 - TRUTH (Phase 4) is a hard prerequisite for AUDIT (Phase 6), not parallel work — an audit log built on unmigrated routes would encode the same silent-success lie it exists to catch.
 - ~~Live-Revit wiring converged into a single phase~~ — superseded 2026-09-30: identity/ambiguity/multi-document moved up to Phase 2 so one assistant session can address specific documents across Revit instances early; live secret/integrity wiring is Phase 5. Two restart-cycle phases accepted (Phase 1 `01-CONTEXT.md` D-01).
-- One MCP server entry = one Revit instance (`REVIT_PORT`); cross-instance work = several entries in one session (Phase 1 D-02/D-03). If the two-Revit bench shows no port auto-increment, stop and revisit addressing (D-18).
+- ~~One MCP server entry = one Revit instance (`REVIT_PORT`); cross-instance work = several entries in one session (Phase 1 D-02/D-03)~~ — superseded by a5-a (D-29): users share one `revit` entry; per-call target selection and a per-target lock are Phase 2 (IDENT-01). D-18 was not triggered.
 - Phase 2 context (`--auto`, pre-reorder) must be re-discussed before planning: split-out secret wiring and the "verification, not retargeting" tension.
 - [Phase 01]: 01-01: every POST locked (fail-safe) until the read-only allowlist lands in 01-02; empty REVIT_PORT is refused, not defaulted
 - [Phase 01]: 01-02: post-send transport failures are reported as outcome UNKNOWN; only Connect/ConnectTimeout/PoolTimeout say not sent — A model that believes a maybe-applied change failed retries blindly
@@ -96,7 +97,10 @@ None yet.
 - Phase 3's success criteria are unit-verified only, not live-enforced — SEC/INTG requirements only become true in the live system once Phase 5 wires them in. This is intentional (build-before-wire ordering).
 - Several implementation details need live verification before/within their phase, per research: whether `CryptographicOperations.FixedTimeEquals` exists on pyRevit's hosted CLR (Phase 3/5, SEC-04), exact `pyrevit configs routes port` CLI semantics (Phase 1, IDENT-05), what Revit's external-event queue does today with two overlapping mutating requests (Phase 1, SER scope), whether pyRevit distinguishes extension-reload from fresh-process-start (relevant if any future restore work reads this milestone's integrity findings), and Revit's native worksharing history granularity (Phase 6, AUDIT ambition).
 - Requirement count in REQUIREMENTS.md's Coverage section was stale (42) versus the actual 47 v1 requirement items; corrected during roadmap creation.
-- Phase 1 halted for re-planning after 01-04 (d27-b); run /gsd-plan-phase 1 --gaps
+- [Phase 1] Cross-process overlap (two assistant sessions, curl, direct `/execute_code/` against one Revit) still cross-wires — backlog 999.1 (d27-c).
+- [Phase 1] WR-01 (`01-REVIEW.md`): a POST answered 200 with an unparseable body returns a bare `Error: Expecting value ...` instead of outcome-UNKNOWN wording; fix before Phase 4 builds on this transport. WR-03: `REVIT_HOST` is not validated.
+- [Phase 1] UAT 2026-10-14 recorded pass for the pyRevit 6.5.5 overlap probe, `/model_info/` under overlap, simultaneous launch and a cross-version pair, but no verdicts, port/PID mapping or output were captured; `bridge.py` still says 6.5.5 was not benched and `/model_info/` stays locked. Record the measurements before anyone proposes unlocking a route.
+- [Phase 1] On the dev workstation `%APPDATA%\pyRevit\Extensions\revit-mcp.extension` is a plain directory (pyRevit 6.5.3), not the junction CLAUDE.md describes — live tests there run the last deployed copy, not the repo.
 
 ## Deferred Items
 
@@ -109,5 +113,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-14T08:22:21.816Z
-Stopped at: Completed 01-07-PLAN.md
+Stopped at: Phase 1 complete, ready to plan Phase 02
 Resume file: None

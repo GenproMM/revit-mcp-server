@@ -102,22 +102,25 @@ async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None, **kwa
     return await _revit_call("POST", endpoint, data=data, ctx=ctx, **kwargs)
 
 
-async def revit_image(endpoint: str, ctx: Any = None) -> Union[Any, str]:
-    """GET request that returns an Image object"""
-    try:
-        from mcp.server.fastmcp import Image
+async def revit_image(endpoint: str, ctx: Any = None, timeout: float = 60.0) -> Union[Any, str]:
+    """GET request that returns an Image object.
+
+    Runs through the same bounded-wait lock path as every other call (d27-b).
+    """
+
+    async def fetch() -> Union[Any, str]:
+        from mcp.server.fastmcp import Image  # inside: keeps cold start cheap (D-24)
 
         client = _get_client()
-        response = await client.get(endpoint, timeout=60.0)
+        response = await client.get(endpoint, timeout=timeout)
 
         if response.status_code == 200:
             data = response.json()
             image_bytes = base64.b64decode(data["image_data"])
             return Image(data=image_bytes, format="png")
-        else:
-            return f"Error: {response.status_code} - {response.text}"
-    except Exception as e:
-        return _error_text(e)
+        return "Error: {} - {}".format(response.status_code, response.text)
+
+    return await _serialized("GET", endpoint, ctx, timeout, fetch)
 
 
 async def _send(method: str, endpoint: str, data: Optional[Dict],
@@ -186,8 +189,8 @@ _NOT_SENT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 # The one progress line a call emits when it has to wait for the lock (D-14).
 WAIT_MESSAGE = (
-    "Waiting for the previous mutation from this MCP server to finish before "
-    "sending this one to Revit."
+    "A previous Revit call from this MCP server is still running; this call "
+    "will be sent to Revit after it finishes."
 )
 
 
@@ -233,7 +236,7 @@ def _transport_failure_message(e: httpx.TransportError, timeout: float) -> str:
 
 
 def _queue_busy_message(timeout: float) -> str:
-    """The wording for a mutation that waited out its bound without being sent.
+    """The wording for a call that waited out its bound without being sent.
 
     The model decides whether to retry from this text alone, so it must say in
     so many words that nothing reached Revit. It starts with a letter after
@@ -241,18 +244,19 @@ def _queue_busy_message(timeout: float) -> str:
     status.
     """
     return (
-        "Error: Revit queue busy - another mutation from this MCP server held "
-        "the queue for longer than this call's timeout ({}s). The request was "
+        "Error: Revit queue busy - another call from this MCP server held the "
+        "queue for longer than this call's timeout ({}s). The request was "
         "NOT sent to Revit: nothing was sent and nothing was changed. It is "
         "safe to retry once the other operation has finished.".format(timeout)
     )
 
 
-async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = None,
-                      timeout: float = 30.0, params: Dict = None) -> Union[Dict, str]:
-    """Internal function handling all HTTP calls.
+async def _serialized(method: str, endpoint: str, ctx: Any, timeout: float,
+                      send: Any) -> Union[Dict, str, Any]:
+    """The one bounded-wait lock path, shared by _revit_call and revit_image.
 
-    Every call except GET /status/ runs inside the lock (d27-b).
+    ``send`` is a zero-argument coroutine function performing exactly one HTTP
+    exchange. Every call except GET /status/ runs inside the lock (d27-b).
 
     A locked call's wait for the lock is bounded by the call's own timeout, and
     that bound stops applying the moment the lock is held. The request then gets
@@ -271,7 +275,7 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = 
                     # Lock held: the wait bound no longer applies.
                     budget.reschedule(None)
                     try:
-                        return await _send(method, endpoint, data, timeout, params)
+                        return await send()
                     except httpx.TransportError as e:
                         # Returned, not raised: async with releases the lock on
                         # every exit. Never hold it waiting for Revit (SER-03).
@@ -280,7 +284,7 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = 
                         if method == "POST":
                             return _transport_failure_message(e, timeout)
                         return _error_text(e)
-        return await _send(method, endpoint, data, timeout, params)
+        return await send()
     except TimeoutError:
         # Only our own wait deadline means "queue busy"; any other TimeoutError
         # must not be mislabelled, and tool functions rely on never seeing a raise.
@@ -289,3 +293,16 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = 
         return "Error: TimeoutError"
     except Exception as e:
         return _error_text(e)
+
+
+async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = None,
+                      timeout: float = 30.0, params: Dict = None) -> Union[Dict, str]:
+    """Internal function handling all HTTP calls.
+
+    Every call except GET /status/ runs inside the lock (d27-b); see _serialized.
+    """
+
+    async def send() -> Union[Dict, str]:
+        return await _send(method, endpoint, data, timeout, params)
+
+    return await _serialized(method, endpoint, ctx, timeout, send)

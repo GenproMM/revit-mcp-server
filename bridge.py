@@ -2,9 +2,10 @@
 """The single HTTP exit from this MCP server to pyRevit Routes.
 
 CPython side only. Every tool reaches Revit through the three callables defined
-here, which main.py injects into the tool registrars. Mutating POSTs issued
-through this process are serialized behind one module-global lock, because the
-Revit API is single-threaded; GET requests never take the lock.
+here, which main.py injects into the tool registrars. Every call issued
+through this process except GET /status/ is serialized behind one module-global
+lock, because pyRevit's shared request handler cross-wires overlapping requests
+(d27-b, plan 01-04 bench).
 
 This module must not import mcp at module level: it is imported on the cold
 start path and has to stay cheap.
@@ -145,22 +146,17 @@ async def _send(method: str, endpoint: str, data: Optional[Dict],
     return response.json() if response.status_code == 200 else "Error: {} - {}".format(response.status_code, response.text)
 
 
-# POST routes that opt OUT of the mutation lock because their Revit-side handler
-# opens no Transaction and changes no session state. Adding a route here
-# requires reading its handler in revit_mcp/ to confirm both, and updating
-# test_allowlist_is_exactly_the_five_read_only_routes. Unlocked reads still pass
-# through pyRevit's single shared request handler: this server does not queue
-# them behind mutations, which is not the same as reads being isolated from
-# them (plan 01-04 measures that).
-READ_ONLY_POST = frozenset({
-    "ai_filter",
-    "material_quantities",
-    "clash_check",
-    "list_category_parameters",
-    "model_worksets",
-})
+# The only GET routes that opt OUT of the lock. On the 01-04 bench (2026-10-07,
+# pyRevit 6.5.3) overlapping requests through pyRevit's shared request handler
+# were cross-wired (cross-wired-mutation and cross-wired-read), so every call
+# takes the lock except GET /status/, whose handler takes no doc and runs on
+# pyRevit's HTTP thread (measured unaffected). /model_info/ also takes no doc
+# but stays locked because its overlap was not measured. Adding a key needs a
+# live overlap measurement with scripts/probe_handler_overlap.py, the user's
+# decision, and an update to test_unlocked_is_exactly_get_status.
+UNLOCKED_GET = frozenset({"status"})
 
-# Never unlockable, even by a mistaken edit of READ_ONLY_POST: arbitrary code
+# Never unlockable, even by a mistaken edit of UNLOCKED_GET: arbitrary code
 # can mutate anything, and open/save change session state (D-09).
 NEVER_UNLOCKED = frozenset({"execute_code", "open_model", "save_document"})
 
@@ -171,16 +167,16 @@ def _route_key(endpoint: str) -> str:
 
 
 def _is_locked(method: str, endpoint: str) -> bool:
-    """Whether a call must wait its turn in the mutation queue.
+    """Whether a call must wait its turn in the queue.
 
-    Fail-safe: an unclassified POST waits rather than racing. GET never locks.
+    False only for a GET whose route key is in UNLOCKED_GET (that is, GET
+    /status/). Fail-safe: every other route and method, including unknown ones,
+    waits rather than racing. NEVER_UNLOCKED is checked first (D-09).
     """
-    if method != "POST":
-        return False
     key = _route_key(endpoint)
     if key in NEVER_UNLOCKED:
         return True
-    return key not in READ_ONLY_POST
+    return not (method == "GET" and key in UNLOCKED_GET)
 
 
 # The only failures where the request certainly never left this process. Every
@@ -256,8 +252,7 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = 
                       timeout: float = 30.0, params: Dict = None) -> Union[Dict, str]:
     """Internal function handling all HTTP calls.
 
-    Every POST is treated as a mutation and runs inside the lock (fail-safe
-    default) unless its route is on the read-only allowlist; GET never touches it.
+    Every call except GET /status/ runs inside the lock (d27-b).
 
     A locked call's wait for the lock is bounded by the call's own timeout, and
     that bound stops applying the moment the lock is held. The request then gets
@@ -280,7 +275,11 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = 
                     except httpx.TransportError as e:
                         # Returned, not raised: async with releases the lock on
                         # every exit. Never hold it waiting for Revit (SER-03).
-                        return _transport_failure_message(e, timeout)
+                        # A read changes nothing, so only a POST may claim an
+                        # unknown outcome (D-13).
+                        if method == "POST":
+                            return _transport_failure_message(e, timeout)
+                        return _error_text(e)
         return await _send(method, endpoint, data, timeout, params)
     except TimeoutError:
         # Only our own wait deadline means "queue busy"; any other TimeoutError

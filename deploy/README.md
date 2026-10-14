@@ -6,9 +6,9 @@ its workstations, only an SMB share and a per-user pyRevit install.
 ## Why the MCP server cannot live on the server
 
 `revit_mcp/` is a set of pyRevit Routes handlers running **inside the Revit
-process**, serving `127.0.0.1:48884`. `main.py` fixes `BASE_URL` once at import
-from `REVIT_HOST` (`main.py:21-23`), so one server process serves exactly one
-Revit workstation. Pointing a central instance at users' machines would need
+process**, serving `127.0.0.1:48884`. `bridge.py` fixes `BASE_URL` once at import
+from `REVIT_HOST` and `REVIT_PORT`, so one server process serves exactly one
+Revit instance on one workstation. Pointing a central instance at users' machines would need
 per-request host routing, Routes bound to `0.0.0.0` everywhere, and an auth
 layer on both hops — while `/execute_code/` is unauthenticated arbitrary
 IronPython with full `doc`/`DB`/`clr` access.
@@ -27,7 +27,7 @@ and update point, not a runtime.**
 ├─ payload\                        mirrored to workstations
 │   ├─ VERSION                     written LAST by build-payload.cmd
 │   ├─ ENGINE                      pyRevit CPython the wheels were built for
-│   ├─ app\                        main.py, tools\, server.py, libs\, gate.py, warm.py
+│   ├─ app\                        main.py, bridge.py, tools\, server.py, libs\, gate.py, warm.py
 │   ├─ install-libs\               ruamel.yaml, for the installer only
 │   └─ configure_hermes.py
 └─ install\  install.cmd, update.cmd, find-python.cmd
@@ -193,6 +193,14 @@ goes in the `env:` block; Hermes runs `python.exe` directly.
 **`REVIT_HOST` is pinned to `127.0.0.1`, not `localhost`.** Routes binds IPv4
 only; on an IPv6-enabled image `localhost` resolves `::1` first and every call
 eats a failed connect.
+
+**`REVIT_PORT` is a deployment knob.** Default 48884. `configure_hermes.py`
+registers one `revit` entry on the default port and is unchanged; engineers share
+that entry and do not add or copy entries. An invalid value makes `server.py`
+exit 2 with the reason on stderr (visible in the Hermes MCP log). Reaching a
+second Revit per call is a later phase.
+Overlapping sessions against one Revit can still cross-wire until d27-c lands.
+Each assistant session runs its own server process and the lock is per process.
 
 **Never launch `main.py` directly.** It is `server.py` that injects `sys.path`;
 `python.exe main.py` under the embeddable interpreter dies on `import mcp`.

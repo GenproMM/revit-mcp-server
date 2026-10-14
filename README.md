@@ -7,7 +7,7 @@ Works with any MCP client: Claude Desktop, Claude Code, Cursor, Windsurf, Copilo
 ## How It Works
 
 ```
-AI Client ──stdio/SSE/HTTP──> MCP Server (Python/FastMCP) ──HTTP :48884──> pyRevit Routes ──> Revit API
+AI Client ──stdio/SSE/HTTP──> MCP Server (Python/FastMCP) ──HTTP :REVIT_PORT (default 48884)──> pyRevit Routes ──> Revit API
 ```
 
 The MCP server runs on your machine and communicates with Revit through pyRevit's Routes API. Any MCP-compatible AI client can connect to it.
@@ -121,6 +121,33 @@ Add to your MCP config:
   }
 }
 ```
+
+### Configuration
+
+The pyRevit Routes address this one server process talks to is set with two optional
+environment variables, supplied through an `env` block in the same entry:
+
+```json
+"env": { "REVIT_HOST": "127.0.0.1", "REVIT_PORT": "48884" }
+```
+
+- `REVIT_HOST` — default `localhost`; use `127.0.0.1` where IPv6 is enabled.
+- `REVIT_PORT` — default `48884`.
+
+Both are read once, when the server starts (in `bridge.py`). An invalid `REVIT_PORT` stops the
+server with a message on stderr instead of falling back to another port. One server process
+talks to one Revit. This is a deployment setting, not a way to add a second Revit to a session;
+choosing a Revit instance per call is planned for a later phase.
+
+### Serialization scope
+
+Serialization covers calls issued through this one MCP server process only.
+Only /status/ skips the queue: every other call to Revit, reads included, waits for the lock.
+Overlapping sessions against one Revit can still cross-wire until d27-c lands.
+
+The lock does not cover another MCP server process (for example a second assistant session,
+which runs its own server process), curl, or `/execute_code/` called directly. A call that timed
+out on the client may still be running in Revit, and the next call can overlap it.
 
 ### Cursor / Windsurf / Other MCP Clients
 
@@ -254,7 +281,7 @@ Two runtimes communicate over HTTP:
 
 | Component | Runtime | Location | Purpose |
 |-----------|---------|----------|---------|
-| `main.py` + `tools/` | Python 3.11+ (CPython) | Your machine | MCP protocol, tool definitions |
+| `main.py` + `bridge.py` + `tools/` | Python 3.11+ (CPython) | Your machine | MCP protocol, tool definitions |
 | `startup.py` + `revit_mcp/` | IronPython 2.7 (inside Revit) | Revit process | pyRevit route handlers, Revit API |
 
 ## Multi-Version Revit Support

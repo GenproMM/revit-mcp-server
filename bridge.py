@@ -2,10 +2,68 @@
 """The single HTTP exit from this MCP server to pyRevit Routes.
 
 CPython side only. Every tool reaches Revit through the three callables defined
-here, which main.py injects into the tool registrars. Every call issued
-through this process except GET /status/ is serialized behind one module-global
-lock, because pyRevit's shared request handler cross-wires overlapping requests
-(d27-b, plan 01-04 bench).
+here (revit_get, revit_post, revit_image); main.py only wires them into the tool
+registrars. Tool modules never import this module.
+
+Scope
+-----
+Serialization covers calls issued through this one MCP server process only.
+Another MCP server process is not covered: each assistant session runs its own
+server process, so a second session (or a second entry) has its own lock. Nor
+are curl or /execute_code/ called directly. The lock is harm reduction for the
+calls this process makes; it is not a correctness guarantee against other
+clients and it is not access control (D-15).
+Overlapping sessions against one Revit can still cross-wire until d27-c lands.
+The Revit-side fix is backlog item 999.1 in .planning/ROADMAP.md (D-30).
+
+Lock coverage
+-------------
+Only /status/ skips the queue: every other call to Revit, reads included, waits for the lock.
+/status/ is exempt because its handler takes no doc and pyRevit serves it on its
+HTTP thread, off the shared request handler (measured 0.01-0.02 s while the
+handler was busy for about 4 s). /model_info/ also takes no doc, but it stays
+locked because its overlap was not measured. A route joins UNLOCKED_GET only
+with a live overlap measurement and the user's decision (D-28).
+
+Why the lock exists
+-------------------
+pyRevit Routes shares one request handler object across its HTTP threads and
+assigns the pending request without a lock. The overlap experiment of
+2026-10-07 (pyRevit 6.5.3, two Revit 2024.3.30 instances,
+scripts/probe_handler_overlap.py, run twice with identical verdicts) returned
+phase M verdict cross-wired-mutation: the overlapped mutation answered 200 with
+the other caller's output and its own body never ran. Phase R verdict
+cross-wired-read: a read returned the mutation's output. So the lock is a
+correctness mechanism for every call that enters the handler, not only for
+mutations (d27-b). pyRevit 6.5.5 was not benched.
+
+Residual
+--------
+A call the client gave up on may still be running in Revit. The lock is
+released anyway so that the queue never sticks (D-13, SER-03), and the next
+call can overlap the abandoned one inside pyRevit's handler.
+
+Time budget
+-----------
+A call's wait for the lock is bounded by its own timeout. The request timeout
+starts once the lock is held, so queueing never shrinks a call's own budget and
+the worst case is about twice the timeout. A slow read, such as a clash check,
+delays a mutation queued behind it, and the other way round (D-11).
+
+Failure wording
+---------------
+A busy queue or a failed connect says the request was NOT sent to Revit. After a
+POST was sent, a failure says the outcome is UNKNOWN. A read's failure is
+reported plainly, because a read changes nothing. The lock is never held while
+waiting for Revit (D-13).
+
+Target
+------
+REVIT_HOST and REVIT_PORT are read once at import. An invalid REVIT_PORT makes
+the server refuse to start. One process means one target; the port names a
+launch slot, not a model. REVIT_PORT is a deployment and development setting:
+users share one revit entry and do not add entries. Choosing a Revit per call,
+with one lock per target, is Phase 2 (D-29).
 
 This module must not import mcp at module level: it is imported on the cold
 start path and has to stay cheap.

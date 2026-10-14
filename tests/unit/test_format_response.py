@@ -151,7 +151,7 @@ def test_empty_dict_reports_success_rather_than_an_error():
 # Routes that mutate the model answer HTTP 409 with status="rolled_back" when
 # Revit silently rolls the transaction back at Commit(). These tests pin the
 # path that makes that visible to the model, because it is load-bearing and
-# non-obvious: _revit_call (main.py) collapses EVERY non-200 to an
+# non-obvious: _revit_call (bridge.py) collapses EVERY non-200 to an
 # "Error: <code> - <body>" string, so a rolled-back write reaches
 # format_response as a string and passes through verbatim -- failures included.
 #

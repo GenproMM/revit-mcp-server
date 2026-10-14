@@ -9,7 +9,7 @@ communicate over local HTTP. Mixing their idioms is the single most common way t
 
 | Side | Files | Runtime | Rules |
 |------|-------|---------|-------|
-| MCP server | `main.py`, `tools/`, `tests/` | CPython ≥3.11 (dev pin 3.13) | async/await, f-strings, `list[str]`, type hints |
+| MCP server | `main.py`, `bridge.py`, `tools/`, `tests/` | CPython ≥3.11 (dev pin 3.13) | async/await, f-strings, `list[str]`, type hints |
 | Revit extension | `startup.py`, `revit_mcp/` | IronPython **3** inside pyRevit/Revit | `"{}".format(x)`, **no** f-strings, no `async`, no `pathlib`, no modern typing |
 
 The Revit half ran under IronPython 2.7 until 2026-09-07; pyRevit now attaches
@@ -69,13 +69,14 @@ Routes Server enabled — check `http://localhost:48884/revit_mcp/status/` in a 
 ## Architecture
 
 ```
-MCP client ──stdio/SSE/HTTP──> main.py + tools/ ──HTTP :48884──> startup.py + revit_mcp/ ──> Revit API
-             (CPython, async)                    (IronPython, sync, in Revit process)
+MCP client ──stdio/SSE/HTTP──> main.py + bridge.py + tools/ ──HTTP :REVIT_PORT (48884)──> startup.py + revit_mcp/ ──> Revit API
+             (CPython, async)                                  (IronPython, sync, in Revit process)
 ```
 
-`main.py` builds the `FastMCP` server, owns the one pooled `httpx.AsyncClient`, and exposes
-`revit_get` / `revit_post` / `revit_image`. Those three callables are **injected** into every
-tool registrar — tool modules never import the transport.
+`main.py` builds the `FastMCP` server and wires the tools. `bridge.py` owns the one pooled
+`httpx.AsyncClient` and the lock, and exposes `revit_get` / `revit_post` / `revit_image`. Those
+three callables are **injected** into every tool registrar — tool modules never import the
+transport. The `bridge.py` module docstring is the full statement of what the lock covers.
 
 Mirroring by domain: `revit_mcp/clash.py` ⇄ `tools/clash_tools.py`. Each side has one
 registration entry point (`register_<domain>_routes(api)` / `register_<domain>_tools(mcp, revit_get, revit_post, revit_image=None)`).
@@ -132,7 +133,7 @@ IronPython 3: `routes/server/server.py` hands the raw bytes from `rfile.read()` 
 Every POST route then returns 500 with nothing reaching Revit. The extension cannot patch
 it — the routes server runs in its own IronPython engine with its own module table, so a
 patch installed from `startup.py` lands on a different copy of that module (measured live,
-2026-09-07). So `main.py` sends `Content-Type: text/plain; charset=utf-8` and handlers call
+2026-09-07). So `bridge.py` sends `Content-Type: text/plain; charset=utf-8` and handlers call
 `parse_request_data(request.data)` (`revit_mcp/textutils.py`), which takes bytes, str or
 dict. Never hand-roll the parse: `scripts/conventions.py` and `tests/unit/` reject
 `json.loads(request.data)`, and any client that still sends `application/json` — curl
@@ -152,7 +153,7 @@ real shipped bug (commit `c1231f6`) that hid valid data behind an `=== ERROR DET
 coerces exceptions to `"Error: …"` strings, so a bridge result may be `dict` or `str` — never
 index one directly.
 
-**Never `print()` in `main.py` under stdio transport** — it corrupts the protocol stream. The
+**Never `print()` in `main.py` or `bridge.py` under stdio transport** — it corrupts the protocol stream. The
 one existing `print` is guarded to `--combined` mode. Revit-side logging goes through
 `logger = logging.getLogger(__name__)`; tool-side progress uses `await ctx.info(...)` guarded by `if ctx:`.
 
@@ -170,8 +171,29 @@ parameter including `ctx`. `check_clashes` in `tools/clash_tools.py` is the refe
 
 ## Known sharp edges
 
-- Port `48884` is hardcoded; only the host is configurable (`REVIT_HOST`, defaults to `localhost`).
-- `_revit_call` uses one 30s timeout for everything — a clash check shares a status ping's budget.
+- The Routes target is `REVIT_HOST` (default `localhost`) plus `REVIT_PORT` (default `48884`), read
+  once at import in `bridge.py`. An invalid `REVIT_PORT` (non-digit, empty, outside 1..65535) makes
+  the server exit 2 with a message on stderr; there is no fallback to another port. It is a
+  deployment and development setting: users share the one `revit` entry that `configure_hermes.py`
+  registers and do not add entries. Choosing a Revit per call is Phase 2.
+- `_revit_call` (in `bridge.py`) uses a 30s default timeout. Every call except `GET /status/` may
+  first wait up to its own timeout in the queue, so the worst case is about twice the timeout, and
+  a slow read such as a clash check now delays a mutation queued behind it, and the other way round.
+- **Serialization scope.** The three sentences below are pinned verbatim by `tests/unit/test_serialization_scope_docs.py`, so each stays on one line.
+  Serialization covers calls issued through this one MCP server process only.
+  Only /status/ skips the queue: every other call to Revit, reads included, waits for the lock.
+  Overlapping sessions against one Revit can still cross-wire until d27-c lands.
+  The Revit-side fix is backlog item 999.1 in `.planning/ROADMAP.md`. Not covered: another MCP server process (each assistant session runs
+  its own), curl, and `/execute_code/` called directly; the lock is harm reduction, not access
+  control. Residual: a call the client gave up on may still be running in Revit, the lock is
+  released anyway, and the next call can overlap it inside pyRevit's handler. The basis is the 01-04
+  overlap experiment (2026-10-07, pyRevit 6.5.3, `cross-wired-mutation` and `cross-wired-read`).
+  A new route needs nothing for serialization: it is locked by default. Adding one to
+  `UNLOCKED_GET` in `bridge.py` needs a live overlap measurement with
+  `scripts/probe_handler_overlap.py`, the user's decision, and the test update. See the
+  `bridge.py` module docstring for the full statement.
+- `_revit_call` wording note: a busy queue or a failed connect says the request was not sent; a POST
+  that failed after sending says the outcome is unknown.
 - Bulk routes catch per-element exceptions, `continue`, and still report `"status": "success"`; the count is the only hint that elements were skipped.
 - `/execute_code/` is unauthenticated arbitrary IronPython with full `doc`/`DB`/`clr`/`System` access. It is the de-facto fallback for missing tools — prefer promoting a snippet into a typed route.
 - `revit_mcp/colors.py` is 1246 lines (twice the next largest). Split by route before adding to it.
@@ -202,6 +224,10 @@ parameter including `ctx`. `check_clashes` in `tools/clash_tools.py` is the refe
   OS picks. Open a model in one and the other answers `No active Revit document`. Check
   `Get-NetTCPConnection -LocalPort 48884 -State Listen` returns exactly one row before
   trusting any live result; note Revit Accelerator can start a second instance by itself.
+  On the 2026-10-07 bench a second Revit started after the first had answered `/status/` took
+  `48885` (two PIDs, one listener each); a simultaneous launch was not measured. pyRevit hands out
+  ports by checking other running Revit processes' registrations, not by an OS bind check, so
+  simultaneous starts or a Revit Accelerator pre-warm can still collide.
 - Launching Revit with a workshared model on the command line pops the **workset selection
   dialog**, which blocks the headless routes server forever. Boot Revit with no model and
   open through `/open_model/`, which supplies a `WorksetConfiguration` and so never prompts.

@@ -31,7 +31,7 @@ instead of one, and the `startup.py` chokepoint is touched twice.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Serialization and configurable addressing** - Mutating calls from this server queue instead of racing, `/status/` stays responsive throughout, and the Revit port this server talks to is no longer hardcoded — one MCP entry per Revit instance, several entries usable in one session
+- [ ] **Phase 1: Serialization and configurable addressing** - Every call from this server except `/status/` queues instead of racing, `/status/` stays responsive throughout, and the Revit port this server talks to is a deployment setting instead of a hardcoded constant — one server process per Revit instance; choosing a Revit per call is Phase 2
 - [ ] **Phase 2: Live identity, ambiguity refusal, and multi-document addressing** - Every response names the document and process that handled it, two listeners on one port produce an explicit refusal instead of a coin-flip, and an engineer can list, address, and switch between documents open in one Revit session
 - [ ] **Phase 3: Secret gate and payload integrity (unit-verified)** - The shared-secret compare and the file-manifest integrity check are built and unit-tested on both runtimes, plus the build pipeline that generates the secret and the manifest, ready to wire in
 - [ ] **Phase 4: Honest outcomes on every mutating route** - Every mutating route, including the two known stragglers, reports what actually happened in Revit rather than an assumed success
@@ -42,14 +42,14 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 ### Phase 1: Serialization and configurable addressing
 
-**Goal**: Mutating calls issued through this MCP server no longer reach Revit's single-threaded API in parallel, and the server's target port is a deployment setting instead of a hardcoded constant. One MCP server entry targets one Revit instance; several entries (e.g. `revit-a` on 48884, `revit-b` on 48885) can be used side by side in one assistant session. Every route still operates on the targeted instance's active document — document addressing is Phase 2.
+**Goal**: Calls issued through this MCP server no longer reach pyRevit's shared request handler in parallel — every call except `/status/` waits its turn (d27-b) — and the server's target port is a deployment setting instead of a hardcoded constant. One MCP server process targets one Revit instance, users share one `revit` entry, and choosing a Revit instance per call is Phase 2. Every route still operates on the targeted instance's active document — document addressing is Phase 2.
 **Depends on**: Nothing (first phase)
 **Requirements**: SER-01, SER-02, SER-03, SER-04, SER-05, IDENT-05
 **Context**: `phases/01-serialization-and-configurable-addressing/01-CONTEXT.md`
 **Success Criteria** (what must be TRUE):
 
   1. Two mutating tool calls issued back-to-back never open overlapping Revit transactions from this server — verified with a concurrent-request test that holds one call and confirms the second waits.
-  2. `/status/` and other read-only calls return promptly even while a mutating call holds the serialization lock — verified with a concurrent test, not inferred from code shape.
+  2. `/status/` returns promptly even while another call holds the serialization lock, and every other call, reads included, waits its turn (d27-b, decided after the 01-04 bench measured cross-wired reads in pyRevit's shared handler) — verified with a concurrent test, not inferred from code shape.
   3. A mutating call that times out, throws, or is cancelled releases the lock immediately — verified by forcing an exception inside the locked region and re-acquiring right after.
   4. Waiting in the queue does not shrink a call's own request timeout budget below what an unqueued call would get; a wait that exceeds its bound returns an explicit "not sent to Revit" error.
   5. Setting `REVIT_PORT` changes which port this server talks to, exercised live with two Revit instances started together: each of 48884 and 48885 has exactly one listener with a different PID, and one assistant session with two MCP entries gets each entry's own `host:port` and `document_title` from `get_revit_status`. If both instances land on 48884, the phase is not accepted and addressing is revisited before Phase 2.

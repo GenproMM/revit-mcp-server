@@ -188,3 +188,7 @@ None - no new network endpoint, auth path or schema surface; the allowlist and w
 ---
 *Phase: 01-serialization-and-configurable-addressing*
 *Completed: 2026-10-07*
+
+## Superseding note (2026-10-07)
+
+The read-only allowlist this plan shipped (`READ_ONLY_POST`, D-08) was measured unsafe on the 01-04 bench (cross-wired-read) and is removed by gap plan 01-06 under decision d27-b; every call except GET `/status/` now takes the lock. The text above is the record of what shipped on 2026-10-07 and is left as written.

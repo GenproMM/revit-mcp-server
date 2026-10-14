@@ -8,6 +8,11 @@
 bench + cross-instance scenario + stop condition, D-16..D-18). All other `--auto` decisions are kept
 (D-19..D-26). Alternatives for both rounds are in `01-DISCUSSION-LOG.md`.
 
+**Revision note 2026-10-07:** the 01-04 bench measured cross-wiring in pyRevit's shared request
+handler (`cross-wired-mutation`, `cross-wired-read`; see `01-04-SUMMARY.md` "Bench record", Step 7).
+D-28 to D-31 (section "Resolved after the 01-04 bench") supersede D-08, D-03, D-17, D-21 (its
+two-entry part) and D-26. The superseded text is kept as written and marked in place.
+
 <domain>
 ## Phase Boundary
 
@@ -16,6 +21,9 @@ target, read-only calls stay responsive while a mutation holds the queue, and th
 port this server talks to becomes a deployment setting (`REVIT_PORT`) instead of the
 literal in `main.py:23`. Requirements: SER-01..05, IDENT-05. No edits under `revit_mcp/` —
 the phase is CPython-side and needs no Revit restart except for the live port check.
+
+> Superseded 2026-10-07 by D-28: only `/status/` stays responsive; every other call, reads
+> included, queues behind a held lock.
 
 **What this phase does NOT deliver (stated so no downstream agent over-claims it):**
 addressing a specific *document* among several open in one Revit session, PID/session
@@ -76,6 +84,9 @@ cross-document half.
   read-only and whether any other POST belongs there). Fail-safe direction: a new tool that is
   not classified waits in the queue rather than racing. GET (`revit_get`) and `revit_image`
   never take the lock (SER-02). *Supersedes 2026-09-23 D-03 ("every POST, no classification").*
+  - Superseded 2026-10-07 by D-28; the allowlist was the measured cross-wired-read;
+    `READ_ONLY_POST` is removed by plan 01-06 and GET and `revit_image` take the lock too;
+    D-09 stands.
 - **D-09:** `/execute_code/`, `/open_model/`, and `/save_document/` always take the lock and can
   never be allowlisted — arbitrary code can mutate anything, and open/save change session state
   that a concurrent mutation would otherwise hit. A unit test pins this.
@@ -157,6 +168,17 @@ cross-document half.
   shared handler, execution **stops at a checkpoint for the user** — options: (a) accept and
   document, (b) lock every API-context route and exempt only `/status/` and `/model_info/`
   (changes SER-02's meaning), (c) Revit-side fix in a later phase. Not chosen unilaterally.
+  - Resolved 2026-10-07: option (b), narrowed by the user, see D-28; option (c) is recorded as a
+    backlog item, see D-30.
+
+### Resolved after the 01-04 bench (2026-10-07)
+- **D-28 (d27-b, narrowed by the user):** `bridge.py` takes the lock for every call that goes
+  through pyRevit's handler (GET reads, `revit_image`, every POST) and exempts only GET
+  `/status/`, which pyRevit serves on its HTTP thread and which the bench measured unaffected.
+  `/model_info/` stays locked because its overlap was not measured. SER-02 now means "does not
+  block `/status/`", and slow reads queue behind mutations. Supersedes D-08. Evidence:
+  `01-04-SUMMARY.md` "Bench record", Step 7. — **Reversibility:** reversible (one frozenset plus
+  tests), but unlocking a route needs a live overlap measurement and the user's decision.
 
 ### Claude's Discretion
 - Lock primitive details and where exactly the read-only allowlist lives (a set in `bridge.py`,

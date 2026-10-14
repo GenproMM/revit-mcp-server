@@ -8,6 +8,7 @@ tests fail if a sentence drifts or an over-claim phrase appears. Needs no Revit.
 
 import ast
 import os
+import re
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -38,8 +39,24 @@ OVERCLAIMS = [
     "reads are not blocked",
 ]
 
-# Files scanned for over-claims; Task 2 of plan 01-07 widens this list.
-OVERCLAIM_SCANNED = ["CLAUDE.md"]
+# Files scanned for over-claims (the bridge.py docstring is scanned separately).
+OVERCLAIM_SCANNED = [
+    "CLAUDE.md",
+    "README.md",
+    os.path.join("deploy", "README.md"),
+    os.path.join("deploy", "USER-GUIDE.md"),
+]
+
+# Whole-token revit-a / revit-b: a plain substring test would also match
+# "pyRevit-based" in README.md when lowercased, so the scan is case-sensitive.
+TWO_ENTRY_TOKEN = re.compile(r"(?<![\w-])revit-[ab](?![\w-])")
+
+# Two statements in deploy/USER-GUIDE.md that the bench made wrong: that both
+# Revit instances occupy port 48884, and the advice to keep only one Revit open.
+STALE_USER_GUIDE_FRAGMENTS = [
+    "они оба занимают порт 48884",
+    "Держите открытым один Revit.",
+]
 
 
 def _read(relpath):
@@ -108,3 +125,44 @@ def test_serialization_scope_no_overclaims():
         lowered = text.lower()
         for phrase in OVERCLAIMS:
             assert phrase not in lowered, "{} contains over-claim {!r}".format(name, phrase)
+
+
+def test_serialization_scope_readme_documents_port_and_scope():
+    text = _read("README.md")
+    for needle in (
+        SCOPE_SENTENCE,
+        STATUS_SENTENCE,
+        CROSS_PROCESS_SENTENCE,
+        "REVIT_PORT",
+        "REVIT_HOST",
+        "bridge.py",
+    ):
+        assert needle in text, "README.md lost {!r}".format(needle)
+
+
+def test_serialization_scope_deploy_readme_names_bridge_and_port():
+    text = _read(os.path.join("deploy", "README.md"))
+    for needle in (
+        "REVIT_PORT",
+        "bridge.py",
+        "configure_hermes.py",
+        CROSS_PROCESS_SENTENCE,
+    ):
+        assert needle in text, "deploy/README.md lost {!r}".format(needle)
+    assert "main.py:21-23" not in text, "deploy/README.md still points at main.py:21-23"
+
+
+def test_serialization_scope_user_guide_single_entry_and_honest():
+    text = _read(os.path.join("deploy", "USER-GUIDE.md"))
+    assert "48885" in text
+    assert RU_CROSS_PROCESS_SENTENCE in text
+    assert '"REVIT_PORT"' not in text, "USER-GUIDE shows a REVIT_PORT JSON key"
+    for fragment in STALE_USER_GUIDE_FRAGMENTS:
+        assert fragment not in text, "USER-GUIDE still says {!r}".format(fragment)
+
+
+def test_serialization_scope_no_two_entry_user_docs():
+    for relpath in ("README.md", os.path.join("deploy", "README.md"),
+                    os.path.join("deploy", "USER-GUIDE.md")):
+        match = TWO_ENTRY_TOKEN.search(_read(relpath))
+        assert match is None, "{} documents a two-entry setup: {!r}".format(relpath, match and match.group(0))

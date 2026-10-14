@@ -4,16 +4,16 @@ milestone: v0.1
 current_phase: 01
 current_phase_name: Serialization and configurable addressing
 status: executing
-stopped_at: "Completed 01-04-PLAN.md (halted: d27-b re-plan)"
-last_updated: "2026-10-07T10:20:00.672Z"
-last_activity: 2026-10-07
+stopped_at: Completed 01-08-PLAN.md
+last_updated: "2026-10-14T08:11:35.241Z"
+last_activity: 2026-10-14
 last_activity_desc: Phase 01 execution started
-state_head: 8514ed6327be0ae374bacd7e961aa3e01cd312ee
+state_head: d77b18461e2b7ae3dbe7408264cca115065207ae
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 7
-  completed_plans: 4
+  completed_plans: 5
 milestone_name: Доверенный мост
 ---
 
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-09-21)
 
 ## Current Position
 
-Phase: 01 (Serialization and configurable addressing) — READY TO EXECUTE
-Plan: 5 of 5
-Status: Halted - re-plan required (01-04, d27-b); do not run 01-05 as written
-Last activity: 2026-10-07 — Phase 01 execution started
+Phase: 01 (Serialization and configurable addressing) — EXECUTING
+Plan: 2 of 7
+Status: Ready to execute
+Last activity: 2026-10-14 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -63,6 +63,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P02 | 3 min | 3 tasks | 2 files |
 | Phase 01 P03 | 4min | 2 tasks | 7 files |
 | Phase 01 P04 | 90min | 3 tasks | 2 files |
+| Phase 01 P08 | 15 min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 01]: 01-01: every POST locked (fail-safe) until the read-only allowlist lands in 01-02; empty REVIT_PORT is refused, not defaulted
 - [Phase 01]: 01-02: post-send transport failures are reported as outcome UNKNOWN; only Connect/ConnectTimeout/PoolTimeout say not sent — A model that believes a maybe-applied change failed retries blindly
 - [Phase 01]: 01-04: D-18 not triggered (staggered Revit pair: PIDs 11088/35780 on 48884/48885); D-27 -> d27-b (lock every handler route, exempt only /status/, /model_info/ stays locked; d27-c Revit-side fix later); A5 -> a5-a (harness is SC5 evidence, two-entry scheme not documented for users, per-call addressing plus per-target lock go to Phase 2 IDENT-01)
+- [Phase 01]: D-28 (d27-b narrowed): every call through pyRevit's handler takes the lock, only GET /status/ exempt; D-29 (a5-a): two-instance harness is SC5 evidence, per-call target selection and per-target lock move to Phase 2; D-30: d27-c is backlog item 999.1; D-31: plan 01-05 superseded — 01-04 bench measured cross-wired mutation and read in pyRevit's shared handler; user decisions at the 01-04 gate and the re-planning run
 
 ### Pending Todos
 
@@ -102,6 +104,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T09:38:35.230Z
-Stopped at: Completed 01-04-PLAN.md (halted: d27-b re-plan)
+Last session: 2026-10-14T08:11:35.192Z
+Stopped at: Completed 01-08-PLAN.md
 Resume file: None

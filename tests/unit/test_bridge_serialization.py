@@ -484,20 +484,34 @@ _FORMER_READ_ONLY_POST = {
 }
 
 
-def _tool_post_endpoints():
-    """Every literal revit_post("/route/") endpoint in tools/*.py, as route keys."""
+def _tool_endpoints():
+    """Every literal revit_get/post/image endpoint in tools/*.py as (method, route key).
+
+    The pattern spans a newline and matches f-strings and ".format" templates.
+    """
     import glob
     import re
 
-    pattern = re.compile(r'revit_post\(\s*"(/[^"]+)"')
-    keys = set()
+    pattern = re.compile(r'revit_(get|post|image)\(\s*f?"(/[^"]+)"')
+    pairs = set()
     for path in glob.glob(os.path.join(REPO_ROOT, "tools", "*.py")):
         with open(path, encoding="utf-8") as handle:
             for match in pattern.finditer(handle.read()):
-                keys.add(bridge._route_key(match.group(1)))
+                method = "POST" if match.group(1) == "post" else "GET"
+                pairs.add((method, bridge._route_key(match.group(2))))
     # A scan that finds nothing would pass every assertion below vacuously.
-    assert len(keys) >= 30, "drift scan found only {} endpoints".format(len(keys))
-    return keys
+    assert len(pairs) >= 40, "drift scan found only {} endpoints".format(len(pairs))
+    return pairs
+
+
+def test_unlocked_every_tool_endpoint_except_status_is_locked():
+    pairs = _tool_endpoints()
+    assert ("GET", "status") in pairs
+    assert ("GET", "model_info") in pairs
+    assert any(key.startswith("get_view") for _, key in pairs)
+    for method, key in sorted(pairs):
+        expected_locked = (method, key) != ("GET", "status")
+        assert bridge._is_locked(method, "/{}/".format(key)) is expected_locked, (method, key)
 
 
 def test_unlocked_is_exactly_get_status():
@@ -550,28 +564,127 @@ def test_unlocked_unknown_empty_and_prefix_routes_are_locked():
             assert bridge._is_locked(method, endpoint) is True, (method, endpoint)
 
 
-@pytest.mark.anyio
-async def test_image_reads_pass_while_locked():
+def _image_handler(gate):
+    """Wrap a _Gate handler so /get_view/ answers with a small base64 image."""
     import base64
 
-    gate = _Gate()
     original = gate.handler
 
     async def handler(request):
         if "/get_view/" in request.url.path:
+            gate.seen.append(request.url.path)
             payload = base64.b64encode(b"\x89PNG-bytes").decode("ascii")
             return httpx.Response(200, json={"image_data": payload})
         return await original(request)
 
-    _install_client(handler)
+    return handler
+
+
+@pytest.mark.anyio
+async def test_image_waits_while_locked():
+    gate = _Gate()
+    _install_client(_image_handler(gate))
     holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
     await asyncio.wait_for(gate.p1_started.wait(), 1.0)
 
-    image = await asyncio.wait_for(bridge.revit_image("/get_view/Level 1"), 1.0)
-    assert not isinstance(image, str), image
+    image = asyncio.ensure_future(bridge.revit_image("/get_view/Level 1"))
+    await asyncio.sleep(0.05)
+    assert gate.seen == ["/revit_mcp/p1/"]
 
     gate.release.set()
     await asyncio.wait_for(holder, 1.0)
+    result = await asyncio.wait_for(image, 1.0)
+    assert not isinstance(result, str), result
+
+
+@pytest.mark.anyio
+async def test_image_queue_bound_returns_not_sent():
+    gate = _Gate()
+    _install_client(_image_handler(gate))
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+
+    result = await asyncio.wait_for(bridge.revit_image("/get_view/x", timeout=0.1), 2.0)
+    assert isinstance(result, str)
+    assert "NOT sent to Revit" in result
+    assert "nothing was sent" in result
+
+    gate.release.set()
+    await asyncio.wait_for(holder, 1.0)
+    assert gate.seen == ["/revit_mcp/p1/"]
+    assert bridge._get_lock().locked() is False
+
+
+@pytest.mark.anyio
+async def test_get_queue_bound_returns_not_sent():
+    gate = _Gate()
+    _install_client(gate.handler)
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+
+    result = await asyncio.wait_for(bridge.revit_get("/list_levels/", timeout=0.1), 2.0)
+    assert isinstance(result, str)
+    assert "NOT sent to Revit" in result
+    assert "nothing was sent" in result
+
+    gate.release.set()
+    await asyncio.wait_for(holder, 1.0)
+    assert gate.seen == ["/revit_mcp/p1/"]
+    assert bridge._get_lock().locked() is False
+
+
+@pytest.mark.anyio
+async def test_get_budget_not_shrunk_by_queue_wait():
+    gate = _Gate()
+    _install_client(gate.handler)
+
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+    asyncio.get_running_loop().call_later(0.3, gate.release.set)
+
+    result = await asyncio.wait_for(bridge.revit_get("/list_levels/", timeout=0.5), 2.0)
+    await asyncio.wait_for(holder, 1.0)
+
+    assert result == {"path": "/revit_mcp/list_levels/"}
+    assert gate.timeouts["/revit_mcp/list_levels/"] == {
+        "connect": 0.5, "read": 0.5, "write": 0.5, "pool": 0.5,
+    }
+
+
+@pytest.mark.anyio
+async def test_mixed_get_post_queue_in_arrival_order():
+    gate = _Gate()
+    _install_client(_image_handler(gate))
+
+    holder = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+    queued = []
+    for make in (
+        lambda: bridge.revit_get("/g1/"),
+        lambda: bridge.revit_post("/q1/", {}),
+        lambda: bridge.revit_image("/get_view/v"),
+        lambda: bridge.revit_get("/g2/"),
+    ):
+        queued.append(asyncio.ensure_future(make()))
+        await asyncio.sleep(0.02)
+
+    gate.release.set()
+    await asyncio.wait_for(asyncio.gather(holder, *queued), 2.0)
+    assert gate.seen == [
+        "/revit_mcp/p1/", "/revit_mcp/g1/", "/revit_mcp/q1/",
+        "/revit_mcp/get_view/v", "/revit_mcp/g2/",
+    ]
+
+
+def test_wait_message_does_not_name_the_holder_a_mutation():
+    assert "mutation" not in bridge.WAIT_MESSAGE.lower()
+    busy = bridge._queue_busy_message(1.0)
+    assert "NOT sent to Revit" in busy
+    assert "nothing was sent" in busy
+    assert "nothing was changed" in busy
+    assert busy.startswith("Error: ") and busy[len("Error: ")].isalpha()
+    assert "another mutation" not in busy
+    assert "mutation" not in busy.lower()
 
 
 @pytest.mark.anyio

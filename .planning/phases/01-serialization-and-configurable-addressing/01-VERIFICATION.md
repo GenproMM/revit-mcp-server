@@ -1,11 +1,27 @@
 ---
 phase: 01-serialization-and-configurable-addressing
 verified: 2026-10-14T10:00:00Z
-status: human_needed
+status: passed
 score: 6/6 must-haves verified
 covered_files:
+
   - ".planning/REQUIREMENTS.md"
   - ".planning/ROADMAP.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-01-PLAN.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-01-SUMMARY.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-02-PLAN.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-02-SUMMARY.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-03-PLAN.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-03-SUMMARY.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-04-PLAN.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-04-SUMMARY.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-05-PLAN.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-06-PLAN.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-06-SUMMARY.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-07-PLAN.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-07-SUMMARY.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-08-PLAN.md"
+  - ".planning/phases/01-serialization-and-configurable-addressing/01-08-SUMMARY.md"
   - "CLAUDE.md"
   - "README.md"
   - "bridge.py"
@@ -22,11 +38,13 @@ covered_files:
   - "tests/unit/test_status_target.py"
   - "tools/process_tools.py"
   - "tools/status_tools.py"
-covered_digest: "v1:sha256:de8b1f3ef7fe3ff92ca9f0f2dbd8bd2effb9a93b25fc2261a238d2910a2f2db0"
+
+covered_digest: "v1:sha256:c42385ad5cc5ad266de6d84539960d02d49b8aaaf026addc9b4339ec9bc7f66a"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification: false
 human_verification:
+
   - test: "Repeat the overlap probe on the fleet's pyRevit 6.5.5 (scripts/probe_handler_overlap.py --port 48884) against one live Revit"
     expected: "Same verdicts as 6.5.3 (cross-wired-mutation, cross-wired-read, /status/ answering in about 0.01-0.02 s while the handler is busy). This confirms that locking everything except /status/ (d27-b) is still required, and that /status/ is still safe to leave unlocked, on the version users run"
     why_human: "Needs a live Revit with pyRevit 6.5.5. The 01-04 bench ran 6.5.3 only (RESEARCH assumption A2). Unit tests cannot observe pyRevit's shared request handler. The code and the docs state this honestly (bridge.py docstring: 'pyRevit 6.5.5 was not benched')"

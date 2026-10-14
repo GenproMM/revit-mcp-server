@@ -4,11 +4,11 @@ milestone: v0.1
 current_phase: 02
 current_phase_name: Live identity, ambiguity refusal, and multi-document addressing
 status: planning
-stopped_at: Phase 1 complete, ready to plan Phase 02
-last_updated: "2026-10-14T11:46:12.753Z"
+stopped_at: Phase 02 context gathered, ready for research and planning
+last_updated: "2026-10-14T18:48:51.692Z"
 last_activity: 2026-10-14
-last_activity_desc: Phase 1 complete, transitioned to Phase 02
-state_head: dcae56d868fe7eba6d32ee99124c666e2640bf93
+last_activity_desc: Phase 2 context revised interactively
+state_head: 81b7e164c186e1b4f7c98f90fdaf81bba3e360ed
 progress:
   total_phases: 6
   completed_phases: 1
@@ -31,8 +31,8 @@ See: .planning/PROJECT.md (updated 2026-10-14)
 
 Phase: 02 — Live identity, ambiguity refusal, and multi-document addressing
 Plan: Not started
-Status: Ready to plan
-Last activity: 2026-10-14 — Phase 1 complete, transitioned to Phase 02
+Status: Context gathered; ready for research and planning
+Last activity: 2026-10-14 — Phase 2 context revised interactively
 
 Progress: [██░░░░░░░░] 17%
 
@@ -80,7 +80,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - TRUTH (Phase 4) is a hard prerequisite for AUDIT (Phase 6), not parallel work — an audit log built on unmigrated routes would encode the same silent-success lie it exists to catch.
 - ~~Live-Revit wiring converged into a single phase~~ — superseded 2026-09-30: identity/ambiguity/multi-document moved up to Phase 2 so one assistant session can address specific documents across Revit instances early; live secret/integrity wiring is Phase 5. Two restart-cycle phases accepted (Phase 1 `01-CONTEXT.md` D-01).
 - ~~One MCP server entry = one Revit instance (`REVIT_PORT`); cross-instance work = several entries in one session (Phase 1 D-02/D-03)~~ — superseded by a5-a (D-29): users share one `revit` entry; per-call target selection and a per-target lock are Phase 2 (IDENT-01). D-18 was not triggered.
-- Phase 2 context (`--auto`, pre-reorder) must be re-discussed before planning: split-out secret wiring and the "verification, not retargeting" tension.
+- Phase 2 context re-discussed interactively on 2026-10-14: `02-CONTEXT.md` now separates Phase 5 secret wiring, carries per-call process selection, permits only proven-safe inactive-document reads without UI switching (minimum model summary and levels), and refuses inactive-document mutations with 412.
 - [Phase 01]: 01-01: every POST locked (fail-safe) until the read-only allowlist lands in 01-02; empty REVIT_PORT is refused, not defaulted
 - [Phase 01]: 01-02: post-send transport failures are reported as outcome UNKNOWN; only Connect/ConnectTimeout/PoolTimeout say not sent — A model that believes a maybe-applied change failed retries blindly
 - [Phase 01]: 01-04: D-18 not triggered (staggered Revit pair: PIDs 11088/35780 on 48884/48885); D-27 -> d27-b (lock every handler route, exempt only /status/, /model_info/ stays locked; d27-c Revit-side fix later); A5 -> a5-a (harness is SC5 evidence, two-entry scheme not documented for users, per-call addressing plus per-target lock go to Phase 2 IDENT-01)
@@ -112,6 +112,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T08:22:21.816Z
-Stopped at: Phase 1 complete, ready to plan Phase 02
-Resume file: None
+Last session: 2026-10-14T18:48:51.599Z
+Stopped at: Phase 02 context gathered, ready for research and planning
+Resume file: .planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-CONTEXT.md

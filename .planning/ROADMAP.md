@@ -85,7 +85,7 @@ Plans:
 
 **Goal**: Every response can be attributed to a specific document in a specific Revit process; two processes listening on the same port produce a loud, named refusal instead of an unpredictable answer; an engineer can enumerate, address, and switch between documents open in one Revit session. Combined with per-call selection of the Revit target inside the one shared `revit` server entry (carried here from Phase 1, see the note below), one assistant session can read and compare documents across instances and within one instance.
 **Depends on**: Phase 1 (port configurability)
-**Context**: `phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-CONTEXT.md` (`--auto`, predates the reorder — re-discuss before planning)
+**Context**: `phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-CONTEXT.md` (interactive revision 2026-10-14; supersedes incompatible pre-reorder `--auto` decisions)
 **Requirements**: IDENT-01, IDENT-02, IDENT-03, IDENT-04, AMBIG-01, AMBIG-02, AMBIG-03, AMBIG-04, MDOC-01, MDOC-02, MDOC-03, MDOC-04, MDOC-05
 **Carried from Phase 1 (01-04, decisions a5-a and d27-b):** per-call selection of the Revit target inside the one shared `revit` server entry belongs here (recorded against IDENT-01); once one server process can address several Revit instances the serialization lock must be keyed by target, one lock per Revit target and never one global lock; `/status/` stays the only unlocked route per target unless a live overlap measurement says otherwise.
 **Success Criteria** (what must be TRUE):

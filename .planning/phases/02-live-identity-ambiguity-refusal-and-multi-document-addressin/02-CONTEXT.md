@@ -1,132 +1,47 @@
-# Phase 2 (was 4): Live identity, ambiguity refusal, and multi-document addressing - Context
+# Phase 2: Live identity, ambiguity refusal, and multi-document addressing - Context
 
-> **Renumbered 2026-09-30** (roadmap reorder, `01-CONTEXT.md` D-01): this was Phase 4. Old→new: 1→1, 2→3 (secret/integrity logic), 3→4 (honest outcomes), 4→2 (identity/ambiguity/multi-document) + 5 (live secret/integrity wiring, split out), 5→6 (audit). Phase numbers inside this document use the OLD numbering.
-> **Split:** the secret-gate and integrity-check wiring decisions below (parts of D-01..D-05: secret in the `_mcp` envelope, 401/integrity checks in the POST wrapper) now belong to **Phase 5** and must not be planned here; the `document` part of the `_mcp` envelope stays in Phase 2. Move them into a Phase 5 context when Phase 5 is discussed.
-> **Open tension to resolve in a Phase 2 discussion:** D-14 ("verification, not retargeting" — addressed document must be active, else 412) vs the user's 2026-09-30 goal of comparing documents in one session without disturbing the engineer's active view. This context was produced with `--auto`; re-run `/gsd-discuss-phase 2` before planning.
+**Gathered:** 2026-10-14 (interactive revision of the 2026-09-23 `--auto` context)
+**Status:** Ready for research and planning
 
-**Gathered:** 2026-09-23
-**Status:** Ready for planning
-**Mode:** `--auto` — все серые зоны выбраны автоматически, по каждому вопросу принят рекомендованный вариант (по поручению пользователя). Альтернативы — в `04-DISCUSSION-LOG.md`.
+The interactive decisions below replace the old Phase 4 boundary and its incompatible `--auto` choices. The original alternatives remain in `02-DISCUSSION-LOG.md`; they are history, not additional requirements. In particular, the old exclusion of multi-instance addressing and the old rule requiring *every* addressed document to be active are superseded. Technical mechanisms proposed in the old context are research leads, not user-approved implementation contracts.
 
 <domain>
 ## Phase Boundary
 
-Каждый ответ относится к конкретному документу в конкретном процессе Revit; два процесса на
-одном порту дают громкий именованный отказ; инженер может перечислить открытые документы,
-адресовать мутацию явно и переключить активный документ. Единственная фаза, которая правит
-`startup.py`: обёртка `api.route` ставится до цикла регистрации и одновременно включает шлюз
-секрета и проверку целостности из фазы 2. Требования: IDENT-01…04, AMBIG-01…04, MDOC-01…05,
-плюс живое включение SEC/INTG.
+In the **one shared `revit` MCP server entry**, discover the available Revit processes, select a process per call, and attribute responses to the actual process and document. Reject two listeners on one target port *before sending* rather than accepting an unpredictable answer. Enumerate documents in a selected process, explicitly address a document, and switch the active document with a separate action. Make it possible for one assistant session to read and compare documents within one process and across processes; at minimum compare model summaries and level lists without disturbing the active Revit UI where safely supported. This is Phase 2 of `.planning/ROADMAP.md`, criteria 1–9, covering IDENT-01..04, AMBIG-01..04 and MDOC-01..05. Per-call process selection and a per-target lock are carried from Phase 1 decision a5-a.
 
-Вне фазы: мутации неактивного документа без переключения, адресация нескольких Revit-процессов
-из одного сервера, журнал аудита.
+Outside this phase: secret authentication and integrity logic (Phase 3), **live** secret/integrity enforcement (Phase 5), honest batch outcomes (Phase 4), audit logging (Phase 6), mutation of an inactive document without an explicit activation, and the Revit-side cross-session handler fix (backlog 999.1). Phase 2 may establish an identity/document chokepoint but must not quietly wire in Phase 5's secret or integrity checks. The earlier `_mcp` envelope proposal is not a requirement to send a secret in Phase 2.
 
 </domain>
 
 <decisions>
 ## Implementation Decisions
 
-### Механизм подключения
-- **D-01:** `startup.py` в начале `register_routes()`, до импорта доменов: (1) выполняет проверку
-  целостности и сохраняет результат в модульном состоянии, которое читает `/status/`; (2) ставит
-  `api = security.wrap_api(api)`. Подменённый `api.route` оборачивает каждый обработчик при
-  регистрации. Правок в 23 доменных модулях нет.
-- **D-02:** **Главный исследовательский флаг фазы.** pyRevit по параметрам обработчика решает,
-  что внедрять (`doc`/`uidoc`/`uiapp`/`request`) и пускать ли вызов через `ExternalEvent`. Обёртка
-  обязана сохранить набор и имена параметров исходного обработчика. До реализации нужно прочитать,
-  **как** pyRevit их инспектирует (`pyrevitlib/pyrevit/routes/server/handler.py`, локальная копия
-  `%APPDATA%\pyRevit-Master\`), и выбрать способ (генерация обёртки с той же сигнатурой, копия
-  `co_varnames` и т.п.). Нельзя строить на догадке.
-- **D-03:** Порядок проверок в обёртке POST: разобрать конверт `_mcp` → секрет (401) → целостность
-  (423 при `verified_mismatch`) → документ (412/404, см. ниже) → обработчик с **очищенным**
-  payload. Если объект `Request` pyRevit не позволяет подменить `.data`, обработчик получает
-  прокси-объект запроса с тем же интерфейсом — выбирает планировщик после чтения
-  `routes/server/base.py`.
-- **D-04:** Секрет проверяется первой строкой обёртки, но внутри `ExternalEvent` (отдельного
-  pre-dispatch крючка в pyRevit нет — проверено исследованием). Пока Revit инициализируется,
-  неверный секрет висит так же, как любой запрос; записано как известное ограничение, не
-  исправляется.
-- **D-05:** `bridge.py` начинает класть конверт `_mcp` (`secret`, `document`) в тело каждого POST
-  **в том же изменении**, что и обёртка на стороне Revit. Порядок выката на парк: сначала payload,
-  затем перезапуск Revit с новым расширением (новое расширение со старым payload даст 401 до
-  обновления payload). Планировщик проверяет grep-ом, что ни один обработчик не перебирает все
-  ключи верхнего уровня тела (иначе лишний `_mcp` что-то сломает при частичном выкате).
+### Selecting the Revit process
+- **D-01:** Keep one shared MCP entry named `revit`; no user-visible duplicate entries per Revit instance. Give the assistant a way to list available processes with port and identity, then pass an exact process selector with subsequent calls. Selection is **per call**, not mutable shared session state. — **Reversibility:** costly — changing the call contract later touches tool signatures, client guidance and tests.
+- **D-02:** If exactly one usable Revit process is available, a call without a process selector may use it. If several are available, the call refuses with the candidate list; never choose the latest, the active-looking process or the default port silently. A selected process that restarts must be selected again from a fresh list rather than being treated as the old target. A selector must therefore distinguish a new process incarnation from a reused port/PID; its concrete representation is for research and planning.
+- **D-03:** Calls routed to different Revit targets have separate serialization locks; calls to one target share its lock across documents. Preserve the Phase 1 rule: only GET `/status/` is unlocked. This process-local queue does **not** solve cross-session/curl overlap or the pyRevit handler cross-wiring documented in Phase 1; backlog 999.1 remains open.
+- **D-04:** If two processes listen on the same selected port, refuse before sending and name both conflicting PIDs. The process-listing path must not suggest either as an unambiguous target. How to enumerate listeners reliably, how to handle discovery failure, and the race between check and send need research; do not promise a stronger safety guarantee than the implementation can establish.
 
-### Идентичность
-- **D-06:** Блок идентичности — вложенный ключ `revit_identity` в каждом ответе-словаре (GET и
-  POST), никогда не новые `status`/`error`: `{pid, process_start, revit_version, port,
-  session_token, document: {title, path, key}}`. Вложенный ключ не сталкивается с существующими
-  полями (`document_title` в `/status/`) и не может сработать как сигнал ошибки в `format_response`.
-- **D-07:** `session_token` — `uuid4().hex`, создаётся один раз на процесс Revit и хранится в
-  `System.AppDomain.CurrentDomain.SetData("revit_mcp.session_token", ...)`: переживает Reload
-  pyRevit и меняется только при перезапуске процесса (IDENT-01 «выдан один раз при запуске
-  процесса»). `process_start` (`Process.GetCurrentProcess().StartTime`, ISO) защищает от повторного
-  использования PID.
-- **D-08:** Порт: как сторона Revit узнаёт свой порт — исследовательский флаг (конфиг routes
-  pyRevit, сокет сервера или заголовок `Host` запроса). Планировщик выбирает по коду pyRevit.
-- **D-09:** Документ в идентичности — тот `doc`, который получил обработчик, разрешённый на
-  момент запроса (не кэш), через один общий защитный помощник `current_document()`, вынесенный
-  из существующего исправления null-документа (Pitfall 14). `path` = `doc.PathName` (в том числе
-  `RSN://`), `key` = `PathName`, если он не пуст, иначе `"unsaved:" + Title`, `title` через
-  `sanitize_string`. Два `Project1` в двух процессах различимы по `pid` + `session_token` (IDENT-04).
-- **D-10:** `format_response` добавляет одну строку идентичности перед телом любого ответа-словаря
-  с `revit_identity`: `[Revit 2027 · PID 1234 · :48884 · <title>]`. Без этого успех-ветка вернула
-  бы только `message`, и идентичность не дошла бы до модели. Тест фиксирует строку.
+### Process and document identity
+- **D-05:** `/status/` exposes PID, Revit version, actual port and a session token issued once per process start. A mutating route's response names the document it actually changed (title and path); resolve identity at request time, including after API activation and a manual UI switch, not from a cached document. Two unsaved documents both titled `Project1` in different processes must be distinguishable by response fields alone.
+- **D-06:** Identity must reach the assistant in the *tool's rendered result*, not merely a nested field discarded by success formatting. Both successful and failed responses must make the selected/answering target intelligible where a response was actually received. Do not label a timed-out or unsent request as a verified response from that document; retain Phase 1's honest not-sent/outcome-unknown distinction.
+- **D-07:** The live `param-write-rolls-back` reproduction is repeated with visible identity, and the observed result is recorded as confirming or ruling out the specific “wrong process answered” hypothesis (AMBIG-04). Do not infer the result from the earlier Phase 1 UAT pass or invent port/PID measurements.
 
-### Отказ при двух слушателях
-- **D-11:** Обнаружение на стороне CPython **перед каждым** вызовом bridge (GET и POST): ctypes
-  `GetExtendedTcpTable` (iphlpapi, `TCP_TABLE_OWNER_PID_LISTENER`, IPv4 и IPv6) — без новых
-  зависимостей, быстрее миллисекунды, без кэша. Больше одного **разного** PID на `REVIT_PORT` →
-  отказ без отправки: `"Error: two processes are listening on port 48884 (PID 1234 Revit.exe,
-  PID 5678 Revit.exe) — close one and retry; nothing was sent"` (AMBIG-01…03). Имена процессов —
-  best-effort через ctypes.
-- **D-12:** Не-Windows или ошибка API таблицы → вызов проходит, а `get_revit_status` сообщает
-  `listener_check: unverifiable`. Чистая функция решения `decide_listeners(rows, port)` тестируется
-  на фикстурах, ctypes-сбор — тонкий.
-- **D-13:** AMBIG-04: после выката повторить живую репродукцию `param-write-rolls-back` с видимой
-  идентичностью и записать исход (гипотеза «отвечал другой процесс» подтверждена или опровергнута)
-  в `.planning/debug/param-write-rolls-back.md`.
+### Documents and user-visible behavior
+- **D-08:** List the open documents in the selected process with identities and active status. An explicit document selector must resolve one document only; ambiguous names must refuse with distinguishable candidates. A document closed after listing must produce a named error and **must not** fall back to whatever is now active. The precise stable key and error vocabulary are research/planning choices, subject to these rules.
+- **D-09:** A mutating call without a document selector may target the only open eligible document. With several open documents it **refuses and lists them**; the tool's own docstring states this default. Do not infer the user's intended document from the current UI selection when several are open.
+- **D-10:** A mutation explicitly addressed to a document that is open but **not active in the UI refuses with HTTP 412**. Do not activate it or retarget the mutation automatically. Use the separate activation action first; a mutation can then be retried with the explicit document. This is the user's direct answer after the interrupted question, not an inferred tool selection.
+- **D-11:** Addressed **reads** of inactive documents should leave the Revit UI on the engineer's active document **only for routes proven safe with a nonactive `Document`**. The minimum comparison surface is the model summary and the list of levels for each of two documents. Any other addressed read not demonstrated safe must refuse clearly rather than silently switch the UI or read the active document under the wrong label. Research must test both routes' actual data access, including helpers that still read `revit.doc`/`UIDocument`. If either minimum read cannot be made safe, stop at a decision gate and report the limitation rather than silently relaxing this acceptance criterion.
+- **D-12:** An engineer can switch the active document through a separate explicit tool call. Research the safe Revit API behavior for already-open saved and unsaved documents, worksharing dialogs and UI state; do not assume the existing `/open_model/` path already implements this action. Never auto-switch merely to satisfy an addressed read or mutation.
 
-### Мультидокумент
-- **D-14:** **Проверка, а не перенацеливание.** Мутации всегда выполняются над активным документом;
-  явный `document` в конверте — предусловие. Не совпадает с активным → **412** с активным
-  документом, списком открытых и подсказкой вызвать `activate_document`. Мутации неактивного
-  документа без переключения отложены: разделение Document/UIDocument и запрет переключения во
-  время событий API не проверены (Pitfall 15), а большинство маршрутов читает `revit.doc`.
-  — **Reversibility:** reversible — перенацеливание можно добавить позже поверх того же селектора.
-- **D-15:** Поведение без `document` (MDOC-03): открыт ровно один не-связанный документ → вызов
-  идёт в него; открыто больше одного → **412** со списком открытых и требованием указать `document`.
-  Связанные (`IsLinked`) не считаются; семейные документы считаются (их видит пользователь).
-  Одна общая фраза о правиле добавляется в докстринг каждого инструмента, который делает POST.
-- **D-16:** Селектор `document`: точный `key` (предпочтительно) или точный `title`, если он
-  уникален в сессии; неоднозначный title → 412 с кандидатами. Документ, закрытый после получения
-  списка, → **404** «document is not open» со списком открытых (MDOC-05), отличимо от 412.
-- **D-17:** Каждый инструмент, вызывающий `revit_post`, получает необязательный параметр
-  `document: str = None` (перед `ctx`) и передаёт его `revit_post(..., document=document)`; bridge
-  кладёт его в конверт. Правка механическая (~30 функций); `scripts/conventions.py` и
-  `test_conventions.py` требуют параметр у каждого инструмента с `revit_post`. Проверка документа
-  применяется ко всем POST, включая читающие, — одно правило без классификации.
-- **D-18:** Новые инструменты и маршруты: `list_open_documents` (GET `/documents/`: title, path,
-  key, is_active, is_linked, is_family) и `activate_document` (POST `/activate_document/`):
-  `OpenAndActivateDocument(path)` для сохранённых документов с той же `WorksetConfiguration`, что у
-  `/open_model/` (без диалога выбора рабочих наборов); несохранённый документ → понятная ошибка
-  «activate it in the Revit UI». `tests/unit/tool_manifest.txt` +2 инструмента в том же коммите.
-- **D-19:** Исключения из проверки документа — явный список в `security.py` с тестом: маршруты, не
-  работающие над активным документом (`/activate_document/`, `/open_model/`). Список короткий и
-  закрытый; каждое добавление требует причины в комментарии.
-
-### Живая проверка
-- **D-20:** Всё реализуется и проходит `uv run pytest tests/unit` до первого перезапуска; затем
-  один перезапуск Revit и заскриптованный чек-лист критериев 1–9 на стенде (два Revit, несколько
-  моделей в одной сессии). Тест повреждённого файла — на установке-копии с манифестом (не на
-  junction, где «повредить файл» = править репозиторий).
-- **D-21:** До перезапуска: `Get-NetTCPConnection -LocalPort 48884 -State Listen` ровно одна
-  строка (кроме намеренного теста двух слушателей), Revit запускается без модели, модели
-  открываются через `/open_model/`.
+### Research and acceptance guardrails
+- **D-13:** Before choosing a shared wrapper in `startup.py`, inspect pyRevit's handler signature inspection, `doc`/`request` injection and `ExternalEvent` dispatch. Preserve those semantics and the existing `text/plain`/`parse_request_data()` contract. Route handlers must continue returning error responses instead of raising. The old D-01..D-05 `security.wrap_api` wiring is **not** carried into this phase as a fixed design.
+- **D-14:** Verify process identity, same-port ambiguity, UI stability for the two supported inactive-document reads, explicit activation, document-close races, and both single- and multi-process defaults against a live Revit bench. Full process restart is required after `revit_mcp/` changes; pyRevit Reload alone is unsafe. Unit tests and the existing cold-start gate remain required, but they are not substitutes for these live claims. Record observed results rather than declaring unrun checks passed.
 
 ### Claude's Discretion
-- Точная форма строки идентичности, текст отказов 412/404, имена помощников в `security.py`.
-- Включать ли `revit_identity` в ответы-списки (не словари) — по умолчанию нет.
+- Exact process/document selector encoding, key format, discovery mechanism, where common response formatting lives, wrapper structure, and message wording, provided the visible behaviors above hold and security work is not pulled forward from Phases 3/5.
+- Whether additional read-only routes are proven safe for nonactive documents after the minimum summary/levels comparison works. Do not classify an unmeasured route as safe by analogy.
 
 </decisions>
 
@@ -135,26 +50,22 @@
 
 **Downstream agents MUST read these before planning or implementing.**
 
-### Объём и требования
-- `.planning/ROADMAP.md` §Phase 4 — цель и 9 критериев
-- `.planning/REQUIREMENTS.md` §Идентичность, §Разрешение неоднозначности, §Мультидокумент
-- `.planning/phases/02-secret-gate-and-payload-integrity-unit-verified/02-CONTEXT.md` — конверт `_mcp`, коды 401/423, три состояния целостности, классификатор бинда
-- `.planning/phases/01-serialization-and-configurable-addressing/01-CONTEXT.md` — `bridge.py`, `REVIT_PORT`
-- `.planning/phases/03-honest-outcomes-on-every-mutating-route/03-CONTEXT.md` — блок `outcome`, код 409
+### Scope and prior decisions
+- `.planning/ROADMAP.md` §Phase 2, §Phase 5, Backlog 999.1 — boundary, nine criteria, carried per-call target/per-target lock, and deferred Revit-side fix.
+- `.planning/REQUIREMENTS.md` §IDENT, §AMBIG, §MDOC — requirement contracts and traceability.
+- `.planning/STATE.md` §Accumulated Context — Phase 1 outcome, unresolved bench measurements and outstanding risks.
+- `.planning/phases/01-serialization-and-configurable-addressing/01-CONTEXT.md` D-28..D-30 — only `/status/` unlocked, a5-a one shared entry, d27-c backlog.
+- `.planning/phases/01-serialization-and-configurable-addressing/01-04-SUMMARY.md` §Bench record — observed pyRevit overlap; do not replace with assumptions.
+- `.planning/debug/param-write-rolls-back.md` — hypothesis to recheck live.
 
-### Исследование и история
-- `.planning/research/ARCHITECTURE.md` §Question 1, §Question 2 — обёртка `api.route`, штамп после возврата обработчика
-- `.planning/research/PITFALLS.md` §Pitfall 14 (устаревший `revit.doc`), §Pitfall 15 (порядок детекта слушателей и адресации; Document против UIDocument)
-- `.planning/debug/param-write-rolls-back.md` — открытая гипотеза для AMBIG-04
-- `CLAUDE.md` §Known sharp edges — два Revit на 48884, диалог рабочих наборов, зависание при инициализации, Reload небезопасен
-
-### Код
-- `startup.py:73-122` — `register_routes()`, место установки обёртки
-- `revit_mcp/status.py` — `/status/`, дополняется идентичностью, целостностью, биндом
-- `revit_mcp/document.py` — `/open_model/` и `WorksetConfiguration`
-- `revit_mcp/code_execution.py` — существующее защитное повторное получение `revit.doc`
-- `tools/utils.py:5-107` — `format_response`
-- pyRevit: `%APPDATA%\pyRevit-Master\pyrevitlib\pyrevit\routes\api.py`, `server\router.py`, `server\handler.py`, `server\base.py`
+### Research and implementation constraints
+- `.planning/research/ARCHITECTURE.md` §Question 1, §Question 2 — candidate chokepoint and response attribution (reassess pre-d27-b read advice).
+- `.planning/research/PITFALLS.md` §Pitfall 14, §Pitfall 15 — stale document and Document/UIDocument risks (reassess pre-d27-b lock advice).
+- `CLAUDE.md` §The Two-Runtime Rule, §Non-negotiable invariants, §Known sharp edges — IronPython 3.4 syntax, request parsing, route errors, restarts, duplicate listeners and honest queue scope.
+- `bridge.py` — current fixed target, injected transports, global lock and only `/status/` exemption.
+- `tools/status_tools.py`, `tools/utils.py` — status target display and tool-visible formatting.
+- `startup.py`, `revit_mcp/status.py`, `revit_mcp/model_info.py`, `revit_mcp/worksharing.py`, `revit_mcp/document.py` — route registration, active-document reads, open/activate behavior and Save outside a transaction.
+- `tests/unit/tool_manifest.txt` — authoritative MCP tool list when adding capabilities.
 
 </canonical_refs>
 
@@ -162,37 +73,38 @@
 ## Existing Code Insights
 
 ### Reusable Assets
-- Один объект `api` передаётся по ссылке во все регистраторы — точка для обёртки.
-- `/open_model/` уже умеет открывать без диалога рабочих наборов — основа для `activate_document`.
-- Защитное повторное получение `revit.doc` из исправления null-документа — вынести в общий помощник.
+- Injected `revit_get`/`revit_post`/`revit_image` and centralized `_revit_call` in `bridge.py` provide the transport boundary; `UNLOCKED_GET` currently contains only `status`.
+- `/open_model/` has workset-aware opening logic, but it is not proof that activation of an already-open or unsaved document works.
+- Existing `get_revit_model_info` and level listing cover the requested comparison data for the **active** document; inactive-document routing must be established rather than assumed.
 
 ### Established Patterns
-- Регистрация по соглашению, импорты внутри функций регистрации.
-- Правило «dict is an error only if…» — идентичность только вложенным ключом с данными.
+- Response formatting regards a dict as error only for a truthy `error` or error-like status. Identity fields must not masquerade as failures; HTTP non-200 refusals must render visibly.
+- Revit route modules use relative imports and are registered by convention. POST uses `text/plain` plus `parse_request_data()`. Transactions suppress warnings immediately after start; Save/SaveAs occur outside a transaction.
 
 ### Integration Points
-- `startup.py` (обёртка + целостность), `bridge.py` (конверт, детект слушателей), `tools/*_tools.py` (параметр `document`), `tools/utils.py` (строка идентичности), новый домен документов на обеих сторонах.
+- `bridge.py` target selection and per-target lock; tool call arguments/docstrings; status and discovery tools; Revit-side identity/document resolution and safe read routes; response formatting; manifest and unit/live acceptance.
 
 </code_context>
 
 <specifics>
 ## Specific Ideas
 
-- Отказ при двух слушателях должен называть оба PID и имена процессов, чтобы инженер знал, что закрыть.
-- Отказ из-за неоднозначного документа должен перечислять открытые документы — модель сразу повторит вызов с `document`.
+- Compare a model summary and its levels from two documents in one assistant session without changing the engineer's active UI where those two reads are proven safe.
+- A refusal for multiple processes or documents lists the exact candidates so the assistant can retry deliberately; a process restart requires re-selection.
+- An explicitly selected inactive document is readable on the supported comparison surface but not mutable until the engineer explicitly activates it (412).
 
 </specifics>
 
 <deferred>
 ## Deferred Ideas
 
-- Мутации неактивного документа без переключения (перенацеливание `doc` по селектору) — после живой проверки Document/UIDocument по маршрутам.
-- Адресация нескольких Revit-процессов из одного процесса сервера.
-- Перекрёстная сверка PID из ответа с PID слушателя — только если одного детекта окажется мало.
+- Live secret gate and file-integrity enforcement from the former Phase 4 `--auto` context D-01..D-05 → Phase 5 (logic built in Phase 3); do not carry their secret-in-`_mcp`, 401 or 423 wiring into Phase 2.
+- Mutation of an inactive document without explicit activation → future capability only after Document/UIDocument behavior is proven.
+- Cross-session pyRevit handler synchronization → `.planning/ROADMAP.md` backlog 999.1 (d27-c); a per-target lock in this MCP process is not that fix.
 
 </deferred>
 
 ---
 
-*Phase: 04-live-identity-ambiguity-refusal-and-multi-document-addressing*
-*Context gathered: 2026-09-23*
+*Phase: 02-live-identity-ambiguity-refusal-and-multi-document-addressin*
+*Context gathered: 2026-10-14*

@@ -63,6 +63,7 @@ cross-document half.
   in the client config (e.g. `revit-a` → 48884, `revit-b` → 48885). The client namespaces their
   tools, so one conversation can read both and compare. Documented with a concrete two-entry
   config example (README, `deploy/USER-GUIDE.md`).
+  - Superseded 2026-10-07 by D-29.
 - **D-04:** End-state addressing is "instance chosen by config entry, document chosen per call"
   (document-per-call arrives in Phase 2). Phase 1 must not build anything that blocks this —
   one target and one pooled `httpx.AsyncClient` per process stays.
@@ -115,6 +116,8 @@ cross-document half.
   serialization covers calls issued through this one MCP server process only. It is not a guarantee
   against a second MCP entry pointed at the same port, another assistant session, curl, or
   `/execute_code/` called directly — harm reduction, not a correctness guarantee.
+  - Extended 2026-10-07 by D-30: the docs also state that overlapping sessions against one Revit
+    can still cross-wire (cross-process cross-wiring) until d27-c lands.
 
 ### Live acceptance
 - **D-16:** Acceptance bench = two Revit instances started together (boot without a model, open
@@ -125,6 +128,7 @@ cross-document half.
 - **D-17:** Acceptance includes the user's cross-instance scenario: one assistant session with
   both `revit-a` and `revit-b` entries, a different model open in each; each entry's
   `get_revit_status` returns its own `host:port` and its own `document_title`.
+  - Superseded 2026-10-07 by D-29.
 - **D-18:** **Stop condition.** If the bench shows no auto-increment (both instances on 48884),
   Phase 1 is NOT accepted on criterion 5. Stop and bring the finding back to the user as a decision
   (e.g. forcing a per-instance port from `startup.py`, or PID-based addressing) — the
@@ -145,6 +149,8 @@ cross-document half.
   rewritten; `README.md`, `deploy/README.md`, `deploy/USER-GUIDE.md` get an env block example with
   `REVIT_PORT` (and the two-entry example of D-03). `deploy/configure_hermes.py` untouched while the
   default port holds.
+  - Two-entry example dropped 2026-10-07 by D-29; the `CLAUDE.md` port fix and the `REVIT_PORT`
+    docs as a deployment setting stand (plan 01-07).
 - **D-22:** New `tests/unit/test_bridge_serialization.py` on `httpx.MockTransport` with a handler
   held by an `asyncio.Event`; async tests via anyio's pytest plugin (`@pytest.mark.anyio`) — no new
   dependency. Cover: second POST waits for the first; GET passes while POST holds the lock; allowlisted
@@ -164,6 +170,7 @@ cross-document half.
 - **D-26:** The two-entry setup (`revit-a` / `revit-b`) is scoped to the **stdio** transport in
   this phase — docs and live acceptance use stdio only. HTTP/SSE multi-entry needs a configurable
   MCP listen port (hardcoded 8000) and is deferred; the docs say so explicitly.
+  - Superseded 2026-10-07 by D-29.
 - **D-27:** If the D-23 experiment shows a read hijacking a pending mutation through pyRevit's
   shared handler, execution **stops at a checkpoint for the user** — options: (a) accept and
   document, (b) lock every API-context route and exempt only `/status/` and `/model_info/`
@@ -179,6 +186,18 @@ cross-document half.
   block `/status/`", and slow reads queue behind mutations. Supersedes D-08. Evidence:
   `01-04-SUMMARY.md` "Bench record", Step 7. — **Reversibility:** reversible (one frozenset plus
   tests), but unlocking a route needs a live overlap measurement and the user's decision.
+- **D-29 (a5-a):** the two-instance harness (`tests/test_two_instance_targets.py`,
+  `TWO_INSTANCE_OK` on the 01-04 bench) counts as SC5 evidence. Standing product constraint: users
+  share ONE `revit` MCP entry and cannot copy it, so the two-entry scheme of D-03 and D-17 is not
+  documented for users and `REVIT_PORT` stays a deployment and development setting. Per-call target
+  selection inside one server moves to Phase 2 (IDENT-01) with one lock per Revit target. D-02
+  (one process = one target) stands as the transport model. Supersedes D-03, D-17 and the
+  two-entry parts of D-21 and D-26.
+- **D-30 (d27-c to the backlog):** the Revit-side fix for cross-process overlap in pyRevit's shared
+  handler is backlog item 999.1 in ROADMAP.md, not a phase. Until it lands, docs say overlapping
+  sessions against one Revit can still cross-wire.
+- **D-31:** plan 01-05 is superseded (`status: superseded` in its frontmatter) and replaced by gap
+  plans 01-06 (d27-b in `bridge.py`), 01-07 (honest-scope docs) and 01-08 (this planning record).
 
 ### Claude's Discretion
 - Lock primitive details and where exactly the read-only allowlist lives (a set in `bridge.py`,
@@ -260,6 +279,7 @@ cross-document half.
 - One MCP server discovering all Revit instances (48884..4888x) and addressing "instance +
   document" per call / a `RevitTarget` registry — rejected for now in favor of D-02/D-04; revisit
   only if D-18 triggers or the fleet regularly runs more than two instances.
+  - Revisited 2026-10-07 by D-29: per-call target selection is now Phase 2 scope.
 - Runtime target-switch tool — rejected (shared state under `stateless_http`).
 - `contrib-kit/revitmcp_kit.py` with a hardcoded `48884` — separate client, not part of IDENT-05.
 - Configurable MCP listen port (hardcoded 8000) so two HTTP/SSE-transport entries can coexist — see D-26.

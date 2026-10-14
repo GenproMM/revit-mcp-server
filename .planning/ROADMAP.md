@@ -52,8 +52,8 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. `/status/` returns promptly even while another call holds the serialization lock, and every other call, reads included, waits its turn (d27-b, decided after the 01-04 bench measured cross-wired reads in pyRevit's shared handler) — verified with a concurrent test, not inferred from code shape.
   3. A mutating call that times out, throws, or is cancelled releases the lock immediately — verified by forcing an exception inside the locked region and re-acquiring right after.
   4. Waiting in the queue does not shrink a call's own request timeout budget below what an unqueued call would get; a wait that exceeds its bound returns an explicit "not sent to Revit" error.
-  5. Setting `REVIT_PORT` changes which port this server talks to, exercised live with two Revit instances started together: each of 48884 and 48885 has exactly one listener with a different PID, and one assistant session with two MCP entries gets each entry's own `host:port` and `document_title` from `get_revit_status`. If both instances land on 48884, the phase is not accepted and addressing is revisited before Phase 2.
-  6. The documented scope of serialization is explicit and honest: it covers calls issued through this one process only; it is not represented anywhere as a guarantee against a second client, curl, or `/execute_code/` called directly.
+  5. Setting `REVIT_PORT` changes which port this server talks to, exercised live with two Revit instances started one after the other: each of 48884 and 48885 has exactly one listener with a different PID, and two stdio server processes (the two-instance harness `tests/test_two_instance_targets.py`) each get their own `host:port` and `document_title` from `get_revit_status`; per decision a5-a the harness stands in for the original one-session two-entry check, because users share one `revit` entry and cannot copy it, so a two-entry session is not a user-facing setup. If a staggered start puts both instances on 48884, the phase is not accepted and addressing is revisited before Phase 2.
+  6. The documented scope of serialization is explicit and honest: it covers calls issued through this one server process only; it is not represented anywhere as a guarantee against another MCP server process (a second assistant session), curl, or `/execute_code/` called directly; and the docs say overlapping sessions against one Revit can still cross-wire until backlog item 999.1 (d27-c) lands.
 
 **Plans:** 4/7 plans executed (01-05 superseded)
 
@@ -83,10 +83,11 @@ Plans:
 
 ### Phase 2: Live identity, ambiguity refusal, and multi-document addressing
 
-**Goal**: Every response can be attributed to a specific document in a specific Revit process; two processes listening on the same port produce a loud, named refusal instead of an unpredictable answer; an engineer can enumerate, address, and switch between documents open in one Revit session. Combined with Phase 1's one-entry-per-instance model, one assistant session can read and compare documents across instances and within one instance.
+**Goal**: Every response can be attributed to a specific document in a specific Revit process; two processes listening on the same port produce a loud, named refusal instead of an unpredictable answer; an engineer can enumerate, address, and switch between documents open in one Revit session. Combined with per-call selection of the Revit target inside the one shared `revit` server entry (carried here from Phase 1, see the note below), one assistant session can read and compare documents across instances and within one instance.
 **Depends on**: Phase 1 (port configurability)
 **Context**: `phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-CONTEXT.md` (`--auto`, predates the reorder — re-discuss before planning)
 **Requirements**: IDENT-01, IDENT-02, IDENT-03, IDENT-04, AMBIG-01, AMBIG-02, AMBIG-03, AMBIG-04, MDOC-01, MDOC-02, MDOC-03, MDOC-04, MDOC-05
+**Carried from Phase 1 (01-04, decisions a5-a and d27-b):** per-call selection of the Revit target inside the one shared `revit` server entry belongs here (recorded against IDENT-01); once one server process can address several Revit instances the serialization lock must be keyed by target, one lock per Revit target and never one global lock; `/status/` stays the only unlocked route per target unless a live overlap measurement says otherwise.
 **Success Criteria** (what must be TRUE):
 
   1. `/status/` returns PID, Revit version, port, and a session token issued once at process start — confirmed live against a running Revit instance.
@@ -177,3 +178,18 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 4. Honest outcomes on every mutating route | 0/TBD | Not started | - |
 | 5. Live secret gate and integrity enforcement | 0/TBD | Not started | - |
 | 6. Structured audit log of true outcomes | 0/TBD | Not started | - |
+
+## Backlog
+
+### Phase 999.1: Revit-side fix for cross-process overlap in pyRevit's shared handler (d27-c) (BACKLOG)
+
+**Goal:** Captured for future planning. Two MCP server processes (two assistant sessions) sending overlapping requests to one Revit must not cross-wire inside pyRevit's shared request handler; `bridge.py`'s lock is per process, so only a Revit-side fix closes this.
+**Evidence:** 01-04 bench, 2026-10-07, pyRevit 6.5.3, two Revit 2024.3.30, `scripts/probe_handler_overlap.py` run twice with identical verdicts. Phase M `cross-wired-mutation`: the overlapped mutation answered 200 with the other caller's output and its own body never ran. Phase R `cross-wired-read`: `/list_levels/` returned the mutation's output. `/status/` unaffected (0.01-0.02 s).
+**Source:** `phases/01-serialization-and-configurable-addressing/01-04-SUMMARY.md` "Bench record", Step 7.
+**Why it matters:** A mutation can be lost while reported as success (see `.planning/debug/param-write-rolls-back.md`, second candidate).
+**When promoted:** A live-Revit restart-cycle phase (changes under `revit_mcp/` or `startup.py` need a full Revit restart); not yet benched on pyRevit 6.5.5.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)

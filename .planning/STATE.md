@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 milestone: v0.1
 current_phase: 02
 current_phase_name: Live identity, ambiguity refusal, and multi-document addressing
-status: planning
-stopped_at: Phase 02 plans checked; live preflight 02-20 pending before production implementation
+status: executing
+stopped_at: 02-01 offline implementation verified (790 passed, 3 skipped); stop before 02-02 production full-restart recheck; G6 not authorized
 last_updated: "2026-10-15"
-last_activity: 2026-10-15
-last_activity_desc: Phase 2 research and 20 plans checked; planning handoff and live gates pending
+last_activity: 2026-10-16
+last_activity_desc: 02-01 implemented and offline verified; next 02-02 requires full Revit restart and separate live scope; no G6 authorization
 state_head: 81b7e164c186e1b4f7c98f90fdaf81bba3e360ed
 progress:
   total_phases: 6
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-10-14)
 
 ## Current Position
 
-Phase: 02 — Live identity, ambiguity refusal, and multi-document addressing
-Plan: 20 plans prepared and checked; 0 executed
-Status: Planning handoff pending; blocking live preflight 02-20 required, not Ready to execute broadly
-Last activity: 2026-10-15 — Research, pattern map and 20 plans checked; 13/13 requirements and 14/14 decisions covered; no live G1–G6 evidence
+Phase: 02 (Live identity, ambiguity refusal, and multi-document addressing) — PAUSED BEFORE 02-02 LIVE RECHECK
+Plan: 02-20 human checkpoint accepted; 02-01 implemented/offline verified
+Status: 790 unit tests passed, 3 skipped; cold start 0.904s. Production identity/actual-port verification pending full Revit restart in 02-02; G6 unrun/not authorized; execute_code enabled (D-15)
+Last activity: 2026-10-16 — selected-status slice completed offline; no live routes called after extension edits
 
 Progress: [██░░░░░░░░] 17%
 
@@ -94,8 +94,8 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 2] G1–G5 preflight 02-20 must record measured mechanisms before 02-01 implementation; OQ-5 includes both a process-start token facility and a Revit-side actual-port source independently reconciled with OS listener/PID evidence. G1–G6 remain unrun; Revit was not running at the last check.
-- [Phase 2] Both execute_revit_code and direct /execute_code/ can independently obtain other documents. Injected-doc validation is not whole-execution confinement; STOP for an explicit user decision if no enforceable mechanism exists. Disabling either capability has not been authorized. Plans pass review with this blocking checkpoint, not with the capability conflict resolved.
+- [Phase 2] G1–G5 measured mechanisms accepted by user; see 02-20-SUMMARY.md. G1 means extension startup in a fresh process, not literal OS creation. No fabricated aggregate classifier PASS; production identity still requires 02-02 full-restart recheck. G6 remains unrun and separately unauthorized.
+- [Phase 2] D-15 resolved the capability decision: both execute capabilities remain enabled as trusted arbitrary-code exceptions. No whole-execution document confinement is claimed; disabling either is not authorized.
 
 - Phase 3's success criteria are unit-verified only, not live-enforced — SEC/INTG requirements only become true in the live system once Phase 5 wires them in. This is intentional (build-before-wire ordering).
 - Several implementation details need live verification before/within their phase, per research: whether `CryptographicOperations.FixedTimeEquals` exists on pyRevit's hosted CLR (Phase 3/5, SEC-04), exact `pyrevit configs routes port` CLI semantics (Phase 1, IDENT-05), what Revit's external-event queue does today with two overlapping mutating requests (Phase 1, SER scope), whether pyRevit distinguishes extension-reload from fresh-process-start (relevant if any future restore work reads this milestone's integrity findings), and Revit's native worksharing history granularity (Phase 6, AUDIT ambition).
@@ -103,7 +103,7 @@ None yet.
 - [Phase 1] Cross-process overlap (two assistant sessions, curl, direct `/execute_code/` against one Revit) still cross-wires — backlog 999.1 (d27-c).
 - [Phase 1] WR-01 (`01-REVIEW.md`): a POST answered 200 with an unparseable body returns a bare `Error: Expecting value ...` instead of outcome-UNKNOWN wording; fix before Phase 4 builds on this transport. WR-03: `REVIT_HOST` is not validated.
 - [Phase 1] UAT 2026-10-14 recorded pass for the pyRevit 6.5.5 overlap probe, `/model_info/` under overlap, simultaneous launch and a cross-version pair, but no verdicts, port/PID mapping or output were captured; `bridge.py` still says 6.5.5 was not benched and `/model_info/` stays locked. Record the measurements before anyone proposes unlocking a route.
-- [Phase 1] On the dev workstation `%APPDATA%\pyRevit\Extensions\revit-mcp.extension` is a plain directory (pyRevit 6.5.3), not the junction CLAUDE.md describes — live tests there run the last deployed copy, not the repo.
+- [Coexistence] `%APPDATA%\pyRevit\Extensions\revit-mcp.extension` belongs to a foreign MCP: never modify it. Our `revit-mcp-server.extension` is the authorized repo junction and uses owned package/API genpro_revit_mcp. Repo extension edits are deployed immediately but need full Revit restart to load safely.
 
 ## Deferred Items
 
@@ -115,7 +115,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-15
-Stopped at: Phase 02 plans checked; finish planning handoff and run only blocking preflight 02-20 before production implementation
-Resume file: .planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-20-PLAN.md
-Next planning command: /gsd-plan-phase 2 — reuse existing research and 20 plans, do not rewrite from scratch; preserve all live STOP gates
+Last session: 2026-10-16
+Stopped at: 02-01 offline verified; production live recheck pending
+Resume file: .planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-02-PLAN.md
+Next boundary: prepare bounded 02-02 recheck and require full Revit close/reopen before any live route; no G6 or broad rollout

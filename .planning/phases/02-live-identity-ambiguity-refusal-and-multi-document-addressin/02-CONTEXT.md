@@ -39,6 +39,14 @@ Outside this phase: secret authentication and integrity logic (Phase 3), **live*
 - **D-13:** Before choosing a shared wrapper in `startup.py`, inspect pyRevit's handler signature inspection, `doc`/`request` injection and `ExternalEvent` dispatch. Preserve those semantics and the existing `text/plain`/`parse_request_data()` contract. Route handlers must continue returning error responses instead of raising. The old D-01..D-05 `security.wrap_api` wiring is **not** carried into this phase as a fixed design.
 - **D-14:** Verify process identity, same-port ambiguity, UI stability for the two supported inactive-document reads, explicit activation, document-close races, and both single- and multi-process defaults against a live Revit bench. Full process restart is required after `revit_mcp/` changes; pyRevit Reload alone is unsafe. Unit tests and the existing cold-start gate remain required, but they are not substitutes for these live claims. Record observed results rather than declaring unrun checks passed.
 
+### Human checkpoint acceptance — 2026-10-16
+
+User decision: «Принимаю чекпоинт, давай дальше». This supersedes the earlier pending human approval, not historical STOP measurements. Proceed only to existing 02-01 selected-status implementation; production live verification remains 02-02. G6 and the wider rollout are not authorized by this decision.
+
+Accepted mechanisms: G1 startup GUID retained in AppDomain and actual bound RoutesServer port, explicit-route-only; G2 retained-reference-equals-v1 with lifetime validity/unique Equals and permanent tombstones; G3 explicit-document summary/levels; G4 measured saved-existing-path activation only, otherwise refusal; G5 full netstat inventory with fail-closed parsing. D-15 remains the trusted arbitrary-code exception, both execute capabilities enabled, no confinement claim.
+
+G1 timing is extension startup in a fresh process, **not literal OS process creation**. The classifier's historical `process-start` literal is not evidence of stronger timing: no synthetic aggregate PASS is manufactured and raw captures remain unchanged. Older G1 execute-code-pending wording is superseded by D-15. G5 provenance-corrected evidence is separate from the original correctly refused capture; both are retained. See 02-20-SUMMARY.md for evidence pointers and limitations.
+
 ### Claude's Discretion
 - Exact process/document selector encoding, key format, discovery mechanism, where common response formatting lives, wrapper structure, and message wording, provided the visible behaviors above hold and security work is not pulled forward from Phases 3/5.
 - Whether additional read-only routes are proven safe for nonactive documents after the minimum summary/levels comparison works. Do not classify an unmeasured route as safe by analogy.

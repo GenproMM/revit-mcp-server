@@ -62,8 +62,17 @@ Target
 REVIT_HOST and REVIT_PORT are read once at import. An invalid REVIT_PORT makes
 the server refuse to start. One process means one target; the port names a
 launch slot, not a model. REVIT_PORT is a deployment and development setting:
-users share one revit entry and do not add entries. Choosing a Revit per call,
-with one lock per target, is Phase 2 (D-29).
+users share one revit entry and do not add entries. An explicit incarnation
+selector currently supports only GET /status/ (02-01); all other selected calls
+refuse rather than falling back to this configured address. No-selector calls
+retain the legacy configured path, not discovery/ambiguity guarantees. Discovery,
+full selected routing and incarnation-keyed locks remain 02-03 (D-29).
+
+Selected status checks a complete Windows netstat snapshot before HTTP and
+compares the received PID, bound port and startup token. Snapshot-to-connect is
+still a finite TOCTOU window, not a socket reservation or authentication. Identity
+is initialized at extension startup in a fresh process, not literal OS creation.
+The scoped status client never mutates the legacy base URL or a shared selection.
 
 This module must not import mcp at module level: it is imported on the cold
 start path and has to stay cheap.
@@ -73,6 +82,12 @@ import os
 import json
 import base64
 import asyncio
+import binascii
+import ipaddress
+import re
+import subprocess
+import sys
+import uuid
 import httpx
 from typing import Optional, Dict, Any, Union
 
@@ -145,8 +160,179 @@ def _get_lock() -> asyncio.Lock:
     return _lock
 
 
-async def revit_get(endpoint: str, ctx: Any = None, **kwargs) -> Union[Dict, str]:
-    """Simple GET request to Revit API"""
+def parse_target(selector: str) -> dict:
+    """Decode a local incarnation selector, not an authentication credential."""
+    if not isinstance(selector, str) or len(selector) > 1024:
+        raise ValueError("Invalid target selector; rediscover Revit targets.")
+    if not re.fullmatch(r"revit1:[A-Za-z0-9_-]+", selector):
+        raise ValueError("Invalid target selector; rediscover Revit targets.")
+    encoded = selector.split(":", 1)[1]
+    def unique_keys(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate target field")
+            result[key] = value
+        return result
+    try:
+        raw = base64.b64decode(encoded + "=" * (-len(encoded) % 4),
+                               altchars=b"-_", validate=True)
+        target = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_keys)
+        if not isinstance(target, dict) or set(target) != {
+            "host", "port", "pid", "session_token"
+        }:
+            raise ValueError("Invalid target fields")
+        if target["host"] not in ("localhost", "127.0.0.1", "::1"):
+            raise ValueError("Only local loopback targets are supported")
+        if type(target["port"]) is not int or not 1 <= target["port"] <= 65535:
+            raise ValueError("Invalid target port")
+        if type(target["pid"]) is not int or target["pid"] <= 0:
+            raise ValueError("Invalid target PID")
+        token = target["session_token"]
+        if not isinstance(token, str) or str(uuid.UUID(token)) != token:
+            raise ValueError("Invalid target session token")
+        return target
+    except (ValueError, TypeError, UnicodeError, binascii.Error) as exc:
+        raise ValueError("Invalid target selector; rediscover Revit targets: {}".format(exc)) from exc
+
+
+def _netstat_endpoint_port(endpoint):
+    host, separator, port = endpoint.rpartition(":")
+    if not separator or not port.isascii() or not port.isdecimal():
+        return None
+    if not 0 <= int(port) <= 65535:
+        return None
+    try:
+        if host.startswith("[") and host.endswith("]"):
+            ipaddress.IPv6Address(host[1:-1])
+        else:
+            ipaddress.IPv4Address(host)
+    except ValueError:
+        return None
+    return int(port)
+
+
+def parse_netstat_listener_rows(text, ports):
+    """Full approved G5 parser: preserve all owners; unknown rows fail closed."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    non_listening = {
+        "CLOSED", "SYN_SENT", "SYN_RECEIVED", "ESTABLISHED", "FIN_WAIT_1",
+        "FIN_WAIT_2", "CLOSE_WAIT", "CLOSING", "LAST_ACK", "TIME_WAIT",
+        "DELETE_TCB", "BOUND",
+    }
+    result = dict((p, []) for p in ports)
+    saw_row = False
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if fields[0] != "TCP":
+            if not saw_row and (
+                line.strip() in ("Active Connections", "Активные подключения")
+                or (fields[-1] == "PID" and fields[0] in ("Proto", "Протокол"))
+            ):
+                continue
+            return None
+        if len(fields) != 5:
+            return None
+        _, local, remote, state, raw_pid = fields
+        port = _netstat_endpoint_port(local)
+        if port is None or _netstat_endpoint_port(remote) is None:
+            return None
+        if state != "LISTENING" and state not in non_listening:
+            return None
+        if not raw_pid.isascii() or not raw_pid.isdecimal():
+            return None
+        pid = int(raw_pid)
+        if state == "LISTENING" and (pid == 0 or port == 0):
+            return None
+        saw_row = True
+        if state == "LISTENING" and port in result and pid not in result[port]:
+            result[port].append(pid)
+    return result if saw_row else None
+
+
+def listener_snapshot(ports, run=subprocess.run, platform=None):
+    """Complete Windows snapshot, never Get-NetTCPConnection or an empty fallback."""
+    if (sys.platform if platform is None else platform) != "win32":
+        return None
+    try:
+        done = run(["netstat.exe", "-ano", "-p", "tcp"],
+                   capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return None
+    if done.returncode != 0:
+        return None
+    return parse_netstat_listener_rows(done.stdout, ports)
+
+
+async def resolve_target(selector: str) -> dict:
+    """Validate ownership before any HTTP; a snapshot does not reserve a socket."""
+    target = parse_target(selector)
+    snapshot = await asyncio.to_thread(listener_snapshot, [target["port"]])
+    if not isinstance(snapshot, dict):
+        raise ValueError("Listener inventory unavailable; request not sent. Rediscover targets.")
+    owners = snapshot.get(target["port"])
+    if not isinstance(owners, list) or any(type(p) is not int or p <= 0 for p in owners):
+        raise ValueError("Listener inventory unusable; request not sent. Rediscover targets.")
+    owners = sorted(set(owners))
+    if len(owners) > 1:
+        raise ValueError("Listener collision: PIDs {}; request not sent. Rediscover targets.".format(owners))
+    if not owners:
+        raise ValueError("No listener; request not sent. Rediscover targets.")
+    if owners != [target["pid"]]:
+        raise ValueError("Listener PID mismatch (owners {}); request not sent. Rediscover targets.".format(owners))
+    return target
+
+
+def _selected_client(target):
+    # A scoped status-only tracer; per-incarnation pools and locks belong to 02-03.
+    host = target["host"]
+    if host == "::1":
+        host = "[::1]"
+    return httpx.AsyncClient(
+        base_url="http://{}:{}/genpro_revit_mcp/".format(host, target["port"]),
+        trust_env=False, follow_redirects=False,
+    )
+
+
+async def _selected_status(selector, timeout):
+    try:
+        target = await resolve_target(selector)
+        async with _selected_client(target) as client:
+            response = await client.get("status/", timeout=timeout)
+        if response.status_code not in (200, 503):
+            return "Error: {} - {}".format(response.status_code, response.text)
+        payload = response.json()
+        identity = payload.get("process_identity") if isinstance(payload, dict) else None
+        if (not isinstance(identity, dict)
+                or type(identity.get("pid")) is not int
+                or type(identity.get("actual_port")) is not int
+                or identity.get("pid") != target["pid"]
+                or identity.get("actual_port") != target["port"]
+                or identity.get("session_token") != target["session_token"]
+                or not isinstance(identity.get("revit_version"), str)
+                or not identity["revit_version"].strip()):
+            return "Error: Revit identity missing or stale; rediscover Revit targets."
+        # Per-response metadata, never mutable callable/session state. Strip any
+        # server-supplied verification claim before attaching our own result.
+        payload.pop("_verified_process", None)
+        payload["_verified_process"] = dict(identity)
+        if response.status_code == 503 and not payload.get("error"):
+            payload["error"] = "Revit status returned HTTP 503"
+        return payload
+    except Exception as exc:
+        return _error_text(exc)
+
+
+async def revit_get(endpoint: str, ctx: Any = None, target: Optional[str] = None,
+                    **kwargs) -> Union[Dict, str]:
+    """GET with an optional explicit incarnation on the status tracer only."""
+    if target is not None:
+        if endpoint != "/status/" or set(kwargs) - {"timeout"}:
+            return "Error: Explicit targets currently support only GET /status/; request not sent."
+        return await _selected_status(target, kwargs.get("timeout", 30.0))
     return await _revit_call("GET", endpoint, ctx=ctx, **kwargs)
 
 
@@ -155,16 +341,23 @@ async def revit_get(endpoint: str, ctx: Any = None, **kwargs) -> Union[Dict, str
 revit_get.revit_target = REVIT_TARGET
 
 
-async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None, **kwargs) -> Union[Dict, str]:
-    """Simple POST request to Revit API"""
+async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None,
+                     target: Optional[str] = None, **kwargs) -> Union[Dict, str]:
+    """Simple POST request to Revit API; selected mutation routing is not yet enabled."""
+    if target is not None:
+        return "Error: Explicit targets currently support only GET /status/; request not sent."
     return await _revit_call("POST", endpoint, data=data, ctx=ctx, **kwargs)
 
 
-async def revit_image(endpoint: str, ctx: Any = None, timeout: float = 60.0) -> Union[Any, str]:
+async def revit_image(endpoint: str, ctx: Any = None, timeout: float = 60.0,
+                      target: Optional[str] = None) -> Union[Any, str]:
     """GET request that returns an Image object.
 
     Runs through the same bounded-wait lock path as every other call (d27-b).
     """
+
+    if target is not None:
+        return "Error: Explicit targets currently support only GET /status/; request not sent."
 
     async def fetch() -> Union[Any, str]:
         from mcp.server.fastmcp import Image  # inside: keeps cold start cheap (D-24)

@@ -87,6 +87,15 @@ def register_routes():
 
     registry.reset()
 
+    # Explicit startup initialization, not a lazy first-request identity. The
+    # owned alias keeps this helper separate from another vendor's package.
+    try:
+        identity = __import__("{}.identity".format(_PACKAGE), fromlist=["identity"])
+        identity.initialize_process_identity()
+    except Exception as exc:
+        registry.FAILED["identity"] = "{}: {}".format(type(exc).__name__, str(exc))
+        logger.exception("Failed to initialize process identity")
+
     for name in _domain_modules(revit_mcp):
         try:
             module = __import__("{}.{}".format(_PACKAGE, name), fromlist=[name])

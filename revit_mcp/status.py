@@ -35,6 +35,7 @@ def register_status_routes(api):
                   "health" is "degraded" when any domain failed to register.
                   "failed_domains" is present only when something failed.
         """
+        identity_data = {}
         try:
             from pyrevit import revit
 
@@ -57,6 +58,17 @@ def register_status_routes(api):
                 registration = {"registry_error": str(reg_error)}
                 degraded = False
 
+            identity_data = {}
+            identity_error = None
+            try:
+                from .identity import get_process_identity
+                from pyrevit import HOST_APP
+
+                identity_data = get_process_identity(HOST_APP.app.VersionNumber)
+            except Exception as identity_exc:
+                identity_error = str(identity_exc)
+                logger.warning("Could not read process identity: {}".format(identity_error))
+
             doc = revit.doc
             if doc:
                 payload = {
@@ -69,6 +81,11 @@ def register_status_routes(api):
                     "api_name": "revit_mcp",
                 }
                 payload.update(registration)
+                if identity_error:
+                    payload["health"] = "degraded"
+                    payload["identity_error"] = identity_error
+                else:
+                    payload["process_identity"] = identity_data
                 return routes.make_response(data=payload)
             else:
                 payload = {
@@ -78,15 +95,22 @@ def register_status_routes(api):
                     "api_name": "revit_mcp",
                 }
                 payload.update(registration)
+                if identity_error:
+                    payload["identity_error"] = identity_error
+                else:
+                    payload["process_identity"] = identity_data
                 return routes.make_response(data=payload, status=503)
 
         except Exception as e:
             logger.error("Health check failed:{}".format(str(e)))
-            return routes.make_response(data={
+            payload = {
                 "status": "unhealthy",
                 "revit_available": False,
                 "error": str(e),
                 "api_name": "revit_mcp"
-            }, status=503)
+            }
+            if identity_data:
+                payload["process_identity"] = identity_data
+            return routes.make_response(data=payload, status=503)
 
     logger.info("Status routes registered successfully")

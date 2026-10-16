@@ -382,9 +382,13 @@ def test_g1_docs_say_signature_and_source_is_inference_not_an_observed_call():
 
 def _only_pair_kind(record, kind):
     other = "unsaved" if kind == "saved" else "saved"
-    record["open_objects"] = [o for o in record["open_objects"] if o["kind"] == kind] + [
+    kept = [o for o in record["open_objects"] if o["kind"] == kind]
+    record["open_objects"] = kept + [
         {"title": "Other", "path": "", "kind": other, "object_id": "o9", "raw_handle": "h9"}
     ]
+    # Keep close-and-replace consistent with the remaining objects: close the second one.
+    record["close_and_replace"]["closed_object_id"] = kept[1]["object_id"]
+    record["close_and_replace"]["replacement"]["raw_handle"] = kept[1]["raw_handle"]
     return record
 
 

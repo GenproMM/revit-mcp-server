@@ -38,9 +38,10 @@ starts as null, which classifies as STOP.
 G1 (process identity, wrapper feasibility, actual port). Run ``snippet g1``. It
     lists every registered handler's positional argument names, the active routes
     server and its ACTUAL bound address, and a token-facility candidate. Fill
-    ``injection`` (what was injected, whether ExternalEvent dispatch happens, and
-    set ``wrapper_preserves_semantics`` true only after a wrapper was actually
-    shown to keep injection and non-throwing responses; leave null otherwise),
+    ``injection`` (what was injected, whether ExternalEvent dispatch happens,
+    ``observation_method``, and ``wrapper_preserves_semantics`` set true only after a
+    wrapper was actually shown to keep injection and non-throwing responses; leave
+    null otherwise),
     ``token`` (facility, ``initialized_at`` = "process-start" only if shown, stable
     across requests, different after a full Revit restart) and ``port``: the
     Revit-side source of the actual bound port, whether that source is the
@@ -52,18 +53,51 @@ G1 (process identity, wrapper feasibility, actual port). Run ``snippet g1``. It
     ``doc``/``uidoc`` from ``uiapp.ActiveUIDocument`` at dispatch: a wrapper that
     hides the argument names loses both. That is a hint about what to measure, not
     a result.
-G2 (document lifetime). Run ``snippet g2`` with LABEL set to before-close, then
-    again after closing one of two same-title documents (do both an unsaved
-    "Project1" pair and a saved pair), then after opening a replacement with the
-    same presentation fields. Map ``runtime_identity_hash`` to ``object_id`` and
-    ``api_hash_code`` to ``raw_handle``.
+    ``injection.observation_method`` discloses how injection was observed.
+    "signature-and-source" means the handler argument names from the G1 snippet plus
+    reading the installed pyRevit handler source: that is inference from source, not
+    an observed call. "live-dispatch" means it was observed during an actual request.
+    Both values may continue; the field only makes the evidence level explicit.
+G2 (document lifetime). Each button click is a fresh script run, so the snippet
+    keeps the enumerated Document objects in process-wide AppDomain data
+    ("phase2_g2_store", with the describe() rows as JSON under
+    "phase2_g2_store_meta"). Run ``snippet g2`` with LABEL = "before-close" FIRST
+    (the only label that stores; it overwrites any previous store), then again with
+    another label after closing one of two same-title documents, then after opening
+    a replacement with the same presentation fields. Every run prints
+    ``stored_objects``: per stored document the stored row, ``is_valid_object``
+    (or {"error": ...} if access throws) and ``still_enumerated`` (its stored
+    ``runtime_identity_hash`` is present in the current enumeration).
+    ``closed_object_invalid_after_close`` = the stored entry of the closed document
+    shows is_valid_object false or an access error in the after-close run.
+    ``survivor_resolves`` = the surviving same-title stored entry shows
+    is_valid_object true and still_enumerated true. Map ``runtime_identity_hash`` to
+    ``object_id`` and ``api_hash_code`` to ``raw_handle``.
+    Revit numbers new unsaved projects (Project1, Project2), so an unsaved
+    same-title pair is probably impossible, and Revit may refuse to open a second
+    saved file with the same name. Try both, and record in ``same_title_pairs``
+    (keys ``unsaved`` and ``saved``, each ``reproducible`` + ``attempt``): a kind
+    with a real same-title pair among ``open_objects`` is enough on its own; a kind
+    without one needs ``reproducible`` false AND an ``attempt`` text saying what was
+    tried (a measured negative). ``reproducible`` false while that kind's pair is in
+    ``open_objects`` is contradictory. If neither kind has a real pair the gate
+    STOPs: at least one real same-title pair is required.
 G3 (inactive read safety). Run ``snippet g3`` with A active and B targeted, then
     with B active and A targeted. Fill both ``directions`` and list any accessor
     you found that reads ``revit.doc``/UIDocument in the summary/levels path.
-G4 (activation). Run ``snippet g4`` with CONFIRM_ACTIVATION left False to list the
-    activation overloads, then set it True per case (saved, unsaved, workshared)
-    under engineer control and note dialogs. A case that did not cleanly activate
-    must carry policy "refuse".
+G4 (activation). The routes run handlers through an ExternalEvent, so activation
+    must be tested in that context, not only in a button's command context. Run
+    ``snippet g4`` in MODE = "list" (default: lists overloads, open documents and
+    the active document, never activates). Then, per case (saved, unsaved,
+    workshared) under engineer control, set CONFIRM_ACTIVATION = True and run
+    MODE = "external-event" (an IExternalEventHandler activates TARGET_PATH and
+    stores its result under "phase2_g4_result"; Raise() only queues it), wait until
+    Revit is idle, then run MODE = "report". Note any dialog by hand. MODE =
+    "command" activates directly in the command context and is optional extra
+    evidence only. Without CONFIRM_ACTIVATION the activating modes print a refusal
+    line and do nothing. Record per case ``context`` ("command" | "external-event");
+    a case with policy "allow" must have context "external-event". A case that did
+    not cleanly activate must carry policy "refuse".
 G5 (ambiguity). Start the duplicate-port condition, run ``listeners --ports N``
     BEFORE any request to that port, capture PIDs independently (Task Manager or
     ``Get-Process revit``), and record ``model_route_send_count`` = the number of
@@ -181,6 +215,10 @@ print("PHASE2_G1_JSON=" + json.dumps(out, default=str))
 
 G2_SNIPPET = '''# -*- coding: utf-8 -*-
 # PHASE 2 G2 probe. READ ONLY. Run once per LABEL; close and open documents by hand.
+# Every button click is a fresh script run, so the Document objects enumerated under
+# LABEL = "before-close" are kept in process-wide AppDomain data and read back by
+# every later run. Run LABEL = "before-close" FIRST (it overwrites any earlier store).
+# Nothing here opens, closes, saves or changes a document.
 import json
 import clr
 clr.AddReference("System")
@@ -188,10 +226,13 @@ import System
 from pyrevit import HOST_APP
 
 LABEL = "before-close"
+STORE_KEY = "phase2_g2_store"
+META_KEY = "phase2_g2_store_meta"
 
 app = HOST_APP.app
 uiapp = HOST_APP.uiapp
 helpers = System.Runtime.CompilerServices.RuntimeHelpers
+domain = System.AppDomain.CurrentDomain
 
 
 def _describe(doc):
@@ -204,12 +245,42 @@ def _describe(doc):
         "is_valid_object": bool(doc.IsValidObject),
         "runtime_identity_hash": helpers.GetHashCode(doc),
         "api_hash_code": doc.GetHashCode(),
+        "label": LABEL,
     }
+
+
+def _stored_objects(current_hashes):
+    store = domain.GetData(STORE_KEY)
+    meta_text = domain.GetData(META_KEY)
+    if store is None or meta_text is None:
+        return None
+    meta = json.loads(str(meta_text))
+    rows = []
+    for index in range(store.Count):
+        doc = store[index]
+        stored = meta[index] if index < len(meta) else None
+        try:
+            valid = bool(doc.IsValidObject)
+        except Exception as ex:
+            valid = {"error": repr(ex)}
+        stored_hash = None if stored is None else stored.get("runtime_identity_hash")
+        rows.append({
+            "stored": stored,
+            "is_valid_object": valid,
+            "still_enumerated": stored_hash in current_hashes,
+        })
+    return rows
 
 
 first = [d for d in app.Documents]
 second = [d for d in app.Documents]
 rows = [_describe(d) for d in first]
+if LABEL == "before-close":
+    keep = System.Collections.ArrayList()
+    for d in first:
+        keep.Add(d)
+    domain.SetData(STORE_KEY, keep)
+    domain.SetData(META_KEY, json.dumps(rows, default=str))
 equals = []
 for i, a in enumerate(first):
     for j, b in enumerate(first):
@@ -227,6 +298,7 @@ out = {
     "second_enumeration_same_objects": same_objects,
     "ui_active_title": None if active is None else active.Document.Title,
     "ui_active_path": None if active is None else active.Document.PathName,
+    "stored_objects": _stored_objects(set(helpers.GetHashCode(d) for d in first)),
 }
 print("PHASE2_G2_JSON=" + json.dumps(out, default=str))
 '''
@@ -296,28 +368,70 @@ print("PHASE2_G3_JSON=" + json.dumps(out, default=str))
 '''
 
 G4_SNIPPET = '''# -*- coding: utf-8 -*-
-# PHASE 2 G4 probe. Lists the activation API, and activates ONLY when the engineer
-# sets CONFIRM_ACTIVATION to True. Activation changes UI state, never model data.
-# Run once per case (saved, unsaved, workshared) and note any dialog by hand.
+# PHASE 2 G4 probe. MODE "list" (default) lists the activation overloads, the open
+# documents and the active document and never activates anything. Modes "command"
+# and "external-event" activate TARGET_PATH and need CONFIRM_ACTIVATION = True, else
+# they print a refusal line and do nothing. Activation changes UI state, never model
+# data. Run once per case (saved, unsaved, workshared) and note any dialog by hand.
+#   "command"        activate directly in this button's command context (extra evidence)
+#   "external-event" activate inside an ExternalEvent handler, the context the routes
+#                    use; Raise() only queues it, so wait until Revit is idle
+#   "report"         print the result the handler stored under "phase2_g4_result"
 import json
 import clr
 clr.AddReference("System")
+clr.AddReference("RevitAPIUI")
 import System
+from Autodesk.Revit.UI import IExternalEventHandler, ExternalEvent
 from pyrevit import HOST_APP
 
+MODE = "list"
 CONFIRM_ACTIVATION = False
 TARGET_PATH = ""
 TARGET_TITLE = ""
 
+RESULT_KEY = "phase2_g4_result"
+HANDLER_KEY = "phase2_g4_handler"
+EVENT_KEY = "phase2_g4_event"
+
 uiapp = HOST_APP.uiapp
 app = HOST_APP.app
+domain = System.AppDomain.CurrentDomain
 
 
-def _active_key():
-    active = uiapp.ActiveUIDocument
+def _active_key_of(ui):
+    active = ui.ActiveUIDocument
     if active is None:
         return None
     return [active.Document.Title, active.Document.PathName]
+
+
+class Phase2G4Handler(IExternalEventHandler):
+    def __init__(self, target_path, target_title):
+        self.target_path = target_path
+        self.target_title = target_title
+
+    def Execute(self, uiapp):
+        result = {
+            "context": "external-event",
+            "target": [self.target_title, self.target_path],
+            "active_before": None,
+            "active_after": None,
+            "error": None,
+        }
+        try:
+            result["active_before"] = _active_key_of(uiapp)
+            uiapp.OpenAndActivateDocument(self.target_path)
+        except Exception as ex:
+            result["error"] = repr(ex)
+        try:
+            result["active_after"] = _active_key_of(uiapp)
+        except Exception as ex:
+            result["error"] = "{} / active_after: {}".format(result["error"], repr(ex))
+        domain.SetData(RESULT_KEY, json.dumps(result, default=str))
+
+    def GetName(self):
+        return "Phase2G4Handler"
 
 
 def _overloads():
@@ -334,21 +448,48 @@ def _open_documents():
 
 out = {
     "probe": "g4",
+    "mode": MODE,
+    "context": None,
     "confirm_activation": CONFIRM_ACTIVATION,
     "activation_overloads": _overloads(),
     "open_documents": _open_documents(),
-    "active_before": _active_key(),
+    "active_before": _active_key_of(uiapp),
     "target": [TARGET_TITLE, TARGET_PATH],
 }
-if CONFIRM_ACTIVATION:
-    try:
-        uiapp.OpenAndActivateDocument(TARGET_PATH)
-        out["activation"] = {"called": True}
-    except Exception as ex:
-        out["activation"] = {"called": True, "error": repr(ex)}
-out["active_after"] = _active_key()
+if MODE == "list":
+    pass
+elif MODE == "report":
+    raw = domain.GetData(RESULT_KEY)
+    out["result"] = None if raw is None else json.loads(str(raw))
+    if out["result"] is not None:
+        out["context"] = out["result"].get("context")
+elif MODE in ("command", "external-event"):
+    if CONFIRM_ACTIVATION:
+        if MODE == "command":
+            out["context"] = "command"
+            try:
+                uiapp.OpenAndActivateDocument(TARGET_PATH)
+                out["activation"] = {"called": True}
+            except Exception as ex:
+                out["activation"] = {"called": True, "error": repr(ex)}
+        else:
+            out["context"] = "external-event"
+            handler = Phase2G4Handler(TARGET_PATH, TARGET_TITLE)
+            event = ExternalEvent.Create(handler)
+            domain.SetData(HANDLER_KEY, handler)
+            domain.SetData(EVENT_KEY, event)
+            domain.SetData(RESULT_KEY, None)
+            out["raise_request"] = str(event.Raise())
+            out["note"] = "queued; wait until Revit is idle, then run MODE = report"
+    else:
+        out["refused"] = "MODE {} needs CONFIRM_ACTIVATION = True".format(MODE)
+        print("PHASE2_G4_REFUSED: set CONFIRM_ACTIVATION = True to run mode " + MODE)
+else:
+    out["error"] = "unknown MODE " + repr(MODE)
+out["active_after"] = _active_key_of(uiapp)
 print("PHASE2_G4_JSON=" + json.dumps(out, default=str))
 '''
+
 
 SNIPPETS = {"g1": G1_SNIPPET, "g2": G2_SNIPPET, "g3": G3_SNIPPET, "g4": G4_SNIPPET}
 
@@ -416,6 +557,10 @@ def _finish(reasons, verdict):
 
 # --------------------------------------------------------------------- G1
 
+# A disclosure, not a stricter gate: both values may continue. "signature-and-source"
+# is inference from the handler argument names and the installed source.
+_G1_METHODS = ("signature-and-source", "live-dispatch")
+
 
 @_never_raises
 def classify_g1(record):
@@ -443,6 +588,11 @@ def classify_g1(record):
         reasons.append("ExternalEvent dispatch was not observed")
     if not _nonblank(inj.get("source_ref")):
         reasons.append("injection source_ref is blank (where was the installed implementation read?)")
+    if inj.get("observation_method") not in _G1_METHODS:
+        reasons.append(
+            "injection observation_method must be 'signature-and-source' or 'live-dispatch' "
+            "(how was injection observed?)"
+        )
     wrapper = inj.get("wrapper_preserves_semantics")
     if wrapper not in (True, False, None):
         reasons.append("wrapper_preserves_semantics must be true, false or null")
@@ -529,13 +679,32 @@ def classify_g2(record):
         )
     )
     ids = {}
+    pairs = _section(record, "same_title_pairs", reasons)
     if not valid:
         reasons.append("open_objects must list at least two documents with title, path, kind, object_id, raw_handle")
     else:
+        observed = 0
         for kind in ("unsaved", "saved"):
             titles = [o["title"] for o in objs if o["kind"] == kind]
-            if not any(titles.count(t) >= 2 for t in titles):
-                reasons.append("no same-title {} pair among open_objects".format(kind))
+            has_pair = any(titles.count(t) >= 2 for t in titles)
+            entry = pairs.get(kind)
+            if not isinstance(entry, dict):
+                reasons.append("same_title_pairs.{} is missing or not an object".format(kind))
+            elif has_pair:
+                observed += 1
+                if entry.get("reproducible") is False:
+                    reasons.append(
+                        "contradictory record: same_title_pairs.{}.reproducible is false although "
+                        "open_objects holds a same-title {} pair".format(kind, kind)
+                    )
+            elif not (entry.get("reproducible") is False and _nonblank(entry.get("attempt"))):
+                reasons.append(
+                    "no same-title {} pair and no recorded non-reproducible attempt".format(kind)
+                )
+        if not observed:
+            reasons.append(
+                "no same-title pair of any kind was observed, so same-title binding is unmeasured"
+            )
         ids = dict((o["object_id"], o) for o in objs)
         if len(ids) != len(objs):
             reasons.append("open documents do not have distinct wrapper objects (an object_id repeats)")
@@ -641,6 +810,7 @@ def classify_g3(record):
 
 _G4_CASES = ("saved", "unsaved", "workshared")
 _G4_OUTCOMES = ("activated", "refused", "dialog", "error")
+_G4_CONTEXTS = ("command", "external-event")
 
 
 @_never_raises
@@ -652,8 +822,6 @@ def classify_g4(record):
 
     if not _nonblank(record.get("api")):
         reasons.append("the activation API (name and overload) is not recorded")
-    if record.get("external_event_context") is not True:
-        reasons.append("activation was not shown to run in a valid Revit API context")
 
     cases = _section(record, "cases", reasons)
     allowed = 0
@@ -665,7 +833,16 @@ def classify_g4(record):
         if case.get("tested") is not True:
             reasons.append("case {} was not tested".format(name))
             continue
-        outcome, policy = case.get("outcome"), case.get("policy")
+        outcome, policy, context = case.get("outcome"), case.get("policy"), case.get("context")
+        if context not in _G4_CONTEXTS:
+            reasons.append(
+                "case {} has an unknown or missing context (must be command or external-event)".format(name)
+            )
+        elif policy == "allow" and context != "external-event":
+            reasons.append(
+                "case {} is allowed but was not activated through an ExternalEvent, "
+                "the context the routes use".format(name)
+            )
         if outcome not in _G4_OUTCOMES:
             reasons.append("case {} has an unknown outcome".format(name))
         if policy not in ("allow", "refuse"):
@@ -749,6 +926,7 @@ def evidence_template():
     """The record to fill in. Every value is null, so it classifies as STOP."""
     case = {
         "tested": None,
+        "context": None,
         "outcome": None,
         "dialog_observed": None,
         "active_after_is_target": None,
@@ -775,6 +953,7 @@ def evidence_template():
                 "external_event": None,
                 "wrapper_preserves_semantics": None,
                 "source_ref": None,
+                "observation_method": None,
             },
             "token": {
                 "facility": None,
@@ -796,6 +975,10 @@ def evidence_template():
             "open_objects": [
                 {"title": None, "path": None, "kind": None, "object_id": None, "raw_handle": None}
             ],
+            "same_title_pairs": {
+                "unsaved": {"reproducible": None, "attempt": None},
+                "saved": {"reproducible": None, "attempt": None},
+            },
             "wrapper_lifetime": {"stable_while_open": None, "stable_across_enumerations": None},
             "close_and_replace": {
                 "closed_object_id": None,
@@ -831,7 +1014,6 @@ def evidence_template():
             "live": None,
             "synthetic": None,
             "api": None,
-            "external_event_context": None,
             "cases": {name: dict(case) for name in _G4_CASES},
         },
         "g5": {

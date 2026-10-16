@@ -52,6 +52,7 @@ def good_g1():
             "external_event": True,
             "wrapper_preserves_semantics": True,
             "source_ref": "pyRevit routes server dispatch, read in the installed extension",
+            "observation_method": "signature-and-source",
         },
         "token": {
             "facility": "System.Guid.NewGuid",
@@ -79,6 +80,10 @@ def good_g2():
             {"title": "Shared", "path": "C:/a/Shared.rvt", "kind": "saved", "object_id": "o3", "raw_handle": "h3"},
             {"title": "Shared", "path": "C:/b/Shared.rvt", "kind": "saved", "object_id": "o4", "raw_handle": "h4"},
         ],
+        "same_title_pairs": {
+            "unsaved": {"reproducible": True, "attempt": None},
+            "saved": {"reproducible": True, "attempt": None},
+        },
         "wrapper_lifetime": {"stable_while_open": True, "stable_across_enumerations": True},
         "close_and_replace": {
             "closed_object_id": "o2",
@@ -127,9 +132,10 @@ def good_g3():
     }
 
 
-def _case(outcome="activated", policy="allow", dialog=False, active_after=True):
+def _case(outcome="activated", policy="allow", dialog=False, active_after=True, context="external-event"):
     return {
         "tested": True,
+        "context": context,
         "outcome": outcome,
         "dialog_observed": dialog,
         "active_after_is_target": active_after,
@@ -142,7 +148,6 @@ def good_g4():
         "live": True,
         "synthetic": False,
         "api": "UIApplication.OpenAndActivateDocument(String)",
-        "external_event_context": True,
         "cases": {
             "saved": _case(),
             "unsaved": _case(),
@@ -352,7 +357,35 @@ def test_g1_unproven_token_lifetime_is_stop(path, value):
     assert any("token" in r for r in reasons)
 
 
+@pytest.mark.parametrize("value", [DELETE, None, "", "guess", "live", "Signature-And-Source", True])
+def test_g1_observation_method_must_be_a_disclosed_allowed_value(value):
+    verdict, reasons = pf.classify_g1(mutated(good_g1, "injection.observation_method", value))
+    assert verdict == "stop"
+    assert any("observation_method" in r for r in reasons)
+
+
+@pytest.mark.parametrize("method", ["signature-and-source", "live-dispatch"])
+def test_g1_either_allowed_observation_method_continues(method):
+    record = mutated(good_g1, "injection.observation_method", method)
+    verdict, reasons = pf.classify_g1(record)
+    assert verdict == "wrapper-compatible"
+    assert reasons == []
+
+
+def test_g1_docs_say_signature_and_source_is_inference_not_an_observed_call():
+    doc = " ".join(pf.__doc__.split())
+    assert "inference from source, not an observed call" in doc
+
+
 # ------------------------------------------------------------------- G2
+
+
+def _only_pair_kind(record, kind):
+    other = "unsaved" if kind == "saved" else "saved"
+    record["open_objects"] = [o for o in record["open_objects"] if o["kind"] == kind] + [
+        {"title": "Other", "path": "", "kind": other, "object_id": "o9", "raw_handle": "h9"}
+    ]
+    return record
 
 
 def test_g2_needs_both_an_unsaved_and_a_saved_same_title_pair():
@@ -366,6 +399,75 @@ def test_g2_needs_both_an_unsaved_and_a_saved_same_title_pair():
     verdict, reasons = pf.classify_g2(record)
     assert verdict == "stop"
     assert any("unsaved" in r for r in reasons)
+
+
+def test_g2_missing_same_title_pairs_section_or_kind_is_stop():
+    verdict, reasons = pf.classify_g2(mutated(good_g2, "same_title_pairs", DELETE))
+    assert verdict == "stop"
+    assert any("same_title_pairs" in r for r in reasons)
+    for kind in ("unsaved", "saved"):
+        verdict, reasons = pf.classify_g2(mutated(good_g2, "same_title_pairs." + kind, DELETE))
+        assert verdict == "stop", kind
+        assert any("same_title_pairs" in r and kind in r for r in reasons)
+
+
+@pytest.mark.parametrize("kind", ["unsaved", "saved"])
+def test_g2_a_pair_that_exists_but_is_recorded_non_reproducible_is_contradictory_stop(kind):
+    record = good_g2()
+    record["same_title_pairs"][kind] = {"reproducible": False, "attempt": "tried and it refused"}
+    verdict, reasons = pf.classify_g2(record)
+    assert verdict == "stop"
+    assert any("contradict" in r and kind in r for r in reasons)
+
+
+@pytest.mark.parametrize("kind", ["unsaved", "saved"])
+def test_g2_a_measured_negative_for_one_kind_continues_when_the_other_kind_has_a_real_pair(kind):
+    other = "saved" if kind == "unsaved" else "unsaved"
+    record = _only_pair_kind(good_g2(), other)
+    record["same_title_pairs"][kind] = {
+        "reproducible": False,
+        "attempt": "Revit renamed the second new project Project2 / refused the same file name",
+    }
+    verdict, reasons = pf.classify_g2(record)
+    assert verdict == "document-object-binding-provable"
+    assert reasons == []
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"reproducible": False, "attempt": None},
+        {"reproducible": False, "attempt": ""},
+        {"reproducible": False, "attempt": "   "},
+        {"reproducible": False, "attempt": 5},
+        {"reproducible": False},
+        {"reproducible": None, "attempt": "tried it"},
+        {"reproducible": True, "attempt": "tried it"},
+        {"reproducible": None, "attempt": None},
+    ],
+    ids=repr,
+)
+def test_g2_a_missing_pair_needs_a_described_non_reproducible_attempt(entry):
+    record = _only_pair_kind(good_g2(), "saved")
+    record["same_title_pairs"]["unsaved"] = entry
+    verdict, reasons = pf.classify_g2(record)
+    assert verdict == "stop"
+    assert any("no same-title unsaved pair and no recorded non-reproducible attempt" in r for r in reasons)
+
+
+def test_g2_both_kinds_non_reproducible_leaves_same_title_binding_unmeasured_stop():
+    record = good_g2()
+    record["open_objects"] = [
+        {"title": "Project1", "path": "", "kind": "unsaved", "object_id": "o1", "raw_handle": "h1"},
+        {"title": "Project2", "path": "", "kind": "unsaved", "object_id": "o2", "raw_handle": "h2"},
+        {"title": "A", "path": "C:/a/A.rvt", "kind": "saved", "object_id": "o3", "raw_handle": "h3"},
+        {"title": "B", "path": "C:/b/B.rvt", "kind": "saved", "object_id": "o4", "raw_handle": "h4"},
+    ]
+    for kind in ("unsaved", "saved"):
+        record["same_title_pairs"][kind] = {"reproducible": False, "attempt": "Revit numbers or refuses"}
+    verdict, reasons = pf.classify_g2(record)
+    assert verdict == "stop"
+    assert any("same-title binding is unmeasured" in r for r in reasons)
 
 
 def test_g2_two_open_documents_sharing_one_wrapper_object_is_stop():
@@ -551,9 +653,46 @@ def test_g4_nothing_activatable_is_stop():
     assert any("no case" in r for r in reasons)
 
 
-def test_g4_blank_api_or_missing_api_context_is_stop():
+@pytest.mark.parametrize("value", [DELETE, None, "", "ui", "Command", "external_event", True])
+def test_g4_unknown_or_missing_context_is_stop(value):
+    for name in ("saved", "workshared"):
+        record = good_g4()
+        if value is DELETE:
+            del record["cases"][name]["context"]
+        else:
+            record["cases"][name]["context"] = value
+        verdict, reasons = pf.classify_g4(record)
+        assert verdict == "stop", name
+        assert any(name in r and "context" in r for r in reasons)
+
+
+def test_g4_allowed_case_activated_only_in_command_context_is_stop():
+    record = good_g4()
+    record["cases"]["saved"]["context"] = "command"
+    verdict, reasons = pf.classify_g4(record)
+    assert verdict == "stop"
+    assert (
+        "case saved is allowed but was not activated through an ExternalEvent, "
+        "the context the routes use"
+    ) in reasons
+
+
+def test_g4_refused_case_may_carry_the_command_context():
+    record = good_g4()
+    record["cases"]["workshared"]["context"] = "command"
+    verdict, reasons = pf.classify_g4(record)
+    assert verdict == "explicit-activation-api"
+    assert reasons == []
+
+
+def test_g4_the_old_top_level_external_event_context_field_is_gone():
+    assert "external_event_context" not in pf.evidence_template()["g4"]
+    assert "external_event_context" not in good_g4()
+
+
+def test_g4_blank_or_missing_api_is_stop():
     assert pf.classify_g4(mutated(good_g4, "api", "  "))[0] == "stop"
-    assert pf.classify_g4(mutated(good_g4, "external_event_context", False))[0] == "stop"
+    assert pf.classify_g4(mutated(good_g4, "api", DELETE))[0] == "stop"
 
 
 def test_g4_unknown_outcome_or_policy_is_stop():
@@ -756,20 +895,63 @@ def test_snippet_is_read_only_and_prints_one_marked_json_line(name):
     assert "PHASE2_{}_JSON=".format(name.upper()) in source
 
 
-def test_g4_snippet_does_not_activate_anything_unless_the_engineer_confirms():
-    source = pf.G4_SNIPPET
-    assert "CONFIRM_ACTIVATION = False" in source
+def test_g2_snippet_persists_document_objects_across_runs_in_appdomain_data():
+    source = pf.G2_SNIPPET
+    for token in ("AppDomain", "SetData", "GetData", "phase2_g2_store", "phase2_g2_store_meta",
+                  "ArrayList", "stored_objects", "still_enumerated", "is_valid_object"):
+        assert token in source, token
+    # The store is only written for the before-close label, never on later runs.
     tree = ast.parse(source)
-    guarded = False
+    guarded = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and "before-close" in ast.dump(node.test):
+            for stmt in node.body:
+                guarded |= {id(n) for n in ast.walk(stmt)}
+    set_calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and "SetData" in ast.dump(n.func)]
+    assert set_calls, "no SetData call"
+    assert all(id(c) in guarded for c in set_calls), "SetData must sit under the before-close guard"
+
+
+def _guarded_nodes(tree):
+    """ids of every node lexically inside the body of an `if CONFIRM_ACTIVATION:`."""
+    ids = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == "CONFIRM_ACTIVATION":
-            guarded = any("OpenAndActivateDocument" in ast.dump(n) for n in node.body)
-    assert guarded, "activation call must sit under `if CONFIRM_ACTIVATION:`"
-    outside = [
+            for stmt in node.body:
+                ids |= {id(n) for n in ast.walk(stmt)}
+    return ids
+
+
+def test_g4_snippet_has_list_command_external_event_and_report_modes_defaulting_to_list():
+    source = pf.G4_SNIPPET
+    assert 'MODE = "list"' in source
+    assert "CONFIRM_ACTIVATION = False" in source
+    for token in ('"command"', '"external-event"', '"report"', "IExternalEventHandler",
+                  "def Execute(self, uiapp)", "def GetName(self)", "ExternalEvent.Create",
+                  "SetData", "GetData", "phase2_g4_result", "PHASE2_G4_JSON=", '"mode"', '"context"'):
+        assert token in source, token
+
+
+def test_g4_snippet_does_not_activate_or_raise_anything_unless_the_engineer_confirms():
+    tree = ast.parse(pf.G4_SNIPPET)
+    guarded = _guarded_nodes(tree)
+    activations = [
         n for n in ast.walk(tree)
         if isinstance(n, ast.Call) and "OpenAndActivateDocument" in ast.dump(n.func)
     ]
-    assert len(outside) == 1
+    raises = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and "Raise" in ast.dump(n.func)]
+    # One call in the ExternalEvent handler's Execute (runs only after Raise) and one
+    # in command mode; the command-mode call and Raise must sit under the guard.
+    assert len(activations) == 2
+    assert len(raises) == 1
+    handler_nodes = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "Execute":
+            handler_nodes = {id(n) for n in ast.walk(node)}
+    assert [a for a in activations if id(a) in handler_nodes], "handler must activate in Execute"
+    outside = [a for a in activations if id(a) not in handler_nodes and id(a) not in guarded]
+    assert not outside, "command-mode activation must sit under `if CONFIRM_ACTIVATION:`"
+    assert all(id(r) in guarded for r in raises), "Raise() must sit under `if CONFIRM_ACTIVATION:`"
 
 
 # ------------------------------------- the procedure can never send a request

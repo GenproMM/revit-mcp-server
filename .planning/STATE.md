@@ -5,16 +5,16 @@ current_phase: 02
 current_phase_name: Live identity, ambiguity refusal, and multi-document addressing
 status: executing
 stopped_at: 02-01 offline implementation verified (790 passed, 3 skipped); stop before 02-02 production full-restart recheck; G6 not authorized
-last_updated: "2026-10-15"
+last_updated: "2026-10-17T06:56:32.372Z"
 last_activity: 2026-10-16
 last_activity_desc: 02-01 implemented and offline verified; next 02-02 requires full Revit restart and separate live scope; no G6 authorization
-state_head: 81b7e164c186e1b4f7c98f90fdaf81bba3e360ed
+state_head: b43eb45dbfa0a2ca65cf13da1a25bf2a19d20d00
 progress:
-  total_phases: 6
+  total_phases: 7
   completed_phases: 1
-  total_plans: 7
+  total_plans: 27
   completed_plans: 7
-  percent: 17
+  percent: 14
 milestone_name: Доверенный мост
 ---
 
@@ -29,12 +29,12 @@ See: .planning/PROJECT.md (updated 2026-10-14)
 
 ## Current Position
 
-Phase: 02 (Live identity, ambiguity refusal, and multi-document addressing) — PAUSED BEFORE 02-02 LIVE RECHECK
-Plan: 02-20 human checkpoint accepted; 02-01 implemented/offline verified
+Phase: 02 (Live identity, ambiguity refusal, and multi-document addressing) — READY TO EXECUTE; PAUSED BEFORE 02-02 LIVE RECHECK
+Plan: 02-20 human checkpoint accepted; 02-01 implemented/offline verified; 02-02..02-19 reconciled with the accepted checkpoint (D-15, G1–G5) on 2026-10-17, plan-checker passed
 Status: 790 unit tests passed, 3 skipped; cold start 0.904s. Production identity/actual-port verification pending full Revit restart in 02-02; G6 unrun/not authorized; execute_code enabled (D-15)
 Last activity: 2026-10-16 — selected-status slice completed offline; no live routes called after extension edits
 
-Progress: [██░░░░░░░░] 17%
+Progress: [█░░░░░░░░░] 14%
 
 ## Performance Metrics
 
@@ -87,6 +87,10 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 01]: D-28 (d27-b narrowed): every call through pyRevit's handler takes the lock, only GET /status/ exempt; D-29 (a5-a): two-instance harness is SC5 evidence, per-call target selection and per-target lock move to Phase 2; D-30: d27-c is backlog item 999.1; D-31: plan 01-05 superseded — 01-04 bench measured cross-wired mutation and read in pyRevit's shared handler; user decisions at the 01-04 gate and the re-planning run
 - [Phase 01]: 01-06: d27-b applied - every call from this process except GET /status/ takes the lock; revit_image shares the _serialized path; /model_info/ stays locked until its overlap is measured live — 01-04 bench measured cross-wired-read and cross-wired-mutation through pyRevit's shared handler
 - [Phase 01]: 01-07: docs state the lock as process-local harm reduction (only /status/ unqueued, cross-wiring between sessions until d27-c / backlog 999.1); REVIT_PORT documented as a deployment setting only, no two-entry example in user docs; simultaneous Revit launch documented as unmeasured — SER-05 honest scope; a5-a one shared revit entry
+
+### Roadmap Evolution
+
+- Phase 7 added: Repository-owned mutation safety and human approval — по исследованию этой сессии. Вся безопасность в revit-mcp-server, без изменений Hermes Fork; редактируемые правила, объяснение риска, одноразовое согласие, Revit-side enforcement и необязательный Jev. Контекст и research inputs сохранены в phases/07-repository-owned-mutation-safety-and-human-approval/. Фаза не спланирована; текущая позиция Phase 2 и её live-ограничения не изменены.
 
 ### Pending Todos
 

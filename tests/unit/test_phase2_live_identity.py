@@ -46,7 +46,8 @@ def ident(pid, token, port=PORT, version="2025"):
 
 
 def reply(kind, identity, at):
-    return {"at": at, "kind": kind, "identity": identity, "text": "synthetic fixture text"}
+    # A copy per reply: a mutation of one reply must never leak into another.
+    return {"at": at, "kind": kind, "identity": dict(identity), "text": "synthetic fixture text"}
 
 
 def listener(port, owners):
@@ -69,7 +70,7 @@ def good_record():
         ],
         "incarnation_1": {
             "selector": "revit1:placeholder",
-            "bootstrap": {"identity": first, "at": "2026-10-17T10:00:00+00:00"},
+            "bootstrap": {"identity": dict(first), "at": "2026-10-17T10:00:00+00:00"},
             "replies": [
                 reply("no-document", first, "2026-10-17T10:00:02+00:00"),
                 reply("no-document", first, "2026-10-17T10:00:03+00:00"),
@@ -78,7 +79,7 @@ def good_record():
             "listener": listener(PORT, [1111]),
         },
         "incarnation_2": {
-            "bootstrap": {"identity": second, "at": "2026-10-17T10:30:00+00:00"},
+            "bootstrap": {"identity": dict(second), "at": "2026-10-17T10:30:00+00:00"},
             "replies": [
                 reply("no-document", second, "2026-10-17T10:30:02+00:00"),
                 reply("no-document", second, "2026-10-17T10:30:03+00:00"),

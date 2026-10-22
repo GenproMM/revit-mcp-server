@@ -389,8 +389,10 @@ def test_set_parameter_keeps_its_legacy_body_and_adds_only_the_document():
 def test_create_room_keeps_its_optional_fields_out_of_the_body_unless_given():
     text, calls = run_tool("create_room")
     assert calls[0][2] == {"level_name": "Level 1"}
-    text, calls = run_tool("create_room", location={"x": 1.0, "y": 2.0}, name="Hall", number="101",
-                           document=DOCUMENT_SELECTOR)
+    # run_tool's own first parameter is called name, so call the room tool directly here.
+    tools, calls = register_module("room")
+    asyncio.run(tools["create_room"](level_name="Level 1", location={"x": 1.0, "y": 2.0}, name="Hall",
+                                     number="101", document=DOCUMENT_SELECTOR))
     assert calls[0][2] == {"level_name": "Level 1", "location": {"x": 1.0, "y": 2.0}, "name": "Hall",
                            "number": "101", "document": DOCUMENT_SELECTOR}
 

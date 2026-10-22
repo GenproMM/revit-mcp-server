@@ -443,6 +443,11 @@ def resolve_document(selector, snapshot=None, registry=None):
     """
     snapshot, registry = _snapshot_and_registry(snapshot, registry)
     observation = registry.observe(snapshot[0], snapshot[1])
+    return _resolve_observed(registry, observation, selector)
+
+
+def _resolve_observed(registry, observation, selector):
+    """resolve_document over an observation already taken for this request."""
     kind = registry.classify(selector)
     if kind == "invalid":
         return _refusal(400, "document-selector-invalid",
@@ -476,3 +481,109 @@ def resolve_document(selector, snapshot=None, registry=None):
         return _refusal(_REFUSAL_STATUS[_ACTIVE_UNKNOWN], _ACTIVE_UNKNOWN,
                         "Whether the document is active could not be determined.")
     return {"ok": True, "document": entry["document"], "descriptor": _descriptor(entry)}
+
+
+# ------------------------------------------------------- mutation decision
+
+
+def _active_token(observation):
+    for entry in observation.entries:
+        if entry["active"]:
+            return entry["token"]
+    return None
+
+
+def _require_active(result, observation):
+    """D-10: a mutation only ever lands on the document active in the UI."""
+    if result["descriptor"]["active"]:
+        return result
+    refusal = _refusal(
+        412, "document-not-active",
+        "The document {} is open but is not the active document in Revit. This call "
+        "does not activate a document and did not change anything. Make it active "
+        "with the separate activation step, then retry with the same selector.".format(
+            result["descriptor"]["document"]),
+        observation)
+    refusal["active_document"] = _active_token(observation)
+    return refusal
+
+
+def decide_mutation_document(selector, snapshot=None, registry=None):
+    """The named decision a mutating route takes before it touches any document.
+
+    With a selector (D-08, D-10): the one document it names, only if it is open
+    AND active in the UI; open but inactive is 412; closed, stale or unknown is
+    404; a title or path is 400. Nothing falls back to another document.
+
+    Without one (D-09): the only open, eligible (non-link) document, again only
+    if it is active (else 412). No document is 503. Several documents is 400
+    "document-selector-required" with every candidate listed; the UI's current
+    selection is never used to choose between them.
+
+    Returns {"ok": True, "document", "descriptor"} or a refusal with "status"
+    (400, 404, 412, 503), "code", "error" and, where the open set is known,
+    "candidates". Identity comes from the registry's retained-reference Equals
+    resolution, never from title or path.
+    """
+    snapshot, registry = _snapshot_and_registry(snapshot, registry)
+    observation = registry.observe(snapshot[0], snapshot[1])
+    if selector is not None:
+        resolved = _resolve_observed(registry, observation, selector)
+        if not resolved["ok"]:
+            return resolved
+        return _require_active(resolved, observation)
+    refusal = _doubt_refusal(observation)
+    if refusal is not None:
+        return refusal
+    entries = observation.entries
+    if not entries:
+        return _refusal(503, "no-open-document", "No document is open in this Revit process.",
+                        observation)
+    if len(entries) > 1:
+        return _refusal(
+            400, "document-selector-required",
+            "{} documents are open and the call named none. Pass the 'document' value of "
+            "exactly one of the candidates; the document active in the UI is not "
+            "assumed.".format(len(entries)), observation)
+    entry = entries[0]
+    return _require_active(
+        {"ok": True, "document": entry["document"], "descriptor": _descriptor(entry)}, observation)
+
+
+def mutation_document_or_response(selector=None, snapshot=None, registry=None,
+                                  identity=None, read_snapshot=None):
+    """Route-handler guard: call it explicitly first, in every mutating handler.
+
+    Returns (document, descriptor, None) when the decision is ok, else
+    (None, None, response) where response is a routes.make_response carrying
+    {error, error_code, process_identity, candidates[, active_document]} at the
+    decision's status. Never raises: an unreadable Revit state is a 503 response.
+    Explicit per-handler call only (G1): no wrapper or decorator is installed
+    in startup.py.
+    """
+    try:
+        if snapshot is None:
+            snapshot = (read_snapshot or read_live_snapshot)()
+        decision = decide_mutation_document(selector, snapshot, registry)
+    except Exception as exc:
+        decision = {
+            "ok": False, "status": 503, "code": "document-registry-unavailable",
+            "error": "The open documents could not be read ({}). Nothing was selected or "
+                     "changed.".format(str(exc) or exc.__class__.__name__),
+        }
+    if decision["ok"]:
+        return decision["document"], decision["descriptor"], None
+    from pyrevit import routes
+
+    identity_error = None
+    if identity is None:
+        identity, identity_error = process_identity_or_error()
+    payload = {"error": decision["error"], "error_code": decision["code"]}
+    if identity:
+        payload["process_identity"] = identity
+    else:
+        payload["identity_error"] = identity_error
+    for key in ("candidates", "active_document"):
+        if key in decision:
+            payload[key] = decision[key]
+    return None, None, routes.make_response(data=payload, status=decision["status"])

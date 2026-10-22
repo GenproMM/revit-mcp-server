@@ -822,6 +822,56 @@ def test_guard_never_raises_when_revit_cannot_be_read(registry, fake_routes):
     assert "Application.Documents unavailable" in payload["error"]
 
 
+def load_documents_route(monkeypatch, fake_routes):
+    """Import revit_mcp/documents.py against a fake pyrevit and capture its handler."""
+    import importlib
+
+    monkeypatch.delitem(sys.modules, "revit_mcp.documents", raising=False)
+    module = importlib.import_module("revit_mcp.documents")
+    captured = {}
+
+    class FakeApi(object):
+        def route(self, path, methods=None):
+            def register(fn):
+                captured[(path, tuple(methods or ()))] = fn
+                return fn
+            return register
+
+    module.register_documents_routes(FakeApi())
+    monkeypatch.delitem(sys.modules, "revit_mcp.documents", raising=False)
+    return captured[("/documents/", ("GET",))]
+
+
+def test_documents_route_answers_an_empty_list_with_identity_and_status_200(monkeypatch, fake_routes):
+    handler = load_documents_route(monkeypatch, fake_routes)
+    monkeypatch.setattr(identity, "process_identity_or_error", lambda: (dict(IDENT), None))
+    monkeypatch.setattr(identity, "current_document_descriptors", lambda: {
+        "ok": True, "documents": [], "count": 0, "active_document": None})
+    handler()
+    payload, status = fake_routes[-1]
+    assert status == 200 and payload["documents"] == [] and payload["count"] == 0
+    assert payload["process_identity"] == IDENT and "error" not in payload
+
+
+def test_documents_route_refusal_keeps_its_status_and_never_raises(monkeypatch, fake_routes):
+    handler = load_documents_route(monkeypatch, fake_routes)
+    monkeypatch.setattr(identity, "process_identity_or_error", lambda: (None, "no retained RoutesServer"))
+    monkeypatch.setattr(identity, "current_document_descriptors", lambda: {
+        "ok": False, "status": 503, "code": "document-identity-unavailable", "error": "cannot tell apart"})
+    handler()
+    payload, status = fake_routes[-1]
+    assert status == 503 and payload["error_code"] == "document-identity-unavailable"
+    assert payload["identity_error"] == "no retained RoutesServer" and "process_identity" not in payload
+
+    def boom():
+        raise RuntimeError("Revit exploded")
+
+    monkeypatch.setattr(identity, "current_document_descriptors", boom)
+    handler()
+    payload, status = fake_routes[-1]
+    assert status == 500 and payload["error"] == "Revit exploded"
+
+
 def test_no_route_wrapper_or_decorator_is_installed_in_startup():
     with open(os.path.join(REPO_ROOT, "startup.py"), encoding="utf-8") as handle:
         source = handle.read()

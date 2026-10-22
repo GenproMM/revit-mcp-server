@@ -1907,7 +1907,7 @@ def code_identifiers(node):
 
 
 def test_the_summary_collector_and_its_helpers_have_no_ui_or_active_document_dependency():
-    for name in ("collect_document_summary", "_project_information", "_db"):
+    for name in ("collect_document_summary", "_project_information", "_count_elements", "_db"):
         assert code_identifiers(function_node(name)) & UI_DEPENDENT_NAMES == set(), name
 
 

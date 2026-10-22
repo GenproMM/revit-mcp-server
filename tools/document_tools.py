@@ -60,6 +60,53 @@ def _render_activation(payload):
     return "\n".join(lines)
 
 
+def _active_token_text(token):
+    return token if token else "none"
+
+
+def _diagnostic_line(payload):
+    """One honest sentence about the active document before and after an addressed read."""
+    before = _active_token_text(payload.get("active_before"))
+    after = _active_token_text(payload.get("active_after"))
+    switched = payload.get("ui_switched")
+    if switched is True:
+        return ("WARNING: the active document changed while this read ran (before: {}; after: {}). "
+                "This tool made no activation call; do not trust the UI state.".format(before, after))
+    if switched is None:
+        reason = payload.get("active_after_error") or payload.get("active_before_error") or "not read"
+        return ("Whether the active document changed during this read is unknown ({}); "
+                "before: {}; after: {}.".format(reason, before, after))
+    return ("Active document before and after this read: {} (unchanged). This is an "
+            "observation of this one call, not a guarantee for other calls.".format(
+                after if before == after else before))
+
+
+def _render_summary(payload):
+    """Readable text for a received /document_summary/ success."""
+    summary = payload.get("summary") or {}
+    document = payload.get("document") or {}
+    lines = ["Summary of document {}: {}".format(document.get("document", ""), summary.get("title", "")),
+             "path: {}".format(summary.get("path") or "(never saved)"),
+             "Read through that document only; this tool made no activation call and the "
+             "document was not activated for the read.",
+             "non-type element count: {}".format(summary.get("non_type_element_count")),
+             "level count: {}".format(summary.get("level_count")),
+             "(These counts are not the model_info category counts.)"]
+    information = summary.get("project_information") or {}
+    for key in ("name", "number", "client", "status"):
+        if key in information:
+            lines.append("project {}: {}".format(key, information[key]))
+    unreadable = summary.get("unreadable_fields") or []
+    if unreadable:
+        lines.append("Not readable (omitted, not guessed): {}".format(", ".join(unreadable)))
+    lines.append("Target is the active document: {}".format("yes" if payload.get("target_is_active") else "no"))
+    lines.append(_diagnostic_line(payload))
+    identity_line = _identity_line(payload)
+    if identity_line:
+        lines.append(identity_line)
+    return "\n".join(lines)
+
+
 def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
     """Register document persistence tools with the MCP server."""
     _ = revit_image  # Acknowledge unused parameter
@@ -155,6 +202,58 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
         if (isinstance(response, dict) and not response.get("error")
                 and response.get("activation") in ("activated", "already-active")):
             return format_response(_render_activation(response))
+        return format_response(response)
+
+    @mcp.tool()
+    async def read_document_summary(document: str, target: str = None, ctx: Context = None) -> str:
+        """Read a summary of one open Revit document, even if it is not the active one.
+
+        This is one of exactly two reads that may inspect a document that is open
+        but not active (the other is read_document_levels). Every other tool still
+        acts on the active document only, and a mutation addressed to an inactive
+        document is refused. The summary is read only through the document you
+        name; this tool does not activate it, so you can compare two models
+        without switching the Revit window. Get the "document" value from
+        list_documents.
+
+        Returned fields, all read from the named document and nothing else:
+        title, path, non_type_element_count (all elements that are not types),
+        level_count, and project_information with name, number, client and
+        status. A project_information field that cannot be read is left out and
+        named in unreadable_fields, never filled from another document. These
+        counts are not the model_info category counts and must not be compared
+        with get_revit_model_info output. The reply also says whether the
+        document is the active one (target_is_active) and the active document
+        before and after the read (active_before, active_after, ui_switched);
+        that is an observation of this call, not a guarantee.
+
+        A selector that is closed, stale, unknown, ambiguous or missing is
+        refused by name; a closed document is never answered with data from an
+        open one, and no default document is chosen. The final line names the
+        Revit process that answered. Limitation: this route has been measured
+        only by a diagnostic and offline tests; its live recheck (plan 02-07)
+        has not been run, so treat "the window did not change" as what
+        ui_switched reports for that call, not as proven behavior.
+
+        Args:
+            document: The opaque "document" selector from list_documents (required)
+            target: Optional opaque process selector from discover_revit_targets;
+                omit it only when exactly one Revit process is usable
+            ctx: MCP context for logging
+        """
+        if not isinstance(document, str) or not document.strip():
+            return format_response({
+                "error": "document is required: pass the 'document' value of one document "
+                         "from list_documents. A read never chooses a default."})
+        if ctx:
+            await ctx.info("Reading summary of document {}".format(document))
+        options = {}
+        if target is not None:
+            options["target"] = target
+        response = await revit_post("/document_summary/", {"document": document}, ctx, **options)
+        if (isinstance(response, dict) and not response.get("error")
+                and isinstance(response.get("summary"), dict)):
+            return format_response(_render_summary(response))
         return format_response(response)
 
     @mcp.tool()

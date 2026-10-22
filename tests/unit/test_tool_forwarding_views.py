@@ -83,10 +83,37 @@ TASK_ONE_TOOLS = {
         {"element_ids": [11], "operation": "move", "vector": POINT_B}),
 }
 
-TOOLS = dict(TASK_ONE_TOOLS)
+TASK_TWO_TOOLS = {
+    "create_view": _row(
+        "view_management", "mutation", "POST", "/create_view/",
+        ["view_type", "name", "level_name", "section_box"],
+        {"view_type": "floor_plan", "name": "Plan 1"}),
+    "set_active_view": _row(
+        "view_management", "mutation", "POST", "/set_active_view/", ["view_name"],
+        {"view_name": "Level 1"}),
+    # The view name is part of the path; the tool bypasses format_response for it.
+    "get_revit_view": _row(
+        "view", "read", "IMAGE", "/get_view/Level 1", ["view_name"], {"view_name": "Level 1"}),
+    "list_revit_views": _row("view", "read", "GET", "/list_views/", [], {}),
+    "get_current_view_info": _row("view", "read", "GET", "/current_view_info/", [], {}),
+    "get_current_view_elements": _row("view", "read", "GET", "/current_view_elements/", [], {}),
+    # Worksharing is process-level: neither tool names an open document.
+    "list_model_worksets": _row(
+        "worksharing", "file_read", "POST", "/model_worksets/",
+        ["file_path", "close_worksets_matching"], {"file_path": "C:/Models/Tower.rvt"}),
+    "open_model": _row(
+        "worksharing", "file_open", "POST", "/open_model/",
+        ["file_path", "detach", "close_worksets_matching", "activate", "audit", "local_path",
+         "overwrite_local"],
+        {"file_path": "C:/Models/Tower.rvt"}),
+}
+
+TOOLS = dict(TASK_ONE_TOOLS, **TASK_TWO_TOOLS)
 MODULES = sorted({row["module"] for row in TOOLS.values()})
 MUTATIONS = sorted(name for name, row in TOOLS.items() if row["kind"] == "mutation")
 READS = sorted(name for name, row in TOOLS.items() if row["kind"] == "read")
+PROCESS_LEVEL = sorted(name for name, row in TOOLS.items() if row["kind"] in ("file_read", "file_open"))
+NO_DOCUMENT_ARGUMENT = sorted(READS + PROCESS_LEVEL)
 
 
 def registrar(module):
@@ -189,6 +216,21 @@ def test_docstrings_name_every_argument_and_state_the_scope_rule(tool_name):
         assert "no document argument" in lowered
         assert "read_document_summary" in doc and "read_document_levels" in doc
         assert "inactive" in lowered
+    elif row["kind"] == "file_read":
+        assert not re.search(r"^\s+document:", args_block, re.M)
+        assert "no document argument" in lowered
+        assert "from disk" in lowered
+        assert "does not read or change any open document" in lowered
+        assert "list_documents" in doc
+    else:
+        assert row["kind"] == "file_open"
+        assert not re.search(r"^\s+document:", args_block, re.M)
+        assert "no document argument" in lowered
+        assert "opens a file" in lowered
+        assert "does not select, activate or change a document that is already open" in lowered
+        assert "activate_document" in doc and "list_documents" in doc
+        assert "document_title" in doc and "activated" in doc
+        assert "never assume" in lowered
 
 
 @pytest.mark.parametrize("tool_name", MUTATIONS)
@@ -251,8 +293,10 @@ def test_mutations_refuse_a_blank_document_without_sending(tool_name, blank):
     assert "document" in text and "list_documents" in text
 
 
-@pytest.mark.parametrize("tool_name", READS)
+@pytest.mark.parametrize("tool_name", NO_DOCUMENT_ARGUMENT)
 def test_reads_offer_no_way_to_name_a_document_and_never_dispatch_when_asked(tool_name):
+    """An explicitly selected inactive document cannot be expressed on a read: it refuses
+    (TypeError) before any dispatch, so no read can silently answer for the wrong document."""
     row = TOOLS[tool_name]
     tools, calls = register_module(row["module"])
     with pytest.raises(TypeError):
@@ -311,6 +355,125 @@ def test_route_replies_pass_through_format_response_unchanged_in_shape(tool_name
     assert text == format_response(reply) and "boom" in text
     text, _ = run_tool(tool_name, response="Error: 412 - not the active document", document=DOCUMENT_SELECTOR)
     assert text == "Error: 412 - not the active document"
+
+
+def test_create_view_keeps_its_legacy_body_and_adds_only_the_document():
+    text, calls = run_tool("create_view")
+    assert calls == [("POST", "/create_view/", {"view_type": "floor_plan", "name": "Plan 1"}, {})]
+    box = {"origin": POINT_A, "direction": POINT_B, "up": POINT_B, "width": 1.0, "height": 2.0, "depth": 3.0}
+    text, calls = run_tool("create_view", view_type="section", level_name="Level 1", section_box=box,
+                           document=DOCUMENT_SELECTOR, target=PROCESS_SELECTOR)
+    assert calls == [("POST", "/create_view/",
+                      {"view_type": "section", "name": "Plan 1", "level_name": "Level 1",
+                       "section_box": box, "document": DOCUMENT_SELECTOR}, {"target": PROCESS_SELECTOR})]
+
+
+def test_set_active_view_is_a_document_bound_mutation_that_sends_exactly_one_call():
+    """It changes the view a document shows; it must never be a hidden activation of a document."""
+    text, calls = run_tool("set_active_view", document=DOCUMENT_SELECTOR, target=PROCESS_SELECTOR)
+    assert calls == [("POST", "/set_active_view/", {"view_name": "Level 1", "document": DOCUMENT_SELECTOR},
+                      {"target": PROCESS_SELECTOR})]
+    tools, _ = register_module("view_management")
+    lowered = normalized(tools["set_active_view"].__doc__)
+    assert "view" in lowered and "never activates a document" in lowered
+
+
+def test_get_revit_view_fetches_the_image_with_the_target_and_keeps_the_view_name_in_the_path():
+    text, calls = run_tool("get_revit_view", response="IMAGE-OBJECT", view_name="L2 Floor Plan",
+                           target=PROCESS_SELECTOR)
+    assert calls == [("IMAGE", "/get_view/L2 Floor Plan", None, {"target": PROCESS_SELECTOR})]
+    assert text == "IMAGE-OBJECT"
+    text, calls = run_tool("get_revit_view", response="Error: 404 - view not found")
+    assert calls == [("IMAGE", "/get_view/Level 1", None, {})]
+    assert text == "Error: 404 - view not found"
+
+
+@pytest.mark.parametrize("tool_name", sorted(READS))
+def test_view_reads_say_they_never_activate_a_document_or_switch_views(tool_name):
+    tools, _ = register_module(TOOLS[tool_name]["module"])
+    lowered = normalized(tools[tool_name].__doc__)
+    assert "never activates a document" in lowered, tool_name
+
+
+@pytest.mark.parametrize("tool_name", ["get_current_view_info", "get_current_view_elements"])
+def test_active_view_reads_forward_the_target_and_keep_their_progress_message(tool_name):
+    row = TOOLS[tool_name]
+    tools, calls = register_module(row["module"])
+    infos = []
+
+    class Ctx(object):
+        async def info(self, message):
+            infos.append(message)
+
+    asyncio.run(tools[tool_name](target=PROCESS_SELECTOR, ctx=Ctx()))
+    assert calls == [("GET", row["route"], None, {"target": PROCESS_SELECTOR})]
+    assert len(infos) == 1
+
+
+def test_list_model_worksets_keeps_its_default_workset_filter_and_forwards_the_target():
+    text, calls = run_tool("list_model_worksets")
+    assert calls == [("POST", "/model_worksets/",
+                      {"file_path": "C:/Models/Tower.rvt", "close_worksets_matching": ["__ALL_USER_WORKSETS__"]},
+                      {})]
+    text, calls = run_tool("list_model_worksets", close_worksets_matching=["#_RVT_LINK"],
+                           target=PROCESS_SELECTOR)
+    assert calls == [("POST", "/model_worksets/",
+                      {"file_path": "C:/Models/Tower.rvt", "close_worksets_matching": ["#_RVT_LINK"]},
+                      {"target": PROCESS_SELECTOR})]
+
+
+def test_open_model_is_process_level_and_sends_the_exact_target_and_no_document_token():
+    text, calls = run_tool("open_model", target=PROCESS_SELECTOR)
+    assert calls == [("POST", "/open_model/",
+                      {"file_path": "C:/Models/Tower.rvt", "detach": "preserve", "activate": True,
+                       "audit": False, "overwrite_local": True,
+                       "close_worksets_matching": ["__ALL_USER_WORKSETS__"]},
+                      {"target": PROCESS_SELECTOR})]
+    assert "document" not in calls[0][2]
+
+
+def test_open_model_forwards_its_own_options_unchanged_including_activate_false():
+    text, calls = run_tool("open_model", detach="none", activate=False, audit=True,
+                           local_path="C:/Local/Tower_user.rvt", overwrite_local=False,
+                           close_worksets_matching=["#_RVT_LINK"], target=PROCESS_SELECTOR)
+    assert calls == [("POST", "/open_model/",
+                      {"file_path": "C:/Models/Tower.rvt", "detach": "none", "activate": False,
+                       "audit": True, "overwrite_local": False, "local_path": "C:/Local/Tower_user.rvt",
+                       "close_worksets_matching": ["#_RVT_LINK"]}, {"target": PROCESS_SELECTOR})]
+
+
+def test_open_model_reports_the_document_the_reply_names_not_the_requested_path():
+    """T-02-10: the opened document identity comes from the received response."""
+    from tools.utils import format_response
+    reply = {"status": "success", "document_title": "Other Title", "activated": False}
+    text, calls = run_tool("open_model", response=reply, target=PROCESS_SELECTOR)
+    assert text == format_response(reply)
+    assert "Other Title" in text and "Tower" not in text
+    text, _ = run_tool("open_model", response="Error: 500 - Open failed: boom")
+    assert text == "Error: 500 - Open failed: boom"
+
+
+@pytest.mark.parametrize("tool_name", ["open_model", "list_model_worksets"])
+def test_worksharing_tools_still_refuse_a_mangled_path_before_sending(tool_name):
+    text, calls = run_tool(tool_name, file_path="C:\x08ad\new.rvt", target=PROCESS_SELECTOR)
+    assert calls == [] and "control characters" in text
+
+
+@pytest.mark.parametrize("tool_name", ["open_model", "list_model_worksets"])
+def test_a_complete_revit_server_path_reaches_revit_untouched_with_the_target(tool_name):
+    text, calls = run_tool(tool_name, file_path="rsn://srv-revit/Projects/Tower.rvt", target=PROCESS_SELECTOR)
+    assert calls[0][2]["file_path"] == "RSN://srv-revit/Projects/Tower.rvt"
+    assert calls[0][3] == {"target": PROCESS_SELECTOR}
+
+
+def test_only_open_model_may_reach_the_file_open_route_no_view_or_edit_tool_opens_a_file():
+    """A process-level file open is never an implicit activation during a read or mutation."""
+    for module in MODULES:
+        count = module_source(module).count("/open_model/")
+        assert count == (1 if module == "worksharing" else 0), (module, count)
+    for tool_name, row in TOOLS.items():
+        if tool_name != "open_model":
+            assert row["route"] != "/open_model/"
 
 
 # ------------------------------------------------------------ source checks

@@ -259,3 +259,361 @@ def test_lifetime_serials_are_unique_across_applications():
     two = FakeApplication().open_document("Project1", "")
     assert one.lifetime_serial != two.lifetime_serial
     assert not one.Equals(two)
+
+
+# ===========================================================================
+# 02-04 Task 1: the registry, descriptors and the list_documents tool/route.
+#
+# Everything below drives the PRODUCTION registry in revit_mcp/identity.py
+# against the doubles above. It is offline evidence of the decision logic only:
+# how a real Revit Document behaves (IsValidObject after close, Equals between
+# enumerations, AppDomain slot retention of a Python object) is rechecked live
+# in 02-18 after a full Revit restart.
+# ===========================================================================
+
+import asyncio
+import inspect
+import os
+import re
+import sys
+import types
+
+from revit_mcp import identity
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TOKEN_SHAPE = re.compile(r"^doc1\.[0-9a-f]{12}\.[1-9][0-9]*$")
+
+
+@pytest.fixture
+def registry():
+    return identity.DocumentRegistry()
+
+
+def snap(app, active=None):
+    """(documents, active) exactly as the live glue reads them: a fresh enumeration
+    plus the UI active document (a wrapper that is NOT one of the enumerated objects)."""
+    return (app.Documents, active)
+
+
+def tokens_of(result):
+    return [entry["document"] for entry in result["documents"]]
+
+
+def counter_of(token):
+    return int(token.rsplit(".", 1)[1])
+
+
+# --------------------------------------------------------- list / descriptors
+
+
+def test_two_same_title_unsaved_documents_get_independent_selectors_and_flags(
+        registry, two_unsaved_projects):
+    app, first, second = two_unsaved_projects
+    result = identity.current_document_descriptors(snap(app, second), registry)
+    assert result["ok"] is True and result["count"] == 2
+    docs = result["documents"]
+    assert [d["title"] for d in docs] == ["Project1", "Project1"]
+    assert [d["path"] for d in docs] == ["", ""]
+    tokens = tokens_of(result)
+    assert len(set(tokens)) == 2
+    assert all(TOKEN_SHAPE.match(t) for t in tokens)
+    assert [d["active"] for d in docs] == [False, True]
+    assert result["active_document"] == tokens[1]
+    # The same lifetimes keep the same selectors on the next request, and the
+    # active flag follows the UI at request time (never cached).
+    again = identity.current_document_descriptors(snap(app, first), registry)
+    assert tokens_of(again) == tokens
+    assert [d["active"] for d in again["documents"]] == [True, False]
+    assert again["active_document"] == tokens[0]
+
+
+def test_same_filename_in_different_folders_are_distinct_selectable_documents(
+        registry, two_same_filename_documents):
+    app, a, _b = two_same_filename_documents
+    result = identity.current_document_descriptors(snap(app, a), registry)
+    assert [d["path"] for d in result["documents"]] == ["C:/A/SAME.rvt", "C:/B/SAME.rvt"]
+    assert len(set(tokens_of(result))) == 2
+
+
+def test_tokens_are_not_derived_from_title_path_or_hash(registry, app, monkeypatch):
+    def forbidden(self):
+        raise AssertionError("the registry must never read a runtime hash")
+
+    monkeypatch.setattr(FakeDocument, "GetHashCode", forbidden, raising=False)
+    app.open_document("Project1", "C:/Models/Project1.rvt")
+    app.open_document("Project1", "C:/Models/Project1.rvt")
+    result = identity.current_document_descriptors(snap(app), registry)
+    for entry in result["documents"]:
+        lowered = entry["document"].lower()
+        assert "project1" not in lowered and "models" not in lowered
+    assert len(set(tokens_of(result))) == 2
+
+
+def test_empty_application_is_an_empty_list_not_an_error(registry, app):
+    result = identity.current_document_descriptors(snap(app), registry)
+    assert result == {"ok": True, "documents": [], "count": 0, "active_document": None}
+
+
+def test_non_ascii_title_and_path_are_preserved(registry, app):
+    app.open_document("Проект1", "C:/Модели/Здание.rvt")
+    result = identity.current_document_descriptors(snap(app), registry)
+    assert result["documents"][0]["title"] == "Проект1"
+    assert result["documents"][0]["path"] == "C:/Модели/Здание.rvt"
+
+
+def test_linked_documents_are_never_listed_or_eligible(registry, app, monkeypatch):
+    monkeypatch.setattr(FakeDocument, "IsLinked",
+                        property(lambda self: self.Title == "Link"), raising=False)
+    host = app.open_document("Host", "C:/Host.rvt")
+    app.open_document("Link", "C:/Link.rvt")
+    result = identity.current_document_descriptors(snap(app, host), registry)
+    assert [d["title"] for d in result["documents"]] == ["Host"]
+    assert result["count"] == 1
+
+
+# ----------------------------------------------- close, tombstones, replacement
+
+
+def test_closing_a_document_tombstones_its_token_permanently(registry, two_unsaved_projects):
+    app, first, second = two_unsaved_projects
+    tokens = tokens_of(identity.current_document_descriptors(snap(app, second), registry))
+    app.close_document(first)
+    after = identity.current_document_descriptors(snap(app, second), registry)
+    assert tokens_of(after) == [tokens[1]]
+    closed = identity.resolve_document(tokens[0], snap(app, second), registry)
+    assert closed["ok"] is False
+    assert closed["status"] == 404 and closed["code"] == "document-closed"
+    # Permanent: still refused after further churn.
+    app.open_document("Other", "")
+    identity.current_document_descriptors(snap(app, second), registry)
+    again = identity.resolve_document(tokens[0], snap(app, second), registry)
+    assert again["code"] == "document-closed"
+    survivor = identity.resolve_document(tokens[1], snap(app, second), registry)
+    assert survivor["ok"] is True
+
+
+def test_replacement_with_identical_title_and_path_gets_a_fresh_token(registry, app):
+    closed = app.open_document("Project1", "")
+    survivor = app.open_document("Project1", "")
+    old_tokens = tokens_of(identity.current_document_descriptors(snap(app, survivor), registry))
+    app.close_document(closed)
+    replacement = app.open_document("Project1", "")
+    result = identity.current_document_descriptors(snap(app, replacement), registry)
+    new_tokens = tokens_of(result)
+    assert new_tokens[0] == old_tokens[1]                  # survivor unchanged
+    assert new_tokens[1] not in old_tokens                 # replacement is new
+    assert counter_of(new_tokens[1]) > max(counter_of(t) for t in old_tokens)
+    stale = identity.resolve_document(old_tokens[0], snap(app, replacement), registry)
+    assert stale["ok"] is False and stale["code"] == "document-closed"
+    assert stale["status"] == 404
+
+
+def test_a_recurring_runtime_hash_does_not_recycle_a_token(registry, app, monkeypatch):
+    monkeypatch.setattr(FakeDocument, "GetHashCode", lambda self: 12345, raising=False)
+    first = app.open_document("Project1", "")
+    token_one = tokens_of(identity.current_document_descriptors(snap(app, first), registry))[0]
+    app.close_document(first)
+    second = app.open_document("Project1", "")
+    token_two = tokens_of(identity.current_document_descriptors(snap(app, second), registry))[0]
+    assert token_one != token_two
+    assert identity.resolve_document(token_one, snap(app, second), registry)["code"] == "document-closed"
+
+
+def test_token_counter_is_monotonic_across_open_and_close(registry, app):
+    seen = []
+    for index in range(4):
+        doc = app.open_document("Project1", "")
+        seen.append(tokens_of(identity.current_document_descriptors(snap(app, doc), registry))[-1])
+        app.close_document(doc)
+    assert [counter_of(t) for t in seen] == sorted(set(counter_of(t) for t in seen))
+    assert len(set(seen)) == 4
+
+
+# ------------------------------------------- unreadable lifetimes never close
+
+
+def test_is_valid_object_exception_refuses_and_is_not_closure(registry, two_unsaved_projects, monkeypatch):
+    app, first, second = two_unsaved_projects
+    tokens = tokens_of(identity.current_document_descriptors(snap(app, first), registry))
+
+    def unreadable(self):
+        raise InvalidObjectError("wrapper not accessible")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(FakeDocument, "IsValidObject", property(unreadable))
+        explicit = identity.resolve_document(tokens[0], snap(app, first), registry)
+        assert explicit["ok"] is False
+        assert explicit["status"] == 503 and explicit["code"] == "document-identity-unavailable"
+        listing = identity.current_document_descriptors(snap(app, first), registry)
+        assert listing["ok"] is False and listing["code"] == "document-identity-unavailable"
+    # Recovery: nothing was tombstoned, the same tokens still resolve.
+    for token in tokens:
+        assert identity.resolve_document(token, snap(app, first), registry)["ok"] is True
+
+
+def test_application_whose_validity_check_always_raises_never_resolves():
+    app = FakeApplication(raises_on_valid_check=True)
+    doc = app.open_document("Project1", "")
+    registry = identity.DocumentRegistry()
+    first = identity.current_document_descriptors(snap(app, doc), registry)
+    assert first["ok"] is True       # a brand-new lifetime has nothing retained to check
+    token = tokens_of(first)[0]
+    second = identity.resolve_document(token, snap(app, doc), registry)
+    assert second["ok"] is False and second["code"] == "document-identity-unavailable"
+
+
+class DuplicatingApplication(FakeApplication):
+    """An enumeration that yields one lifetime twice: a retained reference then has
+    two Equals matches, which is ambiguity, never a choice."""
+
+    @property
+    def Documents(self):
+        docs = FakeApplication.Documents.fget(self)
+        return docs + docs[:1]
+
+
+def test_two_equals_matches_refuse_by_name_and_never_retarget():
+    app = DuplicatingApplication()
+    doc = app.open_document("Project1", "")
+    registry = identity.DocumentRegistry()
+    # The first observation sees one lifetime twice: it is refused by name, and
+    # nothing is chosen between the two wrappers.
+    first = identity.current_document_descriptors(snap(app, doc), registry)
+    assert first["ok"] is False and first["code"] == "document-identity-ambiguous"
+    assert first["status"] == 400
+
+
+def test_retained_reference_with_two_matches_is_ambiguous(registry, app):
+    doc = app.open_document("Project1", "")
+    token = tokens_of(identity.current_document_descriptors(snap(app, doc), registry))[0]
+    docs = app.Documents
+    result = identity.resolve_document(token, (docs + docs[:1], doc), registry)
+    assert result["ok"] is False and result["code"] == "document-identity-ambiguous"
+    assert result["status"] == 400
+    # It is not closure either: a clean enumeration resolves it again.
+    assert identity.resolve_document(token, snap(app, doc), registry)["ok"] is True
+
+
+# ---------------------------------------------- registry lifetime and selectors
+
+
+def test_registry_in_a_store_survives_reacquisition_and_a_lost_registry_never_reissues():
+    store = identity.LocalStore()
+    one = identity.get_document_registry(store)
+    assert identity.get_document_registry(store) is one
+    app = FakeApplication()
+    doc = app.open_document("Project1", "")
+    old_token = tokens_of(identity.current_document_descriptors(snap(app, doc), one))[0]
+    # The slot is lost (module re-import without an owned slot): a new generation.
+    fresh = identity.DocumentRegistry()
+    new_token = tokens_of(identity.current_document_descriptors(snap(app, doc), fresh))[0]
+    assert new_token != old_token
+    assert counter_of(new_token) == counter_of(old_token)      # same counter, different generation
+    stale = identity.resolve_document(old_token, snap(app, doc), fresh)
+    assert stale["ok"] is False and stale["status"] == 404
+    assert stale["code"] == "document-token-stale"
+
+
+def test_a_store_holding_a_foreign_object_gets_a_fresh_registry():
+    store = identity.LocalStore()
+    store.set(identity.REGISTRY_KEY, "not a registry")
+    assert isinstance(identity.get_document_registry(store), identity.DocumentRegistry)
+
+
+def test_selectors_that_are_not_tokens_are_refused_by_name(registry, app):
+    doc = app.open_document("Project1", "C:/Models/Project1.rvt")
+    for selector in ("Project1", "C:/Models/Project1.rvt", "", "doc1.zz.1", 7):
+        result = identity.resolve_document(selector, snap(app, doc), registry)
+        assert result["ok"] is False
+        assert result["status"] == 400 and result["code"] == "document-selector-invalid"
+    unknown = identity.resolve_document(
+        "doc1.{}.99".format(registry.generation), snap(app, doc), registry)
+    assert unknown["status"] == 404 and unknown["code"] == "document-token-unknown"
+
+
+# ------------------------------------------------------------ tool and route
+
+
+class FakeMCP(object):
+    def __init__(self):
+        self.tools = {}
+
+    def tool(self):
+        def register(fn):
+            self.tools[fn.__name__] = fn
+            return fn
+        return register
+
+
+def run_tool(response, **kwargs):
+    from tools.document_tools import register_document_tools
+
+    calls = []
+
+    async def revit_get(path, ctx=None, **options):
+        calls.append((path, options))
+        return response
+
+    async def revit_post(*args, **kwargs):  # pragma: no cover - never called
+        raise AssertionError("list_documents must not POST")
+
+    mcp = FakeMCP()
+    register_document_tools(mcp, revit_get, revit_post)
+    text = asyncio.run(mcp.tools["list_documents"](**kwargs))
+    return text, calls
+
+
+IDENT = {"pid": 4242, "actual_port": 48885, "session_token": "tok-abc", "revit_version": "2024"}
+
+
+def listing_payload(documents):
+    return {"status": "success", "process_identity": dict(IDENT), "documents": documents,
+            "count": len(documents),
+            "active_document": next((d["document"] for d in documents if d["active"]), None)}
+
+
+def test_list_documents_tool_renders_identity_and_every_selector():
+    docs = [{"document": "doc1.aaaaaaaaaaaa.1", "title": "Проект1", "path": "", "active": False, "saved": False},
+            {"document": "doc1.aaaaaaaaaaaa.2", "title": "Проект1", "path": "C:/М/П.rvt", "active": True, "saved": True}]
+    text, calls = run_tool(listing_payload(docs))
+    assert calls == [("/documents/", {})]
+    assert "doc1.aaaaaaaaaaaa.1" in text and "doc1.aaaaaaaaaaaa.2" in text
+    assert text.count("Проект1") == 2 and "C:/М/П.rvt" in text
+    assert "ACTIVE" in text
+    assert "PID 4242" in text and "48885" in text and "tok-abc" in text
+
+
+def test_list_documents_tool_passes_target_and_reports_an_empty_list_as_data():
+    text, calls = run_tool(listing_payload([]), target="revit1:xyz")
+    assert calls == [("/documents/", {"target": "revit1:xyz"})]
+    assert "No documents are open" in text and "PID 4242" in text
+    assert "ERROR" not in text.upper()
+
+
+def test_list_documents_tool_never_labels_a_refusal_as_a_received_listing():
+    text, _ = run_tool("Error: request not sent: queue busy")
+    assert text == "Error: request not sent: queue busy"
+    text, _ = run_tool({"error": "boom", "error_code": "document-identity-unavailable"})
+    assert "boom" in text and "Answering Revit process" not in text
+
+
+def test_list_documents_signature_keeps_ctx_last():
+    from tools.document_tools import register_document_tools
+
+    mcp = FakeMCP()
+    register_document_tools(mcp, None, None)
+    names = list(inspect.signature(mcp.tools["list_documents"]).parameters)
+    assert names == ["target", "ctx"]
+    doc = mcp.tools["list_documents"].__doc__
+    for name in names:
+        assert name + ":" in doc, "docstring Args must name {}".format(name)
+
+
+def test_documents_route_module_shape():
+    with open(os.path.join(REPO_ROOT, "revit_mcp", "documents.py"), encoding="utf-8") as handle:
+        source = handle.read()
+    assert source.startswith("# -*- coding: UTF-8 -*-") or source.startswith("# -*- coding: utf-8 -*-")
+    assert "def register_documents_routes(api)" in source
+    assert '"/documents/"' in source or "'/documents/'" in source
+    assert "from .identity import" in source
+    assert "revit.doc" not in source, "the active document is read only through the registry glue"

@@ -5,6 +5,7 @@ Handles grid creation and structural framing placement
 """
 
 from .utils import get_element_name, find_family_symbol_safely, get_element_id_value, suppress_warnings, parse_request_data
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -17,8 +18,7 @@ MM_TO_FEET = 1.0 / 304.8
 def register_structure_routes(api):
     """Register all structure routes with the API"""
 
-    @api.route("/create_grid/", methods=["POST"])
-    def create_grid_handler(doc, request):
+    def _create_grid(doc, request):
         """Create grid lines in the Revit model."""
         try:
             if not doc:
@@ -114,8 +114,17 @@ def register_structure_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/create_framing/", methods=["POST"])
-    def create_framing_handler(doc, request):
+    @api.route("/create_grid/", methods=["POST"])
+    def create_grid_handler(uiapp, doc, request):
+        """Create grid lines in the Revit model."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_grid(document, request), descriptor, uiapp=uiapp)
+
+    def _create_framing(doc, request):
         """Create structural framing (beams) in the Revit model."""
         try:
             if not doc:
@@ -293,5 +302,15 @@ def register_structure_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+    @api.route("/create_framing/", methods=["POST"])
+    def create_framing_handler(uiapp, doc, request):
+        """Create structural framing (beams) in the Revit model."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_framing(document, request), descriptor, uiapp=uiapp)
 
     logger.info("Structure routes registered successfully")

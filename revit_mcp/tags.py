@@ -5,6 +5,7 @@ Handles element tagging with annotation symbols
 """
 
 from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings, parse_request_data
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -17,8 +18,7 @@ MM_TO_FEET = 1.0 / 304.8
 def register_tag_routes(api):
     """Register all tag routes with the API"""
 
-    @api.route("/tag_elements/", methods=["POST"])
-    def tag_elements_handler(doc, request):
+    def _tag_elements(doc, request):
         """Tag elements with annotation symbols in a view."""
         try:
             if not doc:
@@ -243,5 +243,15 @@ def register_tag_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+    @api.route("/tag_elements/", methods=["POST"])
+    def tag_elements_handler(uiapp, doc, request):
+        """Tag elements with annotation symbols in a view."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_tag_elements(document, request), descriptor, uiapp=uiapp)
 
     logger.info("Tag routes registered successfully")

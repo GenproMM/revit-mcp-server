@@ -10,6 +10,7 @@ from .utils import (
     sanitize_value,
     commit_and_report,
 )
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -402,8 +403,7 @@ def register_parameter_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/set_parameter/", methods=["POST"])
-    def set_parameter_handler(doc, request):
+    def _set_parameter(doc, request):
         """Set a single parameter value on an element."""
         try:
             if not doc:
@@ -550,5 +550,15 @@ def register_parameter_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+    @api.route("/set_parameter/", methods=["POST"])
+    def set_parameter_handler(uiapp, doc, request):
+        """Set a single parameter value on an element."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_set_parameter(document, request), descriptor, uiapp=uiapp)
 
     logger.info("Parameter routes registered successfully")

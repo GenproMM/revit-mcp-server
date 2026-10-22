@@ -272,6 +272,7 @@ class FakeElement(object):
         self._world = world
         self.Id = types.SimpleNamespace(Value=ident)
         self.Name = "El"
+        self.Category = None
         self.Parameters = []
         system = FakeElement(world, 7, with_system=False) if with_system else None
         self.ConnectorManager = types.SimpleNamespace(
@@ -515,7 +516,7 @@ def call(world, fn, body=None, **extra):
     available = {"uiapp": world.uiapp, "doc": world.injected, "request": request_of(body)}
     available.update(extra)
     parameters = inspect.signature(fn).parameters
-    return fn(**dict((name, available[name]) for name in parameters))
+    return fn(**dict((name, available[name]) for name in parameters if name in available))
 
 
 def arm(world, items=()):

@@ -5,6 +5,7 @@ Handles duct, pipe, and MEP system creation
 """
 
 from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings, parse_request_data
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -17,8 +18,7 @@ MM_TO_FEET = 1.0 / 304.8
 def register_mep_routes(api):
     """Register all MEP routes with the API"""
 
-    @api.route("/create_duct/", methods=["POST"])
-    def create_duct_handler(doc, request):
+    def _create_duct(doc, request):
         """Create a duct between two points."""
         try:
             if not doc:
@@ -183,8 +183,17 @@ def register_mep_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/create_pipe/", methods=["POST"])
-    def create_pipe_handler(doc, request):
+    @api.route("/create_duct/", methods=["POST"])
+    def create_duct_handler(uiapp, doc, request):
+        """Create a duct between two points."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_duct(document, request), descriptor, uiapp=uiapp)
+
+    def _create_pipe(doc, request):
         """Create a pipe between two points."""
         try:
             if not doc:
@@ -334,8 +343,17 @@ def register_mep_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/create_mep_system/", methods=["POST"])
-    def create_mep_system_handler(doc, request):
+    @api.route("/create_pipe/", methods=["POST"])
+    def create_pipe_handler(uiapp, doc, request):
+        """Create a pipe between two points."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_pipe(document, request), descriptor, uiapp=uiapp)
+
+    def _create_mep_system(doc, request):
         """Create a mechanical or piping system."""
         try:
             if not doc:
@@ -499,5 +517,15 @@ def register_mep_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+    @api.route("/create_mep_system/", methods=["POST"])
+    def create_mep_system_handler(uiapp, doc, request):
+        """Create a mechanical or piping system."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_mep_system(document, request), descriptor, uiapp=uiapp)
 
     logger.info("MEP routes registered successfully")

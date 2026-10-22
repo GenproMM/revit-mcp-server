@@ -27,16 +27,34 @@ def anyio_backend():
 
 # The bridge keeps one client and one lock per validated process incarnation
 # (02-03). These Phase-1 tests exercise ONE incarnation: the single process
-# discovery would pick. Discovery and the identity handshake have their own tests
-# (test_target_resolution.py, test_target_locks.py); here they are fixed so every
-# assertion below still proves the queue, timeout and failure-wording contract.
+# discovery would pick. Discovery has its own tests (test_target_resolution.py,
+# test_target_locks.py), so it is fixed here.
+#
+# Every async queue, timeout, cancellation and failure-wording test below runs
+# twice (02-16): once with the proof of the incarnation stubbed out, as 02-03
+# adapted them, and once with the REAL _verify_target (netstat owner check plus a
+# GET /status/ identity handshake taken with the lock held), so none of the
+# Phase-1 semantics is proven only against a bridge that skips the handshake.
+PROOFS = ("fixed-proof", "real-handshake")
+
 TOKEN = "11111111-1111-4111-8111-111111111111"
 TARGET = {"host": "127.0.0.1", "port": 48884, "pid": 4242, "session_token": TOKEN}
 IDENTITY = {"pid": 4242, "actual_port": 48884, "session_token": TOKEN, "revit_version": "2024"}
 
 
+def pytest_generate_tests(metafunc):
+    # Only the async tests exercise the queue; the pure and subprocess tests run once.
+    if "proof" in metafunc.fixturenames and metafunc.definition.get_closest_marker("anyio"):
+        metafunc.parametrize("proof", PROOFS)
+
+
+@pytest.fixture
+def proof():
+    return "fixed-proof"
+
+
 @pytest.fixture(autouse=True)
-def _reset_bridge_state(monkeypatch):
+def _reset_bridge_state(monkeypatch, proof):
     # A lock contended in one test's event loop is bound to that loop, and a
     # pooled client belongs to the loop it was first used in: fresh state per test.
     bridge._states.clear()
@@ -49,7 +67,8 @@ def _reset_bridge_state(monkeypatch):
         return None
 
     monkeypatch.setattr(bridge, "resolve_default_target", only_process)
-    monkeypatch.setattr(bridge, "_verify_target", proven)
+    if proof == "fixed-proof":
+        monkeypatch.setattr(bridge, "_verify_target", proven)
     monkeypatch.setattr(bridge, "listener_snapshot",
                         lambda ports, **kwargs: {TARGET["port"]: [TARGET["pid"]]})
     yield
@@ -68,20 +87,22 @@ class _Gate(object):
     """A handler that holds /p1/ on an event and records what it has seen."""
 
     def __init__(self):
-        self.seen = []
+        self.seen = []          # requested routes only, in arrival order
+        self.status_seen = []   # every GET /status/ (a call's own or a handshake)
         self.timeouts = {}
         self.p1_started = asyncio.Event()
         self.release = asyncio.Event()
 
     async def handler(self, request):
-        self.seen.append(request.url.path)
         self.timeouts[request.url.path] = dict(request.extensions["timeout"])
+        if request.url.path.endswith("/status/"):
+            self.status_seen.append(request.url.path)
+            return httpx.Response(200, json={"path": request.url.path,
+                                             "process_identity": IDENTITY})
+        self.seen.append(request.url.path)
         if request.url.path.endswith("/p1/"):
             self.p1_started.set()
             await self.release.wait()
-        if request.url.path.endswith("/status/"):
-            return httpx.Response(200, json={"path": request.url.path,
-                                             "process_identity": IDENTITY})
         return httpx.Response(200, json={"path": request.url.path})
 
 
@@ -114,7 +135,8 @@ async def test_status_passes_while_locked():
     await asyncio.wait_for(gate.p1_started.wait(), 1.0)
 
     result = await asyncio.wait_for(bridge.revit_get("/status/"), 1.0)
-    assert result["path"] == "/genpro_revit_mcp/status/"
+    # The exact Phase-1 payload: the identity answer is the status route's own data.
+    assert result == {"path": "/genpro_revit_mcp/status/", "process_identity": IDENTITY}
 
     gate.release.set()
     await asyncio.wait_for(first, 1.0)
@@ -336,6 +358,10 @@ def _routing_handler(behaviours, seen=None):
     """A MockTransport handler: path suffix -> exception to raise, else a 200."""
 
     async def handler(request):
+        if request.url.path.endswith("/status/"):
+            # The identity handshake of the real-handshake mode (and a plain status call).
+            return httpx.Response(200, json={"path": request.url.path,
+                                             "process_identity": IDENTITY})
         if seen is not None:
             seen.append(request.url.path)
         for suffix, factory in behaviours.items():
@@ -795,7 +821,7 @@ async def test_d27b_tool_path_model_info_waits_status_does_not():
 
     status = await asyncio.wait_for(mcp.tools["get_revit_status"](None), 1.0)
     assert status.splitlines()[-1].startswith("MCP target: ")
-    assert "/genpro_revit_mcp/status/" in gate.seen
+    assert "/genpro_revit_mcp/status/" in gate.status_seen
 
     info = asyncio.ensure_future(mcp.tools["get_revit_model_info"](None))
     await asyncio.sleep(0.05)
@@ -804,3 +830,183 @@ async def test_d27b_tool_path_model_info_waits_status_does_not():
     gate.release.set()
     await asyncio.wait_for(asyncio.gather(holder, info), 2.0)
     assert gate.seen.index("/genpro_revit_mcp/p1/") < gate.seen.index("/genpro_revit_mcp/model_info/")
+
+
+# --- Per-incarnation queue semantics (02-16) -------------------------------------
+# The Phase-1 contract restated for two selected processes: one queue per
+# incarnation for every transport, independent processes, a status call that
+# bypasses only its own process queue, and eviction that never touches another
+# process in-flight call. Each runs with the proof stubbed and with the real
+# handshake.
+
+TOKEN_B = "22222222-2222-4222-8222-222222222222"
+PORT_B, PID_B = 48885, 5151
+TARGET_B = {"host": "127.0.0.1", "port": PORT_B, "pid": PID_B, "session_token": TOKEN_B}
+IDENTITY_B = {"pid": PID_B, "actual_port": PORT_B, "session_token": TOKEN_B,
+              "revit_version": "2025"}
+SEL_A = bridge._selector_for(TARGET)
+SEL_B = bridge._selector_for(TARGET_B)
+
+
+class _TwoProcesses(object):
+    """Two selected incarnations whose /hold/ route blocks until released, per port."""
+
+    def __init__(self, monkeypatch):
+        self.seen = []          # (port, requested path), requested routes only
+        self.started = {}
+        self.release = {}
+        self.clients = {}
+        for target in (TARGET, TARGET_B):
+            self.started[target["port"]] = asyncio.Event()
+            self.release[target["port"]] = asyncio.Event()
+        owners = {TARGET["port"]: [TARGET["pid"]], PORT_B: [PID_B]}
+        monkeypatch.setattr(bridge, "listener_snapshot",
+                            lambda ports, **kwargs: dict((p, list(owners.get(p, []))) for p in ports))
+        for target in (TARGET, TARGET_B):
+            client = httpx.AsyncClient(
+                base_url="http://test:{}/genpro_revit_mcp/".format(target["port"]),
+                transport=httpx.MockTransport(self.handler), trust_env=False)
+            bridge._state_for(target).client = client
+            self.clients[target["port"]] = client
+
+    async def handler(self, request):
+        import base64
+
+        port, path = request.url.port, request.url.path
+        if path.endswith("/status/"):
+            who = IDENTITY if port == TARGET["port"] else IDENTITY_B
+            return httpx.Response(200, json={"status": "active", "process_identity": who})
+        self.seen.append((port, path))
+        if path.endswith("/hold/"):
+            self.started[port].set()
+            await self.release[port].wait()
+        if "/get_view/" in path:
+            return httpx.Response(200, json={"image_data": base64.b64encode(b"\x89PNG").decode("ascii")})
+        return httpx.Response(200, json={"port": port, "path": path})
+
+    def routes(self, port):
+        return [path for p, path in self.seen if p == port]
+
+
+@pytest.mark.anyio
+async def test_the_proof_of_the_incarnation_is_taken_inside_the_lock_before_each_send(proof):
+    gate = _Gate()
+    _install_client(gate.handler)
+
+    first = asyncio.ensure_future(bridge.revit_post("/p1/", {}))
+    await asyncio.wait_for(gate.p1_started.wait(), 1.0)
+    second = asyncio.ensure_future(bridge.revit_post("/p2/", {}))
+    await asyncio.sleep(0.05)
+    # A queued call never handshakes outside the lock: only the holder proof exists.
+    assert len(gate.status_seen) == (1 if proof == "real-handshake" else 0)
+
+    gate.release.set()
+    await asyncio.wait_for(asyncio.gather(first, second), 2.0)
+    assert len(gate.status_seen) == (2 if proof == "real-handshake" else 0)
+    assert gate.seen == ["/genpro_revit_mcp/p1/", "/genpro_revit_mcp/p2/"]
+
+
+@pytest.mark.anyio
+async def test_image_with_a_target_waits_behind_that_targets_lock_only(proof, monkeypatch):
+    world = _TwoProcesses(monkeypatch)
+    holder = asyncio.ensure_future(bridge.revit_post("/hold/", {}, target=SEL_A))
+    await asyncio.wait_for(world.started[TARGET["port"]].wait(), 1.0)
+
+    waiting = asyncio.ensure_future(bridge.revit_image("/get_view/L1", target=SEL_A))
+    other = await asyncio.wait_for(bridge.revit_image("/get_view/L1", target=SEL_B), 1.0)
+    await asyncio.sleep(0.05)
+    assert not isinstance(other, str), other                       # the other process answered at once
+    assert world.routes(TARGET["port"]) == ["/genpro_revit_mcp/hold/"]   # this one is still queued
+    assert not waiting.done()
+
+    world.release[TARGET["port"]].set()
+    await asyncio.wait_for(holder, 1.0)
+    image = await asyncio.wait_for(waiting, 1.0)
+    assert not isinstance(image, str), image
+    assert world.routes(TARGET["port"]) == ["/genpro_revit_mcp/hold/", "/genpro_revit_mcp/get_view/L1"]
+    assert world.routes(PORT_B) == ["/genpro_revit_mcp/get_view/L1"]
+
+
+@pytest.mark.anyio
+async def test_reads_and_writes_to_a_second_target_never_wait_for_the_first(proof, monkeypatch):
+    world = _TwoProcesses(monkeypatch)
+    holder = asyncio.ensure_future(bridge.revit_post("/hold/", {}, target=SEL_A))
+    await asyncio.wait_for(world.started[TARGET["port"]].wait(), 1.0)
+    queued = asyncio.ensure_future(bridge.revit_get("/list/", target=SEL_A))
+
+    read = await asyncio.wait_for(bridge.revit_get("/list/", target=SEL_B), 1.0)
+    write = await asyncio.wait_for(bridge.revit_post("/edit/", {}, target=SEL_B), 1.0)
+    assert read == {"port": PORT_B, "path": "/genpro_revit_mcp/list/"}
+    assert write == {"port": PORT_B, "path": "/genpro_revit_mcp/edit/"}
+    assert not queued.done()
+    assert bridge._get_lock(TARGET).locked() and not bridge._get_lock(TARGET_B).locked()
+
+    world.release[TARGET["port"]].set()
+    await asyncio.wait_for(asyncio.gather(holder, queued), 1.0)
+    assert world.routes(TARGET["port"]) == ["/genpro_revit_mcp/hold/", "/genpro_revit_mcp/list/"]
+
+
+@pytest.mark.anyio
+async def test_selected_status_bypasses_only_the_queue_it_belongs_to(proof, monkeypatch):
+    world = _TwoProcesses(monkeypatch)
+    holder = asyncio.ensure_future(bridge.revit_post("/hold/", {}, target=SEL_A))
+    await asyncio.wait_for(world.started[TARGET["port"]].wait(), 1.0)
+
+    for selector in (SEL_A, SEL_B):
+        status = await asyncio.wait_for(bridge.revit_get("/status/", target=selector), 1.0)
+        assert status["process_identity"]["pid"] in (TARGET["pid"], PID_B)
+    assert world.routes(TARGET["port"]) == ["/genpro_revit_mcp/hold/"]   # status is not a requested route
+
+    world.release[TARGET["port"]].set()
+    await asyncio.wait_for(holder, 1.0)
+
+
+@pytest.mark.anyio
+async def test_eviction_of_a_stale_incarnation_never_releases_another_in_flight_call(proof, monkeypatch):
+    world = _TwoProcesses(monkeypatch)
+    stale_client = world.clients[TARGET["port"]]
+    holder_a = asyncio.ensure_future(bridge.revit_post("/hold/", {}, target=SEL_A))
+    holder_b = asyncio.ensure_future(bridge.revit_post("/hold/", {}, target=SEL_B))
+    await asyncio.wait_for(world.started[TARGET["port"]].wait(), 1.0)
+    await asyncio.wait_for(world.started[PORT_B].wait(), 1.0)
+
+    # A restarted process proves itself on A port: A state is superseded while A is mid-call.
+    successor = dict(TARGET, session_token="33333333-3333-4333-8333-333333333333")
+    await bridge._retire_stale("127.0.0.1", TARGET["port"], bridge._target_key(successor))
+
+    assert bridge._target_key(TARGET) not in bridge._states           # nothing new can use it
+    assert bridge._target_key(TARGET_B) in bridge._states             # the other process is untouched
+    assert bridge._get_lock(TARGET_B).locked()
+    assert not stale_client.is_closed                                 # the in-flight call keeps its client
+    assert not world.clients[PORT_B].is_closed
+
+    world.release[TARGET["port"]].set()
+    assert await asyncio.wait_for(holder_a, 1.0) == {"port": TARGET["port"], "path": "/genpro_revit_mcp/hold/"}
+    assert stale_client.is_closed                                     # closed by its last user
+    assert bridge._get_lock(TARGET_B).locked() and not holder_b.done()
+    assert not world.clients[PORT_B].is_closed
+
+    world.release[PORT_B].set()
+    assert await asyncio.wait_for(holder_b, 1.0) == {"port": PORT_B, "path": "/genpro_revit_mcp/hold/"}
+
+
+def test_no_module_level_mcp_import_in_the_bridge():
+    import ast
+
+    with open(os.path.join(REPO_ROOT, "bridge.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    imported = []
+    for node in tree.body:                       # module level only
+        if isinstance(node, ast.Import):
+            imported.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imported.append(node.module or "")
+    assert not [name for name in imported if name == "mcp" or name.startswith("mcp.")], imported
+
+
+def test_the_endpoint_scan_sees_every_never_unlocked_route_and_all_of_them_lock():
+    pairs = _tool_endpoints()
+    for route in sorted(bridge.NEVER_UNLOCKED):
+        assert ("POST", route) in pairs, route
+        assert bridge._is_locked("POST", "/{}/".format(route)) is True
+        assert bridge._is_locked("GET", "/{}/".format(route)) is True

@@ -16,6 +16,9 @@ is roughly ten extra discipline models and ten times the memory.
 from pyrevit import routes, DB
 from .utils import parse_request_data
 from .textutils import sanitize_string, describe_broken_path
+from .identity import (
+    read_live_snapshot, get_document_registry, current_descriptor, process_identity_or_error,
+)
 import os
 import logging
 
@@ -33,10 +36,59 @@ _DETACH_MODES = {
 }
 
 
-def _get_host_app():
-    """Return pyRevit HOST_APP, which carries .app (Application) and .uiapp."""
-    from pyrevit import HOST_APP
-    return HOST_APP
+def _stamp_process(response, uiapp):
+    """Name the Revit process that answered on a process-level reply. Never raises.
+
+    open_model is not document-bound: it takes no document selector and is not refused for
+    a document count. What it can honestly report on every reply, error included, is the
+    process that handled it (read through the injected ``uiapp``, never a process-global). A reply
+    whose data is not a dict is returned untouched.
+    """
+    try:
+        data = getattr(response, "data", None)
+        if isinstance(data, dict):
+            identity, identity_error = process_identity_or_error(uiapp)
+            if identity:
+                data["process_identity"] = identity
+            else:
+                data["identity_error"] = identity_error
+    except Exception:
+        pass
+    return response
+
+
+def _same_lifetime(opened, candidate):
+    try:
+        return bool(opened.Equals(candidate))
+    except Exception:
+        return False
+
+
+def _opened_document_descriptor(opened, uiapp):
+    """The document Revit actually opened, read from that Document now (never the request).
+
+    Title and path come from the opened Document itself. The selector and the active flag
+    come from the live registry: the open document that Equals ``opened``. When that cannot
+    be established (the registry is in doubt, or no single open document matches) the
+    selector is None and the flag is None: an honest unknown, never a guess and never the
+    previously active document. Never raises.
+    """
+    token = None
+    active = None
+    try:
+        documents, active_document = read_live_snapshot(uiapp)
+        observation = get_document_registry().observe(documents, active_document)
+        matches = [entry for entry in observation.entries
+                   if _same_lifetime(opened, entry["document"])]
+        if len(matches) == 1:
+            token = matches[0]["token"]
+            active = matches[0]["active"]
+    except Exception as e:
+        logger.warning("Could not select the opened document: {}".format(str(e)))
+    return current_descriptor(
+        {"document": token, "title": "Unnamed", "path": "", "active": active, "saved": False},
+        opened,
+    )
 
 
 def _matches_any(name, patterns):
@@ -349,8 +401,7 @@ def register_worksharing_routes(api):
             logger.error("model_worksets failed: {}".format(str(e)))
             return routes.make_response(data={"error": str(e)}, status=500)
 
-    @api.route("/open_model/", methods=["POST"])
-    def open_model(doc, request):
+    def _open_model(uiapp, request):
         """
         Open a model from disk, detaching from central and configuring worksets.
 
@@ -416,8 +467,7 @@ def register_worksharing_routes(api):
             local_path = data.get("local_path")
             overwrite_local = bool(data.get("overwrite_local", True))
 
-            host = _get_host_app()
-            app = host.app
+            app = uiapp.Application
             if app is None:
                 return routes.make_response(
                     data={"error": "Revit Application unavailable"}, status=503
@@ -490,7 +540,7 @@ def register_worksharing_routes(api):
             was_activated = False
             try:
                 if activate:
-                    uidoc = host.uiapp.OpenAndActivateDocument(open_path, options, False)
+                    uidoc = uiapp.OpenAndActivateDocument(open_path, options, False)
                     opened = uidoc.Document if uidoc else None
                     was_activated = True
                 else:
@@ -530,6 +580,8 @@ def register_worksharing_routes(api):
                 "activated": was_activated,
                 "audited": audit,
                 "is_local_copy": local_report is not None,
+                # The Document Revit actually opened, read after the API call.
+                "document": _opened_document_descriptor(opened, uiapp),
             }
             if local_report:
                 result["local_path"] = local_report["local_path"]
@@ -546,5 +598,12 @@ def register_worksharing_routes(api):
         except Exception as e:
             logger.error("open_model failed: {}".format(str(e)))
             return routes.make_response(data={"error": str(e)}, status=500)
+
+    @api.route("/open_model/", methods=["POST"])
+    def open_model(uiapp, doc, request):
+        """Open a model from disk (process-level); the reply names the document it opened."""
+        # Not document-bound (D-01): no selector and no guard. The reply is stamped with the
+        # process that answered; a success also names the document that was actually opened.
+        return _stamp_process(_open_model(uiapp, request), uiapp)
 
     logger.info("Worksharing routes registered successfully")

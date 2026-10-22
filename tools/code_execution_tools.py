@@ -12,27 +12,50 @@ def register_code_execution_tools(mcp, revit_get, revit_post, revit_image=None):
 
     @mcp.tool()
     async def execute_revit_code(
-        code: str, description: str = "Code execution", ctx: Context = None
+        code: str,
+        description: str = "Code execution",
+        target: str = None,
+        ctx: Context = None,
     ) -> str:
         """
-        Execute IronPython code directly in Revit context.
+        Execute IronPython code directly in a Revit process.
 
-        This tool allows you to send IronPython 2.7.12 code to be executed inside Revit.
-        The code has access to:
-        - doc: The active Revit document
-        - DB: Revit API Database namespace
-        - revit: pyRevit module
-        - print: Function to output text (returned in response)
+        This is a trusted arbitrary-code exception. It is not confined to one document,
+        and it is kept for work the typed tools cannot do. Read these limits before you
+        use it:
 
-        Use this when the existing MCP tools cannot accomplish what you need.
+        - The code runs as IronPython 3 (the Python 3.4 language level: no f-strings)
+          with full access to the targeted Revit process: doc, DB, revit, clr and System.
+        - doc is only the starting context: the document that was current when the call
+          arrived. It is not a selected document and it is not guaranteed to be the one
+          you intend; the active document may not be the one you meant.
+        - The code can reach and change other open documents (through revit, DB, clr,
+          System or builtins). There is no document guard, no inactive-document refusal
+          and no confinement.
+        - The documents the code changes are not identified or attributed in the reply.
+          The reply says which process ran the code (process_identity) and repeats this
+          exception in its document_scope field; it never names a changed document. If
+          the work matters, verify the result with a read tool afterwards.
+        - target selects which Revit process runs the code and nothing more. It is not
+          authentication and it does not select, guard or confine a document.
+        - The code is wrapped in one transaction that is rolled back if Revit vetoes the
+          commit (a rolled_back reply is an error, not a success).
+
+        Use this when the existing MCP tools cannot accomplish what you need, and prefer a
+        typed tool whenever one exists: typed mutation tools take a document and refuse when
+        it is not the active one.
 
         Args:
             code: The IronPython code to execute (as a string)
             description: Optional description of what the code does
+            target: Optional opaque process selector from discover_revit_targets; omit it
+                only when exactly one Revit process is usable. It names the process that
+                runs the code and nothing else.
             ctx: MCP context for logging
 
         Returns:
-            Execution results including any output or errors
+            Execution results including any output or errors, the process that ran the
+            code and the document_scope exception notice
 
         Example:
             code = '''
@@ -48,7 +71,7 @@ def register_code_execution_tools(mcp, revit_get, revit_post, revit_image=None):
                     collector = DB.FilteredElementCollector(doc).OfClass(DB.TextNoteType).ToElements()
                     print("Number of text note types:", len(collector))
                     '''
-                    
+
         Tips for writing IronPython code in Revit:
         -----------------------------------------
         1. Accessing Element.Name property:
@@ -81,11 +104,12 @@ def register_code_execution_tools(mcp, revit_get, revit_post, revit_image=None):
         """
         try:
             payload = {"code": code, "description": description}
+            options = {} if target is None else {"target": target}
 
             if ctx:
                 await ctx.info("Executing code: {}".format(description))
 
-            response = await revit_post("/execute_code/", payload, ctx)
+            response = await revit_post("/execute_code/", payload, ctx, **options)
             return format_response(response)
 
         except (ConnectionError, ValueError, RuntimeError) as e:

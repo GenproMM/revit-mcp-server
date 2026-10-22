@@ -5,6 +5,7 @@ Handles direct execution of IronPython code in Revit context.
 """
 from pyrevit import routes, revit, DB
 from .utils import suppress_warnings, parse_request_data, commit_and_report
+from .identity import process_identity_or_error
 import logging
 import sys
 import traceback
@@ -16,21 +17,45 @@ except ImportError:  # IronPython 2.7
 # Standard logger setup
 logger = logging.getLogger(__name__)
 
+# D-15 (user decision 2026-10-16): this route stays enabled as a trusted arbitrary-code
+# exception. It is not document-guarded and nothing confines the code, so every reply says
+# so, in the same words, and never names a document the code changed.
+DOCUMENT_SCOPE_NOTICE = (
+    "This call is a trusted arbitrary-code exception: it ran arbitrary IronPython with full "
+    "access to the targeted Revit process. No document guard or confinement applies. The injected "
+    "'doc' is only the starting context (the document pyRevit supplied for this request); "
+    "the code could read and change any open document, and the documents it changed are "
+    "not identified or attributed in this reply. The process that ran it is named by "
+    "process_identity."
+)
+
+
+def _stamp_exception(response, uiapp):
+    """Add the constant document_scope notice and the process identity to a reply.
+
+    Never raises, never alters the status or any other key, and never adds a title, path
+    or any other attribution of a document the code changed. A reply whose data is not a
+    dict is returned untouched.
+    """
+    try:
+        data = getattr(response, "data", None)
+        if isinstance(data, dict):
+            data["document_scope"] = DOCUMENT_SCOPE_NOTICE
+            identity, identity_error = process_identity_or_error(uiapp)
+            if identity:
+                data["process_identity"] = identity
+            else:
+                data["identity_error"] = identity_error
+    except Exception:
+        pass
+    return response
+
 
 def register_code_execution_routes(api):
     """Register code execution routes with the API."""
 
-    @api.route("/execute_code/", methods=["POST"])
-    def execute_code(doc, request):
-        """
-        Execute IronPython code in Revit context.
-
-        Expected payload:
-        {
-            "code": "python code as string",
-            "description": "optional description of what the code does"
-        }
-        """
+    def _execute_code(doc, request):
+        """Execute IronPython code in Revit context (body unchanged by plan 02-15)."""
         try:
             # During OpenAndActivateDocument, pyRevit can invoke the route
             # once with a stale/null injected document. Prefer the current
@@ -224,5 +249,21 @@ def register_code_execution_routes(api):
         except Exception as e:
             logger.error("Execute code request failed: {}".format(str(e)))
             return routes.make_response(data={"error": str(e)}, status=500)
+
+    @api.route("/execute_code/", methods=["POST"])
+    def execute_code(uiapp, doc, request):
+        """
+        Execute IronPython code in Revit context.
+
+        Expected payload:
+        {
+            "code": "python code as string",
+            "description": "optional description of what the code does"
+        }
+
+        Trusted arbitrary-code exception (D-15): no document selector, no document
+        guard and no 412 path. Every reply carries document_scope and process_identity.
+        """
+        return _stamp_exception(_execute_code(doc, request), uiapp)
 
     logger.info("Code execution routes registered successfully.")

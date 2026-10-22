@@ -214,7 +214,7 @@ def test_docstrings_name_every_argument_and_state_the_scope_rule(name):
     args_block = doc.split("Args:", 1)[1]
     for argument in inspect.signature(tools[name]).parameters:
         assert re.search(r"^\s+{}:".format(argument), args_block, re.M), (name, argument)
-    lowered = doc.lower()
+    lowered = " ".join(doc.lower().split())
     assert "discover_revit_targets" in doc
     if row["kind"] == "mutation":
         for phrase in ("list_documents", "activate_document", "412", "the only open document",

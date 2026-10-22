@@ -93,7 +93,26 @@ TASK_ONE_TOOLS = {
     "list_levels": _row("model", "read", "GET", "/list_levels/", [], {}),
 }
 
-TASK_TWO_TOOLS = {}
+TASK_TWO_TOOLS = {
+    "list_project_parameters": _row(
+        "parameter", "read", "GET", "/project_parameters/",
+        ["shared_only", "prefix", "search", "summary_only"], {}),
+    # The route embeds the element id, so the row carries the resolved path.
+    "get_element_properties": _row(
+        "parameter", "read", "GET", "/element_properties/7",
+        ["element_id", "include_type_params"], {"element_id": 7}),
+    "set_parameter": _row(
+        "parameter", "mutation", "POST", "/set_parameter/",
+        ["element_id", "parameter_name", "value"],
+        {"element_id": 7, "parameter_name": "Comments", "value": "checked"}),
+    "create_room": _row(
+        "room", "mutation", "POST", "/create_room/",
+        ["level_name", "location", "name", "number"], {"level_name": "Level 1"}),
+    "create_room_separation": _row(
+        "room", "mutation", "POST", "/create_room_separation/",
+        ["lines", "level_name", "view_name"],
+        {"lines": [{"start_point": POINT_A, "end_point": POINT_B}]}),
+}
 
 TOOLS = dict(TASK_ONE_TOOLS, **TASK_TWO_TOOLS)
 MODULES = sorted({row["module"] for row in TOOLS.values()})
@@ -332,6 +351,82 @@ def test_list_levels_is_an_active_only_read_and_points_to_the_addressed_levels_t
     assert "active document" in lowered
     assert "read_document_levels" in lowered
     assert "no document argument" in lowered
+
+
+def test_list_project_parameters_forwards_its_filter_params_and_the_target_together():
+    text, calls = run_tool("list_project_parameters", shared_only=True, prefix="ADSK_", search="mark",
+                           summary_only=True, target=PROCESS_SELECTOR)
+    assert calls == [("GET", "/project_parameters/", None,
+                      {"params": {"shared_only": "true", "prefix": "ADSK_", "search": "mark",
+                                  "summary_only": "true"}, "target": PROCESS_SELECTOR})]
+    text, calls = run_tool("list_project_parameters")
+    assert calls == [("GET", "/project_parameters/", None, {"params": {}})]
+
+
+def test_get_element_properties_keeps_the_element_id_in_the_path_and_adds_only_the_target():
+    text, calls = run_tool("get_element_properties", element_id=42, target=PROCESS_SELECTOR)
+    assert calls == [("GET", "/element_properties/42", None, {"target": PROCESS_SELECTOR})]
+
+
+def test_parameter_reads_state_that_they_read_the_active_document_only():
+    for name in ("list_project_parameters", "get_element_properties"):
+        tools, _ = register_module("parameter")
+        lowered = " ".join(tools[name].__doc__.lower().split())
+        assert "no document argument" in lowered, name
+        assert "active document" in lowered, name
+
+
+def test_set_parameter_keeps_its_legacy_body_and_adds_only_the_document():
+    text, calls = run_tool("set_parameter")
+    assert calls == [("POST", "/set_parameter/",
+                      {"element_id": 7, "parameter_name": "Comments", "value": "checked"}, {})]
+    text, calls = run_tool("set_parameter", document=DOCUMENT_SELECTOR, target=PROCESS_SELECTOR)
+    assert calls == [("POST", "/set_parameter/",
+                      {"element_id": 7, "parameter_name": "Comments", "value": "checked",
+                       "document": DOCUMENT_SELECTOR}, {"target": PROCESS_SELECTOR})]
+
+
+def test_create_room_keeps_its_optional_fields_out_of_the_body_unless_given():
+    text, calls = run_tool("create_room")
+    assert calls[0][2] == {"level_name": "Level 1"}
+    text, calls = run_tool("create_room", location={"x": 1.0, "y": 2.0}, name="Hall", number="101",
+                           document=DOCUMENT_SELECTOR)
+    assert calls[0][2] == {"level_name": "Level 1", "location": {"x": 1.0, "y": 2.0}, "name": "Hall",
+                           "number": "101", "document": DOCUMENT_SELECTOR}
+
+
+def test_create_room_separation_keeps_its_optional_fields_out_of_the_body_unless_given():
+    lines = [{"start_point": POINT_A, "end_point": POINT_B}]
+    text, calls = run_tool("create_room_separation")
+    assert calls[0][2] == {"lines": lines}
+    text, calls = run_tool("create_room_separation", level_name="Level 1", view_name="Plan 1",
+                           document=DOCUMENT_SELECTOR)
+    assert calls[0][2] == {"lines": lines, "level_name": "Level 1", "view_name": "Plan 1",
+                           "document": DOCUMENT_SELECTOR}
+
+
+@pytest.mark.parametrize("name", MUTATIONS)
+def test_a_rolled_back_409_stays_a_visible_failure_never_a_success(name):
+    """The bridge hands a non-200 reply over as an 'Error: 409 - ...' string (D-07).
+
+    The tools must return it verbatim: no selector handling may rewrite it into a
+    success, and no formatting may drop the rollback reason.
+    """
+    text, calls = run_tool(name, response=ROLLED_BACK_409, document=DOCUMENT_SELECTOR,
+                           target=PROCESS_SELECTOR)
+    assert len(calls) == 1
+    assert text == ROLLED_BACK_409
+    assert text.startswith("Error: 409")
+    assert "rolled_back" in text and "Constraints are not satisfied" in text
+
+
+@pytest.mark.parametrize("name", MUTATIONS)
+def test_a_rollback_dict_signal_is_not_relabelled_by_the_tool(name):
+    """Whatever a mutation tool gets back is formatted by format_response, nothing else."""
+    from tools.utils import format_response
+    reply = {"status": "rolled_back", "transaction_status": "RolledBack"}
+    text, _ = run_tool(name, response=reply, document=DOCUMENT_SELECTOR)
+    assert text == format_response(reply)
 
 
 def test_route_replies_pass_through_format_response_unchanged_in_shape():

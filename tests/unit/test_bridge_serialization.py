@@ -38,7 +38,7 @@ def _reset_bridge_state():
 
 def _install_client(handler):
     bridge._http_client = httpx.AsyncClient(
-        base_url="http://test:1/revit_mcp",
+        base_url="http://test:1/genpro_revit_mcp",
         transport=httpx.MockTransport(handler),
         trust_env=False,
     )
@@ -72,14 +72,14 @@ async def test_second_post_waits_for_the_first():
     second = asyncio.ensure_future(bridge.revit_post("/p2/", {}))
     await asyncio.sleep(0.05)
 
-    assert gate.seen == ["/revit_mcp/p1/"]
+    assert gate.seen == ["/genpro_revit_mcp/p1/"]
 
     gate.release.set()
     r1 = await asyncio.wait_for(first, 1.0)
     r2 = await asyncio.wait_for(second, 1.0)
-    assert r1 == {"path": "/revit_mcp/p1/"}
-    assert r2 == {"path": "/revit_mcp/p2/"}
-    assert gate.seen == ["/revit_mcp/p1/", "/revit_mcp/p2/"]
+    assert r1 == {"path": "/genpro_revit_mcp/p1/"}
+    assert r2 == {"path": "/genpro_revit_mcp/p2/"}
+    assert gate.seen == ["/genpro_revit_mcp/p1/", "/genpro_revit_mcp/p2/"]
 
 
 @pytest.mark.anyio
@@ -91,7 +91,7 @@ async def test_status_passes_while_locked():
     await asyncio.wait_for(gate.p1_started.wait(), 1.0)
 
     result = await asyncio.wait_for(bridge.revit_get("/status/"), 1.0)
-    assert result == {"path": "/revit_mcp/status/"}
+    assert result == {"path": "/genpro_revit_mcp/status/"}
 
     gate.release.set()
     await asyncio.wait_for(first, 1.0)
@@ -177,7 +177,7 @@ def test_port_reaches_base_url():
     )
     assert result.returncode == 0, result.stderr
     lines = result.stdout.split()
-    assert lines == ["http://127.0.0.1:48885/revit_mcp", "127.0.0.1:48885"]
+    assert lines == ["http://127.0.0.1:48885/genpro_revit_mcp", "127.0.0.1:48885"]
 
 
 def test_port_refusal_writes_stderr_only():
@@ -240,9 +240,9 @@ async def test_budget_not_shrunk_by_queue_wait():
     second = await asyncio.wait_for(bridge.revit_post("/p2/", {}, timeout=0.5), 2.0)
     await asyncio.wait_for(first, 1.0)
 
-    assert second == {"path": "/revit_mcp/p2/"}
+    assert second == {"path": "/genpro_revit_mcp/p2/"}
     # The wait is not subtracted: httpx got the caller's whole timeout.
-    assert gate.timeouts["/revit_mcp/p2/"] == {
+    assert gate.timeouts["/genpro_revit_mcp/p2/"] == {
         "connect": 0.5, "read": 0.5, "write": 0.5, "pool": 0.5,
     }
 
@@ -261,11 +261,11 @@ async def test_queue_bound_returns_not_sent_without_sending():
     assert "NOT sent to Revit" in result
     assert "nothing was sent" in result
     assert "nothing was changed" in result
-    assert gate.seen == ["/revit_mcp/p1/"]
+    assert gate.seen == ["/genpro_revit_mcp/p1/"]
 
     gate.release.set()
     await asyncio.wait_for(first, 1.0)
-    assert gate.seen == ["/revit_mcp/p1/"]
+    assert gate.seen == ["/genpro_revit_mcp/p1/"]
     assert bridge._get_lock().locked() is False
 
 
@@ -325,7 +325,7 @@ async def test_releases_after_handler_exception():
     assert result == "Error: boom"
     assert bridge._get_lock().locked() is False
 
-    assert await asyncio.wait_for(bridge.revit_post("/next/", {}), 1.0) == {"path": "/revit_mcp/next/"}
+    assert await asyncio.wait_for(bridge.revit_post("/next/", {}), 1.0) == {"path": "/genpro_revit_mcp/next/"}
 
 
 @pytest.mark.anyio
@@ -340,7 +340,7 @@ async def test_releases_after_post_send_timeout():
     assert "Verify" in result
     assert bridge._get_lock().locked() is False
 
-    assert await asyncio.wait_for(bridge.revit_post("/next/", {}), 1.0) == {"path": "/revit_mcp/next/"}
+    assert await asyncio.wait_for(bridge.revit_post("/next/", {}), 1.0) == {"path": "/genpro_revit_mcp/next/"}
 
 
 @pytest.mark.anyio
@@ -355,7 +355,7 @@ async def test_releases_after_cancellation_of_holder():
         await holder
 
     assert bridge._get_lock().locked() is False
-    assert await asyncio.wait_for(bridge.revit_post("/p2/", {}), 1.0) == {"path": "/revit_mcp/p2/"}
+    assert await asyncio.wait_for(bridge.revit_post("/p2/", {}), 1.0) == {"path": "/genpro_revit_mcp/p2/"}
 
 
 @pytest.mark.anyio
@@ -372,10 +372,10 @@ async def test_releases_cancelled_waiter_is_never_sent():
         await waiter
 
     gate.release.set()
-    assert await asyncio.wait_for(holder, 1.0) == {"path": "/revit_mcp/p1/"}
-    assert gate.seen == ["/revit_mcp/p1/"]
+    assert await asyncio.wait_for(holder, 1.0) == {"path": "/genpro_revit_mcp/p1/"}
+    assert gate.seen == ["/genpro_revit_mcp/p1/"]
     assert bridge._get_lock().locked() is False
-    assert await asyncio.wait_for(bridge.revit_post("/p2/", {}), 1.0) == {"path": "/revit_mcp/p2/"}
+    assert await asyncio.wait_for(bridge.revit_post("/p2/", {}), 1.0) == {"path": "/genpro_revit_mcp/p2/"}
 
 
 @pytest.mark.anyio
@@ -393,7 +393,7 @@ async def test_releases_queued_posts_in_arrival_order():
     gate.release.set()
     await asyncio.wait_for(asyncio.gather(holder, *queued), 2.0)
     assert gate.seen == [
-        "/revit_mcp/p1/", "/revit_mcp/q1/", "/revit_mcp/q2/", "/revit_mcp/q3/", "/revit_mcp/q4/",
+        "/genpro_revit_mcp/p1/", "/genpro_revit_mcp/q1/", "/genpro_revit_mcp/q2/", "/genpro_revit_mcp/q3/", "/genpro_revit_mcp/q4/",
     ]
 
 
@@ -451,7 +451,7 @@ async def test_wait_message_absent_when_free():
     ctx = _Ctx()
 
     result = await asyncio.wait_for(bridge.revit_post("/p2/", {}, ctx=ctx), 1.0)
-    assert result == {"path": "/revit_mcp/p2/"}
+    assert result == {"path": "/genpro_revit_mcp/p2/"}
     assert ctx.messages == []
 
 
@@ -468,7 +468,7 @@ async def test_wait_message_failure_does_not_fail_call():
     gate.release.set()
 
     r1, r2 = await asyncio.wait_for(asyncio.gather(holder, second), 2.0)
-    assert r2 == {"path": "/revit_mcp/p2/"}
+    assert r2 == {"path": "/genpro_revit_mcp/p2/"}
 
 
 # --- Lock coverage (d27-b, D-09) -----------------------------------------------
@@ -589,7 +589,7 @@ async def test_image_waits_while_locked():
 
     image = asyncio.ensure_future(bridge.revit_image("/get_view/Level 1"))
     await asyncio.sleep(0.05)
-    assert gate.seen == ["/revit_mcp/p1/"]
+    assert gate.seen == ["/genpro_revit_mcp/p1/"]
 
     gate.release.set()
     await asyncio.wait_for(holder, 1.0)
@@ -611,7 +611,7 @@ async def test_image_queue_bound_returns_not_sent():
 
     gate.release.set()
     await asyncio.wait_for(holder, 1.0)
-    assert gate.seen == ["/revit_mcp/p1/"]
+    assert gate.seen == ["/genpro_revit_mcp/p1/"]
     assert bridge._get_lock().locked() is False
 
 
@@ -629,7 +629,7 @@ async def test_get_queue_bound_returns_not_sent():
 
     gate.release.set()
     await asyncio.wait_for(holder, 1.0)
-    assert gate.seen == ["/revit_mcp/p1/"]
+    assert gate.seen == ["/genpro_revit_mcp/p1/"]
     assert bridge._get_lock().locked() is False
 
 
@@ -645,8 +645,8 @@ async def test_get_budget_not_shrunk_by_queue_wait():
     result = await asyncio.wait_for(bridge.revit_get("/list_levels/", timeout=0.5), 2.0)
     await asyncio.wait_for(holder, 1.0)
 
-    assert result == {"path": "/revit_mcp/list_levels/"}
-    assert gate.timeouts["/revit_mcp/list_levels/"] == {
+    assert result == {"path": "/genpro_revit_mcp/list_levels/"}
+    assert gate.timeouts["/genpro_revit_mcp/list_levels/"] == {
         "connect": 0.5, "read": 0.5, "write": 0.5, "pool": 0.5,
     }
 
@@ -671,8 +671,8 @@ async def test_mixed_get_post_queue_in_arrival_order():
     gate.release.set()
     await asyncio.wait_for(asyncio.gather(holder, *queued), 2.0)
     assert gate.seen == [
-        "/revit_mcp/p1/", "/revit_mcp/g1/", "/revit_mcp/q1/",
-        "/revit_mcp/get_view/v", "/revit_mcp/g2/",
+        "/genpro_revit_mcp/p1/", "/genpro_revit_mcp/g1/", "/genpro_revit_mcp/q1/",
+        "/genpro_revit_mcp/get_view/v", "/genpro_revit_mcp/g2/",
     ]
 
 
@@ -697,11 +697,11 @@ async def test_get_read_waits_while_locked():
 
     read = asyncio.ensure_future(bridge.revit_get("/list_levels/"))
     await asyncio.sleep(0.05)
-    assert "/revit_mcp/list_levels/" not in gate.seen
+    assert "/genpro_revit_mcp/list_levels/" not in gate.seen
 
     gate.release.set()
     await asyncio.wait_for(asyncio.gather(holder, read), 2.0)
-    assert gate.seen == ["/revit_mcp/p1/", "/revit_mcp/list_levels/"]
+    assert gate.seen == ["/genpro_revit_mcp/p1/", "/genpro_revit_mcp/list_levels/"]
 
 
 @pytest.mark.anyio
@@ -715,12 +715,12 @@ async def test_former_allowlist_post_waits_while_locked():
 
     waiting = asyncio.ensure_future(bridge.revit_post("/ai_filter/", {}, ctx=ctx))
     await asyncio.sleep(0.05)
-    assert "/revit_mcp/ai_filter/" not in gate.seen
+    assert "/genpro_revit_mcp/ai_filter/" not in gate.seen
     assert ctx.messages == [bridge.WAIT_MESSAGE]
 
     gate.release.set()
     await asyncio.wait_for(asyncio.gather(holder, waiting), 2.0)
-    assert gate.seen == ["/revit_mcp/p1/", "/revit_mcp/ai_filter/"]
+    assert gate.seen == ["/genpro_revit_mcp/p1/", "/genpro_revit_mcp/ai_filter/"]
     assert ctx.messages == [bridge.WAIT_MESSAGE]
 
 
@@ -766,12 +766,12 @@ async def test_d27b_tool_path_model_info_waits_status_does_not():
 
     status = await asyncio.wait_for(mcp.tools["get_revit_status"](None), 1.0)
     assert status.splitlines()[-1].startswith("MCP target: ")
-    assert "/revit_mcp/status/" in gate.seen
+    assert "/genpro_revit_mcp/status/" in gate.seen
 
     info = asyncio.ensure_future(mcp.tools["get_revit_model_info"](None))
     await asyncio.sleep(0.05)
-    assert "/revit_mcp/model_info/" not in gate.seen
+    assert "/genpro_revit_mcp/model_info/" not in gate.seen
 
     gate.release.set()
     await asyncio.wait_for(asyncio.gather(holder, info), 2.0)
-    assert gate.seen.index("/revit_mcp/p1/") < gate.seen.index("/revit_mcp/model_info/")
+    assert gate.seen.index("/genpro_revit_mcp/p1/") < gate.seen.index("/genpro_revit_mcp/model_info/")

@@ -541,6 +541,138 @@ def test_g2_token_design_that_permits_reuse_or_raw_handles_is_stop(path, value):
     assert verdict == "stop"
 
 
+# ---------------------------------------------- G2 retained-reference branch
+
+
+def good_retained_g2():
+    """Offline fixture, not evidence of a live run or production token registry."""
+    docs = [
+        {"title": "SAME", "path": "C:/a/SAME.rvt", "kind": "saved"},
+        {"title": "SAME", "path": "C:/b/SAME.rvt", "kind": "saved"},
+        {"title": "Project1", "path": "", "kind": "unsaved"},
+    ]
+    captures = []
+    for label in ("before-close", "while-open", "after-close", "after-replacement"):
+        current = copy.deepcopy(docs)
+        if label == "after-close":
+            current.pop(0)
+        if label == "after-replacement":
+            current = current[1:] + [current[0]]
+        stored = []
+        for i, doc in enumerate(docs):
+            valid = i != 0 or label in ("before-close", "while-open")
+            comparisons = [
+                {"current_index": j, "equals": d == doc, "reference_equals": False}
+                for j, d in enumerate(current)
+            ] if valid else []
+            row = {"stored": copy.deepcopy(doc), "is_valid_object": valid,
+                   "still_enumerated": valid, "comparisons": comparisons}
+            if valid:
+                row["element_count"] = 10
+            stored.append(row)
+        captures.append({
+            "probe": "g2", "probe_schema": 2, "label": label,
+            "documents": current, "stored_objects": stored,
+            "second_enumeration_same_objects": False,
+            "enumeration_comparisons": [
+                {"first_index": i, "comparisons": [
+                    {"current_index": j, "equals": i == j, "reference_equals": False}
+                    for j in range(len(current))]}
+                for i in range(len(current))],
+        })
+    return {
+        "live": True, "synthetic": False,
+        "binding_mechanism": "retained-reference-equals-v1",
+        "captures": captures, "closed_store_index": 0, "survivor_store_index": 1,
+        "replacement_current_index": 2,
+        "replacement_retained": {"probe": "g2-retained-replacement", "original_valid": False,
+            "retained": [{"owned_index": 4, "title": "SAME", "path": "C:/a/SAME.rvt",
+                          "valid": True, "equals_matches": [2], "element_count": 10}]},
+        "replacement_owned_index": 4,
+        "same_title_pairs": {"saved": {"reproducible": True, "attempt": None},
+                             "unsaved": {"reproducible": False, "attempt": "Revit numbered new projects"}},
+        "token_design": good_g2()["token_design"],
+    }
+
+
+def test_g2_retained_branch_accepts_unique_semantic_binding_not_wrapper_identity():
+    assert pf.classify_g2(good_retained_g2()) == ("document-object-binding-provable", [])
+
+
+@pytest.mark.parametrize("change", [
+    "missing-capture", "reordered-captures", "duplicate-label", "zero-match", "two-matches",
+    "bad-index", "bool-index", "compare-error", "missing-reference-measurement",
+    "collector-error", "missing-collector", "invalid-survivor", "closed-revived",
+    "missing-replacement-check", "replacement-invalid", "replacement-wrong-path",
+    "repeated-owned-index", "replacement-old-match", "contradict-reference-flag",
+    "same-title-absent", "hash-selector", "unknown-mechanism", "bad-row-type",
+    "changed-stored-metadata", "closed-validity-error", "missing-enumeration",
+    "capture-error", "retained-error", "replacement-error",
+])
+def test_g2_retained_branch_incomplete_or_contradictory_capture_stops(change):
+    record = good_retained_g2()
+    row = record["captures"][1]["stored_objects"][0]
+    if change == "missing-capture": record["captures"].pop(2)
+    elif change == "reordered-captures": record["captures"].reverse()
+    elif change == "duplicate-label": record["captures"][1]["label"] = "before-close"
+    elif change == "zero-match": row["comparisons"][0]["equals"] = False
+    elif change == "two-matches": row["comparisons"][1]["equals"] = True
+    elif change == "bad-index": row["comparisons"][0]["current_index"] = 99
+    elif change == "bool-index": row["comparisons"][0]["current_index"] = False
+    elif change == "compare-error": row["comparisons"][1]["error"] = "API error"
+    elif change == "missing-reference-measurement": del row["comparisons"][0]["reference_equals"]
+    elif change == "collector-error": row["collector_error"] = "API error"
+    elif change == "missing-collector": del row["element_count"]
+    elif change == "invalid-survivor": record["captures"][2]["stored_objects"][1]["is_valid_object"] = False
+    elif change == "closed-revived": record["captures"][3]["stored_objects"][0]["is_valid_object"] = True
+    elif change == "missing-replacement-check": del record["replacement_retained"]
+    elif change == "replacement-invalid": record["replacement_retained"]["retained"][0]["valid"] = False
+    elif change == "replacement-wrong-path": record["captures"][3]["documents"][2]["path"] = "other"
+    elif change == "repeated-owned-index": record["replacement_retained"]["retained"] *= 2
+    elif change == "replacement-old-match": record["replacement_current_index"] = 0
+    elif change == "contradict-reference-flag": record["captures"][1]["second_enumeration_same_objects"] = True
+    elif change == "same-title-absent": record["captures"][0]["documents"][1]["title"] = "different"
+    elif change == "hash-selector": record["token_design"]["raw_handle_used_as_selector"] = True
+    elif change == "unknown-mechanism": record["binding_mechanism"] = "hash-based"
+    elif change == "bad-row-type": row["comparisons"][0]["equals"] = 1
+    elif change == "changed-stored-metadata": row["stored"]["path"] = "changed"
+    elif change == "closed-validity-error": record["captures"][2]["stored_objects"][0]["is_valid_object"] = {"error": "oops"}
+    elif change == "missing-enumeration": del record["captures"][1]["enumeration_comparisons"]
+    elif change == "capture-error": record["captures"][1]["pf_error"] = "failure"
+    elif change == "retained-error": row["error"] = "failure"
+    elif change == "replacement-error": record["replacement_retained"]["pf_error"] = "failure"
+    assert pf.classify_g2(record)[0] == "stop", change
+
+
+@pytest.mark.parametrize("path,value", [
+    ("live", False), ("synthetic", True),
+    ("closed_store_index", True), ("survivor_store_index", -1),
+    ("replacement_current_index", True), ("replacement_owned_index", True),
+    ("token_design.registry_issued", False),
+    ("token_design.monotonic_unique_per_incarnation", None),
+    ("token_design.tombstone_after_close", False),
+    ("token_design.raw_handle_used_as_selector", None),
+])
+def test_g2_retained_branch_keeps_preamble_indices_and_token_design_fail_closed(path, value):
+    assert pf.classify_g2(mutated(good_retained_g2, path, value))[0] == "stop"
+
+
+def test_g2_retained_eligibility_does_not_approve_or_pass_other_gates():
+    result = pf.classify_all({"g2": good_retained_g2()})
+    assert result["gates"]["G2"]["verdict"] == "document-object-binding-provable"
+    assert result["overall"] == "stop"
+    assert result["approval"] == "not-granted"
+
+
+def test_retained_template_is_unset_and_covers_new_branch():
+    assert _leaf_paths(good_retained_g2()) <= _leaf_paths(pf.evidence_template()["g2"])
+
+
+def test_g2_operator_does_not_promote_hashes_to_identity():
+    assert "Map ``runtime_identity_hash`` to" not in pf.__doc__
+    assert "retained-reference-equals-v1" in pf.__doc__
+
+
 # ------------------------------------------------------------------- G3
 
 
@@ -843,6 +975,94 @@ def test_parse_listener_rows_ignores_malformed_rows():
     assert pf.parse_listener_rows(text, [48884]) == {48884: [7]}
 
 
+NETSTAT_DUAL = """\nActive Connections\n\n  Proto  Local Address          Foreign Address        State           PID\n  TCP    127.0.0.1:48991        0.0.0.0:0              LISTENING       112992\n  TCP    127.0.0.1:48991        0.0.0.0:0              LISTENING       88388\n"""
+
+
+def test_netstat_keeps_both_pids_on_the_same_endpoint():
+    assert pf.parse_netstat_listener_rows(NETSTAT_DUAL, [48991, 48884]) == {
+        48991: [112992, 88388], 48884: []}
+
+
+def test_netstat_handles_localized_headers_wildcards_ipv6_and_dedup():
+    text = """Активные подключения
+  Протокол  Локальный адрес  Внешний адрес  Состояние  PID
+  TCP    0.0.0.0:48991       0.0.0.0:0       LISTENING  10
+  TCP    [::]:48991          [::]:0          LISTENING  20
+  TCP    [::1]:48991         [::]:0          LISTENING  10
+  TCP    [fe80::1%12]:5555   [::]:0          LISTENING  30
+  TCP    127.0.0.1:48884     0.0.0.0:0       LISTENING  40
+"""
+    assert pf.parse_netstat_listener_rows(text, [48991]) == {48991: [10, 20]}
+
+
+@pytest.mark.parametrize("state", [
+    "CLOSED", "SYN_SENT", "SYN_RECEIVED", "ESTABLISHED", "FIN_WAIT_1",
+    "FIN_WAIT_2", "CLOSE_WAIT", "CLOSING", "LAST_ACK", "TIME_WAIT", "DELETE_TCB", "BOUND",
+])
+def test_netstat_known_non_listening_rows_do_not_count(state):
+    text = "TCP 127.0.0.1:48991 127.0.0.1:1234 {} 0".format(state)
+    assert pf.parse_netstat_listener_rows(text, [48991]) == {48991: []}
+
+
+@pytest.mark.parametrize("text", [
+    "", "  ", "not netstat", "Active Connections\nProto Local Address Foreign Address State PID",
+    "TCP 127.0.0.1:48991 0.0.0.0:0 ПРОСЛУШИВАНИЕ 10",
+    "TCP 127.0.0.1:48991 0.0.0.0:0 UNKNOWN 10",
+    "TCP 127.0.0.1:48991 0.0.0.0:0 LISTENING",
+    "TCP 127.0.0.1:48991 0.0.0.0:0 LISTENING 10 extra",
+    "TCP 127.0.0.1:48991 0.0.0.0:0 LISTENING bad",
+    "TCP 127.0.0.1:48991 0.0.0.0:0 LISTENING -1",
+    "TCP 127.0.0.1:48991 0.0.0.0:0 LISTENING 0",
+    "TCP localhost:48991 0.0.0.0:0 LISTENING 10",
+    "TCP 999.1.1.1:48991 0.0.0.0:0 LISTENING 10",
+    "TCP ::1:48991 [::]:0 LISTENING 10",
+    "TCP [::bad::]:48991 [::]:0 LISTENING 10",
+    "TCP 127.0.0.1:65536 0.0.0.0:0 LISTENING 10",
+    "TCP 127.0.0.1:48991 bad:0 LISTENING 10",
+    "UDP 0.0.0.0:48991 *:* 10",
+    NETSTAT_DUAL + "truncated output",
+    NETSTAT_DUAL + "TCP bad:5555 0.0.0.0:0 LISTENING 10",
+])
+def test_netstat_unreadable_or_suspicious_output_fails_closed(text):
+    assert pf.parse_netstat_listener_rows(text, [48991]) is None
+
+
+def test_os_listener_snapshot_uses_full_netstat_without_shell_or_port_filter():
+    import types
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return types.SimpleNamespace(returncode=0, stdout=NETSTAT_DUAL)
+
+    assert pf.os_listener_snapshot([48991], run=run) == {48991: [112992, 88388]}
+    assert calls == [(["netstat.exe", "-ano", "-p", "tcp"], {
+        "capture_output": True, "text": True, "encoding": "ascii",
+        "errors": "replace", "timeout": 30})]
+
+
+@pytest.mark.parametrize("failure", ["launch", "timeout", "decode", "nonzero", "unreadable"])
+def test_os_listener_snapshot_failures_never_fall_back_to_incomplete_cmdlet(failure):
+    import subprocess
+    import types
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if failure == "launch":
+            raise OSError("unavailable")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(command, 30)
+        if failure == "decode":
+            raise UnicodeError("cannot decode snapshot")
+        return types.SimpleNamespace(
+            returncode=1 if failure == "nonzero" else 0,
+            stdout="unknown" if failure == "unreadable" else NETSTAT_DUAL)
+
+    assert pf.os_listener_snapshot([48991], run=run) is None
+    assert len(calls) == 1
+
+
 # ------------------------------------------------ snippets are IronPython-safe
 
 SNIPPETS = {
@@ -956,6 +1176,127 @@ def test_g4_snippet_does_not_activate_or_raise_anything_unless_the_engineer_conf
     outside = [a for a in activations if id(a) not in handler_nodes and id(a) not in guarded]
     assert not outside, "command-mode activation must sit under `if CONFIRM_ACTIVATION:`"
     assert all(id(r) in guarded for r in raises), "Raise() must sit under `if CONFIRM_ACTIVATION:`"
+
+
+def test_g4_callback_survives_button_globals_cleanup(monkeypatch):
+    import types
+    import sys
+
+    stored = {}
+    domain = types.SimpleNamespace(SetData=lambda key, value: stored.update({key: value}))
+    monkeypatch.setitem(sys.modules, "System", types.SimpleNamespace(
+        AppDomain=types.SimpleNamespace(CurrentDomain=domain)))
+    tree = ast.parse(pf.G4_SNIPPET)
+    handler = next(n for n in tree.body if isinstance(n, ast.ClassDef))
+    namespace = {"IExternalEventHandler": object}
+    exec(compile(ast.Module(body=[handler], type_ignores=[]), "g4-callback", "exec"), namespace)
+    instance = namespace["Phase2G4Handler"]("C:/test/target.rvt", "target")
+    namespace.clear()
+    active = types.SimpleNamespace(Document=types.SimpleNamespace(Title="before", PathName="before.rvt"))
+    uiapp = types.SimpleNamespace(ActiveUIDocument=active)
+
+    def activate(path):
+        assert path == "C:/test/target.rvt"
+        uiapp.ActiveUIDocument = types.SimpleNamespace(
+            Document=types.SimpleNamespace(Title="target", PathName=path))
+
+    uiapp.OpenAndActivateDocument = activate
+    instance.Execute(uiapp)
+    result = json.loads(stored["phase2_g4_result"])
+    assert result["context"] == "external-event"
+    assert result["active_before"] == ["before", "before.rvt"]
+    assert result["active_after"] == ["target", "C:/test/target.rvt"]
+    assert result["error"] is None
+
+
+@pytest.mark.parametrize("label", ["after-close", "after-replacement"])
+def test_g2_retained_binding_uses_equals_not_diagnostic_hashes(label):
+    import types
+
+    class Document:
+        def __init__(self, identity, valid=True):
+            self.identity = identity
+            self.IsValidObject = valid
+
+        def Equals(self, other):
+            assert self.IsValidObject, "closed document must not be compared"
+            return self.identity == other.identity
+
+    retained = [Document("closed", False), Document("survivor")]
+    current = [Document("survivor")]
+    if label == "after-replacement":
+        current.append(Document("replacement"))
+    meta = [{"runtime_identity_hash": 1}, {"runtime_identity_hash": 2}]
+    data = {"meta": json.dumps(meta)}
+
+    class Store:
+        Count = 2
+
+        def __getitem__(self, index):
+            return retained[index]
+
+    data["store"] = Store()
+    namespace = {
+        "domain": types.SimpleNamespace(GetData=data.get),
+        "STORE_KEY": "store", "META_KEY": "meta", "json": json,
+        "System": types.SimpleNamespace(Object=types.SimpleNamespace(ReferenceEquals=lambda a, b: a is b)),
+        "DB": types.SimpleNamespace(FilteredElementCollector=lambda doc: types.SimpleNamespace(
+            WhereElementIsNotElementType=lambda: types.SimpleNamespace(GetElementCount=lambda: 5030))),
+    }
+    tree = ast.parse(pf.G2_SNIPPET)
+    functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name != "_describe"]
+    exec(compile(ast.Module(body=functions, type_ignores=[]), "g2-retained", "exec"), namespace)
+    rows = namespace["_stored_objects"](current)
+    assert rows[0]["is_valid_object"] is False
+    assert rows[0]["still_enumerated"] is False
+    assert rows[0]["comparisons"] == []
+    assert rows[1]["still_enumerated"] is True
+    assert rows[1]["element_count"] == 5030
+    matches = [r for r in rows[1]["comparisons"] if r["equals"] is True]
+    assert len(matches) == 1
+    assert matches[0]["reference_equals"] is False
+
+
+@pytest.mark.parametrize("switch", [False, True])
+def test_g3_active_identity_uses_equals_even_when_hashes_collide(monkeypatch, capsys, switch):
+    import sys
+    import types
+
+    class Document:
+        IsLinked = False
+        def __init__(self, key):
+            self.key = key
+            self.Title = key
+            self.PathName = key + ".rvt"
+        def Equals(self, other):
+            return self.key == other.key
+        def GetHashCode(self):
+            return 7  # A diagnostic hash collision must not identify a document.
+
+    a, b = Document("A"), Document("B")
+    ui = types.SimpleNamespace(ActiveUIDocument=types.SimpleNamespace(Document=a))
+    class Collector:
+        def __init__(self, doc):
+            assert doc is b
+        def OfClass(self, cls):
+            return self
+        def ToElements(self):
+            if switch:
+                ui.ActiveUIDocument = types.SimpleNamespace(Document=b)
+            return []
+        def WhereElementIsNotElementType(self):
+            return self
+        def GetElementCount(self):
+            return 10
+    monkeypatch.setitem(sys.modules, "clr", types.SimpleNamespace(AddReference=lambda name: None))
+    monkeypatch.setitem(sys.modules, "System", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "pyrevit", types.SimpleNamespace(
+        HOST_APP=types.SimpleNamespace(app=types.SimpleNamespace(Documents=[a, b]), uiapp=ui),
+        DB=types.SimpleNamespace(Level=object, FilteredElementCollector=Collector)))
+    namespace = {}
+    exec(pf.G3_SNIPPET.replace('TARGET_PATH = ""', 'TARGET_PATH = "B.rvt"'), namespace)
+    assert namespace["out"]["target_is_active"] is False
+    assert namespace["out"]["ui_switched"] is switch
 
 
 # ------------------------------------- the procedure can never send a request

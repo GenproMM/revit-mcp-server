@@ -67,12 +67,26 @@ G2 (document lifetime). Each button click is a fresh script run, so the snippet
     a replacement with the same presentation fields. Every run prints
     ``stored_objects``: per stored document the stored row, ``is_valid_object``
     (or {"error": ...} if access throws) and ``still_enumerated`` (its stored
-    ``runtime_identity_hash`` is present in the current enumeration).
-    ``closed_object_invalid_after_close`` = the stored entry of the closed document
-    shows is_valid_object false or an access error in the after-close run.
-    ``survivor_resolves`` = the surviving same-title stored entry shows
-    is_valid_object true and still_enumerated true. Map ``runtime_identity_hash`` to
-    ``object_id`` and ``api_hash_code`` to ``raw_handle``.
+    Document has an Equals match in the current enumeration). Hashes are diagnostic
+    only: neither RuntimeHelpers.GetHashCode nor Document.GetHashCode proves object
+    identity or exposes a raw native handle. Never turn either into a selector.
+    For ``binding_mechanism`` = "retained-reference-equals-v1", attach schema-2
+    ``captures`` in order: before-close, while-open, after-close BEFORE reopen,
+    after-replacement. Preserve the retained store across all four captures. Supply
+    ``closed_store_index``, ``survivor_store_index`` and ``replacement_current_index``
+    as observation positions, NOT document tokens. IsValidObject must be false for
+    the closed entry both before and after reopen; an access error is STOP. Every
+    other retained entry must stay valid, have exactly one Equals match and support
+    a collector read. ReferenceEquals is measured separately and may be false.
+    ``replacement_retained`` is a separate read-only observation of the retained
+    replacement: original_valid false, and retained rows with distinct owned_index,
+    title, path, valid, equals_matches and element_count. ``replacement_owned_index``
+    identifies its row in that observation, not an external token. This observation
+    must use the same current enumeration as after-replacement (verify its index and
+    title/path); recapture if ordering changed. No automatic token-registry proof is
+    inferred: ``token_design`` states mandatory future design constraints only.
+    The legacy wrapper-lifetime branch remains available for old records; it still
+    requires independently proven object identities and native handles, not hashes.
     Revit numbers new unsaved projects (Project1, Project2), so an unsaved
     same-title pair is probably impossible, and Revit may refuse to open a second
     saved file with the same name. Try both, and record in ``same_title_pairs``
@@ -99,10 +113,18 @@ G4 (activation). The routes run handlers through an ExternalEvent, so activation
     a case with policy "allow" must have context "external-event". A case that did
     not cleanly activate must carry policy "refuse".
 G5 (ambiguity). Start the duplicate-port condition, run ``listeners --ports N``
-    BEFORE any request to that port, capture PIDs independently (Task Manager or
-    ``Get-Process revit``), and record ``model_route_send_count`` = the number of
-    model-route requests you sent (it must be 0).
+    BEFORE any request to that port. This captures full ``netstat.exe -ano -p tcp``
+    output, retaining every LISTENING PID, including duplicate endpoints, wildcard
+    and IPv6 binds. Get-NetTCPConnection alone was incomplete in the live dual-bind
+    experiment and is not a fallback. Unknown states, malformed rows or an unreadable
+    inventory mean STOP, never "no listeners". Independently cross-check the socket
+    owners against Revit processes (Task Manager or ``Get-Process revit``); process
+    existence alone does not prove socket ownership. Record both capture methods and
+    any disagreement, and ``model_route_send_count`` (it must be 0). Do not send even
+    a status request to the conflicting port. This auxiliary-server experiment does
+    not establish automatic primary-port selection or whole-checkpoint approval.
 """
+import ipaddress
 import json
 import subprocess
 import sys
@@ -129,7 +151,7 @@ import System
 from pyrevit import HOST_APP
 from pyrevit.coreutils import envvars
 
-API_NAME = "revit_mcp"
+API_NAME = "genpro_revit_mcp"
 out = {"probe": "g1"}
 
 
@@ -217,13 +239,16 @@ G2_SNIPPET = '''# -*- coding: utf-8 -*-
 # PHASE 2 G2 probe. READ ONLY. Run once per LABEL; close and open documents by hand.
 # Every button click is a fresh script run, so the Document objects enumerated under
 # LABEL = "before-close" are kept in process-wide AppDomain data and read back by
-# every later run. Run LABEL = "before-close" FIRST (it overwrites any earlier store).
+# every later run. Run LABEL = "before-close" FIRST (it overwrites any earlier store),
+# then "after-close" BEFORE reopening, then "after-replacement". Runtime/API hashes
+# are diagnostic only, never identity or selector proofs. Schema 2 uses Equals for
+# still_enumerated; keep ReferenceEquals separate from semantic document equality.
 # Nothing here opens, closes, saves or changes a document.
 import json
 import clr
 clr.AddReference("System")
 import System
-from pyrevit import HOST_APP
+from pyrevit import HOST_APP, DB
 
 LABEL = "before-close"
 STORE_KEY = "phase2_g2_store"
@@ -249,7 +274,20 @@ def _describe(doc):
     }
 
 
-def _stored_objects(current_hashes):
+def _comparisons(doc, current):
+    rows = []
+    for index, other in enumerate(current):
+        row = {"current_index": index, "equals": None, "reference_equals": None}
+        try:
+            row["reference_equals"] = bool(System.Object.ReferenceEquals(doc, other))
+            row["equals"] = bool(doc.Equals(other))
+        except Exception as ex:
+            row["error"] = repr(ex)
+        rows.append(row)
+    return rows
+
+
+def _stored_objects(current):
     store = domain.GetData(STORE_KEY)
     meta_text = domain.GetData(META_KEY)
     if store is None or meta_text is None:
@@ -263,12 +301,20 @@ def _stored_objects(current_hashes):
             valid = bool(doc.IsValidObject)
         except Exception as ex:
             valid = {"error": repr(ex)}
-        stored_hash = None if stored is None else stored.get("runtime_identity_hash")
-        rows.append({
+        comparisons = _comparisons(doc, current) if valid is True else []
+        row = {
             "stored": stored,
             "is_valid_object": valid,
-            "still_enumerated": stored_hash in current_hashes,
-        })
+            "comparisons": comparisons,
+            "still_enumerated": any(r["equals"] is True for r in comparisons),
+        }
+        if valid is True:
+            try:
+                collector = DB.FilteredElementCollector(doc).WhereElementIsNotElementType()
+                row["element_count"] = collector.GetElementCount()
+            except Exception as ex:
+                row["collector_error"] = repr(ex)
+        rows.append(row)
     return rows
 
 
@@ -286,19 +332,25 @@ for i, a in enumerate(first):
     for j, b in enumerate(first):
         if i < j:
             equals.append({"i": i, "j": j, "equals": bool(a.Equals(b))})
+enumerations = [{"first_index": i, "comparisons": _comparisons(d, second)}
+                for i, d in enumerate(first)]
 same_objects = len(first) == len(second) and all(
-    helpers.GetHashCode(a) == helpers.GetHashCode(b) for a, b in zip(first, second)
+    sum(1 for r in row["comparisons"] if r["reference_equals"] is True) == 1
+    for row in enumerations
 )
 active = uiapp.ActiveUIDocument
 out = {
     "probe": "g2",
+    "probe_schema": 2,
+    "identity_note": "hashes are diagnostic; Equals and ReferenceEquals are separate measurements",
+    "enumeration_comparisons": enumerations,
     "label": LABEL,
     "documents": rows,
     "equals_matrix": equals,
     "second_enumeration_same_objects": same_objects,
     "ui_active_title": None if active is None else active.Document.Title,
     "ui_active_path": None if active is None else active.Document.PathName,
-    "stored_objects": _stored_objects(set(helpers.GetHashCode(d) for d in first)),
+    "stored_objects": _stored_objects(first),
 }
 print("PHASE2_G2_JSON=" + json.dumps(out, default=str))
 '''
@@ -320,12 +372,13 @@ app = HOST_APP.app
 uiapp = HOST_APP.uiapp
 
 
-def _active_key():
+def _active_doc():
     active = uiapp.ActiveUIDocument
-    if active is None:
-        return None
-    doc = active.Document
-    return [doc.Title, doc.PathName, doc.GetHashCode()]
+    return None if active is None else active.Document
+
+
+def _active_key(doc):
+    return None if doc is None else [doc.Title, doc.PathName, doc.GetHashCode()]
 
 
 def _pick():
@@ -341,7 +394,8 @@ def _pick():
     return found
 
 
-before = _active_key()
+before_doc = _active_doc()
+before = _active_key(before_doc)
 matches = _pick()
 out = {"probe": "g3", "active_before": before, "match_count": len(matches)}
 if len(matches) == 1:
@@ -353,7 +407,7 @@ if len(matches) == 1:
     )
     elements = DB.FilteredElementCollector(target).WhereElementIsNotElementType()
     out["target"] = [target.Title, target.PathName, target.GetHashCode()]
-    out["target_is_active"] = target.GetHashCode() == (before or [None, None, None])[2]
+    out["target_is_active"] = before_doc is not None and bool(target.Equals(before_doc))
     out["summary"] = {
         "title": target.Title,
         "path": target.PathName,
@@ -361,9 +415,11 @@ if len(matches) == 1:
         "element_count": elements.GetElementCount(),
     }
     out["levels"] = rows
-after = _active_key()
+after_doc = _active_doc()
+after = _active_key(after_doc)
 out["active_after"] = after
-out["ui_switched"] = before != after
+out["ui_switched"] = ((after_doc is not None) if before_doc is None else
+                      (after_doc is None or not bool(before_doc.Equals(after_doc))))
 print("PHASE2_G3_JSON=" + json.dumps(out, default=str))
 '''
 
@@ -412,6 +468,9 @@ class Phase2G4Handler(IExternalEventHandler):
         self.target_title = target_title
 
     def Execute(self, uiapp):
+        # The button engine may have cleared its globals before this callback runs.
+        import System
+        import json
         result = {
             "context": "external-event",
             "target": [self.target_title, self.target_path],
@@ -420,15 +479,17 @@ class Phase2G4Handler(IExternalEventHandler):
             "error": None,
         }
         try:
-            result["active_before"] = _active_key_of(uiapp)
+            active = uiapp.ActiveUIDocument
+            result["active_before"] = None if active is None else [active.Document.Title, active.Document.PathName]
             uiapp.OpenAndActivateDocument(self.target_path)
         except Exception as ex:
             result["error"] = repr(ex)
         try:
-            result["active_after"] = _active_key_of(uiapp)
+            active = uiapp.ActiveUIDocument
+            result["active_after"] = None if active is None else [active.Document.Title, active.Document.PathName]
         except Exception as ex:
             result["error"] = "{} / active_after: {}".format(result["error"], repr(ex))
-        domain.SetData(RESULT_KEY, json.dumps(result, default=str))
+        System.AppDomain.CurrentDomain.SetData("phase2_g4_result", json.dumps(result, default=str))
 
     def GetName(self):
         return "Phase2G4Handler"
@@ -657,12 +718,189 @@ def classify_g1(record):
 # --------------------------------------------------------------------- G2
 
 
+def _g2_token_design(record, reasons):
+    # Design constraints, not a claim that the production registry exists.
+    design = _section(record, "token_design", reasons)
+    for key in ("registry_issued", "monotonic_unique_per_incarnation", "tombstone_after_close"):
+        if design.get(key) is not True:
+            reasons.append("token_design.{} must be true".format(key))
+    if design.get("raw_handle_used_as_selector") is not False:
+        reasons.append("a raw handle/hash may be used as a selector")
+
+
+def _g2_presentation(doc):
+    if not isinstance(doc, dict) or not _nonblank(doc.get("title")) or not isinstance(doc.get("path"), str):
+        raise ValueError("G2 document needs title and path")
+    return doc["title"], doc["path"]
+
+
+def _g2_matches(rows, count):
+    """Validate a full comparison matrix row; return the one semantic match."""
+    if not isinstance(rows, list) or len(rows) != count:
+        raise ValueError("G2 comparison row does not cover current documents")
+    indices, matches, references = [], [], []
+    for row in rows:
+        if not isinstance(row, dict) or "error" in row:
+            raise ValueError("G2 comparison error")
+        index = row.get("current_index")
+        if not _is_int(index) or not 0 <= index < count:
+            raise ValueError("G2 comparison index invalid")
+        if type(row.get("equals")) is not bool or type(row.get("reference_equals")) is not bool:
+            raise ValueError("G2 comparison booleans are missing or invalid")
+        indices.append(index)
+        if row["equals"]:
+            matches.append(index)
+        if row["reference_equals"]:
+            if not row["equals"]:
+                raise ValueError("G2 ReferenceEquals contradicts Equals")
+            references.append(index)
+    if len(set(indices)) != count or len(matches) != 1 or len(references) > 1:
+        raise ValueError("G2 binding must have exactly one unique Equals match")
+    return matches[0], bool(references)
+
+
+def _g2_collector(row):
+    count = row.get("element_count")
+    if "collector_error" in row or not _is_int(count) or count < 0:
+        raise ValueError("G2 retained collector read missing or failed")
+
+
+def _classify_retained_g2(record, reasons):
+    """Validate lifetime observations, without deriving identities from hashes."""
+    captures = record.get("captures")
+    labels = ["before-close", "while-open", "after-close", "after-replacement"]
+    if not isinstance(captures, list) or len(captures) != 4:
+        return STOP, reasons + ["G2 needs four ordered lifetime captures"]
+    if any(not isinstance(c, dict) for c in captures) or [c.get("label") for c in captures] != labels:
+        return STOP, reasons + ["G2 capture order must include after-close before replacement"]
+    closed, survivor = record.get("closed_store_index"), record.get("survivor_store_index")
+    first = captures[0].get("stored_objects")
+    if not isinstance(first, list) or len(first) < 2:
+        return STOP, reasons + ["G2 needs at least two retained documents"]
+    size = len(first)
+    if any(not _is_int(i) or not 0 <= i < size for i in (closed, survivor)) or closed == survivor:
+        return STOP, reasons + ["G2 closed/survivor store positions invalid"]
+    initial = [_g2_presentation(r.get("stored")) for r in first]
+    if initial[closed][0] != initial[survivor][0]:
+        reasons.append("G2 closed/survivor must be a same-title pair")
+    objects = captures[0].get("documents")
+    if not isinstance(objects, list):
+        return STOP, reasons + ["G2 initial document list missing"]
+    pairs = _section(record, "same_title_pairs", reasons)
+    observed = 0
+    for kind in ("saved", "unsaved"):
+        titles = []
+        for doc in objects:
+            title, path = _g2_presentation(doc)
+            if doc.get("kind") not in ("saved", "unsaved") or (doc["kind"] == "saved") != bool(path):
+                raise ValueError("G2 saved/unsaved kind contradicts path")
+            if doc["kind"] == kind:
+                titles.append(title)
+        has_pair = any(titles.count(t) > 1 for t in titles)
+        entry = pairs.get(kind, {})
+        if has_pair:
+            observed += 1
+            if entry.get("reproducible") is not True:
+                reasons.append("G2 same-title {} pair needs reproducible=true".format(kind))
+        elif not (entry.get("reproducible") is False and _nonblank(entry.get("attempt"))):
+            reasons.append("G2 no same-title {} pair or measured negative".format(kind))
+    if not observed:
+        reasons.append("G2 same-title binding is unmeasured")
+    match_maps = []
+    for stage, capture in enumerate(captures):
+        if "pf_error" in capture or "error" in capture:
+            raise ValueError("G2 capture reports an error")
+        if capture.get("probe") != "g2" or type(capture.get("probe_schema")) is not int or capture["probe_schema"] != 2:
+            raise ValueError("G2 raw capture must use probe_schema 2")
+        docs, stored = capture.get("documents"), capture.get("stored_objects")
+        expected = size - 1 if stage == 2 else size
+        if not isinstance(docs, list) or len(docs) != expected or not isinstance(stored, list) or len(stored) != size:
+            raise ValueError("G2 lifetime document/store counts inconsistent")
+        mapping = {}
+        for i, row in enumerate(stored):
+            if "error" in row:
+                raise ValueError("G2 retained observation reports an error")
+            if _g2_presentation(row.get("stored")) != initial[i]:
+                raise ValueError("G2 retained-store presentation changed")
+            valid = i != closed or stage < 2
+            if row.get("is_valid_object") is not valid:
+                raise ValueError("G2 invalid retained lifetime: closed reference must never revive")
+            if not valid:
+                if row.get("still_enumerated") is not False or row.get("comparisons") != []:
+                    raise ValueError("G2 closed reference must be invalid and not compared")
+                continue
+            match, _ = _g2_matches(row.get("comparisons"), len(docs))
+            if row.get("still_enumerated") is not True or _g2_presentation(docs[match]) != initial[i]:
+                raise ValueError("G2 retained semantic match contradicts presentation")
+            _g2_collector(row)
+            mapping[i] = match
+        if len(set(mapping.values())) != len(mapping):
+            raise ValueError("G2 distinct retained documents collapse onto one current document")
+        enumerations = capture.get("enumeration_comparisons")
+        if not isinstance(enumerations, list) or len(enumerations) != len(docs):
+            raise ValueError("G2 second enumeration missing")
+        starts, targets, references = [], [], []
+        for row in enumerations:
+            index = row.get("first_index")
+            if not _is_int(index) or not 0 <= index < len(docs):
+                raise ValueError("G2 first enumeration position invalid")
+            target, reference = _g2_matches(row.get("comparisons"), len(docs))
+            starts.append(index)
+            targets.append(target)
+            references.append(reference)
+        if len(set(starts)) != len(docs) or len(set(targets)) != len(docs):
+            raise ValueError("G2 enumeration mapping is not one-to-one")
+        if capture.get("second_enumeration_same_objects") is not all(references):
+            raise ValueError("G2 wrapper identity flag contradicts ReferenceEquals measurements")
+        match_maps.append(mapping)
+    replacement = record.get("replacement_current_index")
+    final_docs = captures[-1]["documents"]
+    if not _is_int(replacement) or not 0 <= replacement < len(final_docs):
+        raise ValueError("G2 replacement position invalid")
+    if replacement in match_maps[-1].values() or _g2_presentation(final_docs[replacement]) != initial[closed]:
+        raise ValueError("G2 replacement must be unmatched by old live bindings and match closed presentation")
+    check = _section(record, "replacement_retained", reasons)
+    if "error" in check or "pf_error" in check:
+        raise ValueError("G2 replacement observation reports an error")
+    if check.get("probe") != "g2-retained-replacement" or check.get("original_valid") is not False:
+        reasons.append("G2 replacement retained probe must show original invalid")
+    rows, owner = check.get("retained"), record.get("replacement_owned_index")
+    if not isinstance(rows, list) or not rows or not _is_int(owner) or owner < 0:
+        raise ValueError("G2 replacement retained reference missing")
+    owned = set()
+    selected = []
+    for row in rows:
+        index = row.get("owned_index")
+        if not _is_int(index) or index < 0 or index in owned:
+            raise ValueError("G2 retained owned positions must be distinct")
+        owned.add(index)
+        matches = row.get("equals_matches")
+        if row.get("valid") is not True or not isinstance(matches, list) or len(matches) != 1:
+            raise ValueError("G2 replacement retained reference is not uniquely valid")
+        target = matches[0]
+        if not _is_int(target) or not 0 <= target < len(final_docs) or _g2_presentation(row) != _g2_presentation(final_docs[target]):
+            raise ValueError("G2 replacement retained match/presentation inconsistent")
+        _g2_collector(row)
+        if index == owner:
+            selected.append(target)
+    if selected != [replacement]:
+        reasons.append("G2 retained replacement does not resolve the new document")
+    _g2_token_design(record, reasons)
+    return _finish(reasons, "document-object-binding-provable")
+
+
 @_never_raises
 def classify_g2(record):
     """G2: document-object-binding-provable | stop."""
     reasons = _preamble(record)
     if not isinstance(record, dict):
         return STOP, reasons
+
+    mechanism = record.get("binding_mechanism")
+    if mechanism == "retained-reference-equals-v1":
+        return _classify_retained_g2(record, reasons)
+    if mechanism not in (None, "stable-wrapper-v1"):
+        return STOP, reasons + ["unknown G2 binding mechanism"]
 
     objs = record.get("open_objects")
     valid = (
@@ -972,6 +1210,28 @@ def evidence_template():
         "g2": {
             "live": None,
             "synthetic": None,
+            "binding_mechanism": None,
+            "closed_store_index": None,
+            "survivor_store_index": None,
+            "replacement_current_index": None,
+            "replacement_owned_index": None,
+            "captures": [{
+                "probe": None, "probe_schema": None, "label": None,
+                "documents": [{"title": None, "path": None, "kind": None}],
+                "stored_objects": [{
+                    "stored": {"title": None, "path": None, "kind": None},
+                    "is_valid_object": None, "still_enumerated": None, "element_count": None,
+                    "comparisons": [{"current_index": None, "equals": None, "reference_equals": None}],
+                }],
+                "second_enumeration_same_objects": None,
+                "enumeration_comparisons": [{"first_index": None, "comparisons": [
+                    {"current_index": None, "equals": None, "reference_equals": None}]}],
+            }],
+            "replacement_retained": {
+                "probe": None, "original_valid": None,
+                "retained": [{"owned_index": None, "title": None, "path": None,
+                              "valid": None, "equals_matches": None, "element_count": None}],
+            },
             "open_objects": [
                 {"title": None, "path": None, "kind": None, "object_id": None, "raw_handle": None}
             ],
@@ -1031,8 +1291,9 @@ def evidence_template():
 
 
 def parse_listener_rows(text, ports):
-    """Parse Get-NetTCPConnection JSON into {port: [pids]}, or None if unreadable.
+    """Parse legacy Get-NetTCPConnection evidence; not used for OS collection.
 
+    This source missed a real duplicate bind and cannot establish G5 completeness.
     None, never an empty inventory, for output that cannot be read: an unreadable
     snapshot must not look like "no listeners".
     """
@@ -1056,25 +1317,88 @@ def parse_listener_rows(text, ports):
     return result
 
 
+def _netstat_endpoint_port(endpoint):
+    """Validate a numeric Windows netstat endpoint, including scoped IPv6."""
+    host, separator, port = endpoint.rpartition(":")
+    if not separator or not port.isascii() or not port.isdecimal():
+        return None
+    if not 0 <= int(port) <= 65535:
+        return None
+    try:
+        if host.startswith("[") and host.endswith("]"):
+            ipaddress.IPv6Address(host[1:-1])
+        else:
+            ipaddress.IPv4Address(host)
+    except ValueError:
+        return None
+    return int(port)
+
+
+def parse_netstat_listener_rows(text, ports):
+    """Parse full Windows netstat TCP output without collapsing duplicate binds.
+
+    Headers may be localized; TCP states must be recognized. A malformed row on
+    ANY port makes the entire snapshot unusable. Header-only/empty output cannot
+    establish an empty inventory, so it also returns None. This is a preflight
+    observation, not a race-free reservation of the port.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return None
+    non_listening = {
+        "CLOSED", "SYN_SENT", "SYN_RECEIVED", "ESTABLISHED", "FIN_WAIT_1",
+        "FIN_WAIT_2", "CLOSE_WAIT", "CLOSING", "LAST_ACK", "TIME_WAIT",
+        "DELETE_TCB", "BOUND",
+    }
+    result = dict((p, []) for p in ports)
+    saw_row = False
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if fields[0] != "TCP":
+            # Before the first row only: netstat prints its banner and column
+            # heading in the OEM code page and the host language, which an ANSI
+            # locale mis-decodes (ru-RU: cp866 read as cp1251). Skip such lines
+            # by shape, not by text. A skipped line must carry no host:port
+            # token, so a garbled data row is never dropped as a heading.
+            if not saw_row and all(_netstat_endpoint_port(f) is None for f in fields):
+                continue
+            return None
+        if len(fields) != 5:
+            return None
+        _, local, remote, state, raw_pid = fields
+        port = _netstat_endpoint_port(local)
+        if port is None or _netstat_endpoint_port(remote) is None:
+            return None
+        if state != "LISTENING" and state not in non_listening:
+            return None
+        if not raw_pid.isascii() or not raw_pid.isdecimal():
+            return None
+        pid = int(raw_pid)
+        if state == "LISTENING" and (pid == 0 or port == 0):
+            return None
+        saw_row = True
+        if state == "LISTENING" and port in result and pid not in result[port]:
+            result[port].append(pid)
+    return result if saw_row else None
+
+
 def os_listener_snapshot(ports, run=subprocess.run):
-    """Listening-socket PIDs per port from the OS, or None if it cannot be read."""
-    script = (
-        "$r = @(Get-NetTCPConnection -State Listen -LocalPort {} "
-        "-ErrorAction SilentlyContinue | Select-Object LocalPort,OwningProcess); "
-        "ConvertTo-Json -InputObject $r -Compress"
-    ).format(",".join(str(p) for p in ports))
+    """Full netstat listener PIDs per port, or None; never a cmdlet fallback."""
     try:
         done = run(
-            ["powershell", "-NoProfile", "-Command", script],
+            ["netstat.exe", "-ano", "-p", "tcp"],
             capture_output=True,
             text=True,
+            encoding="ascii",
+            errors="replace",
             timeout=30,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeError):
         return None
     if done.returncode != 0:
         return None
-    return parse_listener_rows(done.stdout, ports)
+    return parse_netstat_listener_rows(done.stdout, ports)
 
 
 # --------------------------------------------------------------------- CLI

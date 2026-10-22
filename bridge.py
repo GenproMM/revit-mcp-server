@@ -122,7 +122,7 @@ def _resolve_port(value: Optional[str]) -> int:
 # Configuration. Read once at import: one Revit target per MCP server process.
 REVIT_HOST = os.environ.get("REVIT_HOST", "localhost")
 REVIT_PORT = _resolve_port(os.environ.get("REVIT_PORT"))
-BASE_URL = f"http://{REVIT_HOST}:{REVIT_PORT}/revit_mcp"
+BASE_URL = f"http://{REVIT_HOST}:{REVIT_PORT}/genpro_revit_mcp"
 REVIT_TARGET = "{}:{}".format(REVIT_HOST, REVIT_PORT)
 
 # Shared HTTP client with keep-alive connection pooling. Reusing a single
@@ -228,10 +228,12 @@ def parse_netstat_listener_rows(text, ports):
         if not fields:
             continue
         if fields[0] != "TCP":
-            if not saw_row and (
-                line.strip() in ("Active Connections", "Активные подключения")
-                or (fields[-1] == "PID" and fields[0] in ("Proto", "Протокол"))
-            ):
+            # Before the first row only: netstat prints its banner and column
+            # heading in the OEM code page and the host language, which an ANSI
+            # locale mis-decodes (ru-RU: cp866 read as cp1251). Skip such lines
+            # by shape, not by text. A skipped line must carry no host:port
+            # token, so a garbled data row is never dropped as a heading.
+            if not saw_row and all(_netstat_endpoint_port(f) is None for f in fields):
                 continue
             return None
         if len(fields) != 5:
@@ -259,7 +261,8 @@ def listener_snapshot(ports, run=subprocess.run, platform=None):
         return None
     try:
         done = run(["netstat.exe", "-ano", "-p", "tcp"],
-                   capture_output=True, text=True, timeout=10)
+                   capture_output=True, text=True, encoding="ascii",
+                   errors="replace", timeout=10)
     except (OSError, subprocess.SubprocessError, UnicodeError):
         return None
     if done.returncode != 0:

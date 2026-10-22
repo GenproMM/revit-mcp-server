@@ -213,6 +213,42 @@ def test_listener_adapter_full_command_no_fallback():
             "TCP 127.0.0.1:48885 0.0.0.0:0 LISTENING 1234"})()
     assert bridge.listener_snapshot([48885], run=run, platform="win32") == {48885: [1234]}
     assert calls == [(["netstat.exe", "-ano", "-p", "tcp"],
-                      {"capture_output": True, "text": True, "timeout": 10})]
+                      {"capture_output": True, "text": True, "encoding": "ascii",
+                       "errors": "replace", "timeout": 10})]
     assert bridge.listener_snapshot([48885], run=run, platform="linux") is None
     assert len(calls) == 1
+
+
+# Real `netstat.exe -ano -p tcp` heading bytes from a ru-RU Windows 11 host (OEM cp866).
+RU_NETSTAT_HEADER_BYTES = (
+    b"\r\n\x80\xaa\xe2\xa8\xa2\xad\xeb\xa5 \xaf\xae\xa4\xaa\xab\xee\xe7\xa5\xad\xa8\xef\r\n\r\n"
+    b"  \x88\xac\xef    \x8b\xae\xaa\xa0\xab\xec\xad\xeb\xa9 \xa0\xa4\xe0\xa5\xe1        "
+    b"\x82\xad\xa5\xe8\xad\xa8\xa9 \xa0\xa4\xe0\xa5\xe1          "
+    b"\x91\xae\xe1\xe2\xae\xef\xad\xa8\xa5       PID\r\n"
+)
+RU_NETSTAT_ROWS = (
+    b"  TCP    127.0.0.1:48884        0.0.0.0:0              LISTENING       91920\r\n"
+    b"  TCP    127.0.0.1:48884        127.0.0.1:49700        TIME_WAIT       0\r\n"
+)
+
+
+@pytest.mark.parametrize("decode", [
+    lambda raw: raw.decode("cp1251", "replace"),
+    lambda raw: raw.decode("cp866"),
+    lambda raw: raw.decode("ascii", "replace"),
+], ids=["cp1251-locale", "cp866-oem", "ascii-replace"])
+def test_parser_survives_oem_encoded_localized_headings(decode):
+    text = decode(RU_NETSTAT_HEADER_BYTES + RU_NETSTAT_ROWS)
+    assert bridge.parse_netstat_listener_rows(text, [48884]) == {48884: [91920]}
+
+
+def test_heading_skip_cannot_hide_a_garbled_data_row():
+    text = "garbled TCP-ish 127.0.0.1:48884 0.0.0.0:0 LISTENING 5\n" \
+           "TCP 127.0.0.1:48884 0.0.0.0:0 LISTENING 91920\n"
+    assert bridge.parse_netstat_listener_rows(text, [48884]) is None
+
+
+def test_unknown_text_after_first_row_still_fails_closed():
+    text = "heading\nTCP 127.0.0.1:48884 0.0.0.0:0 LISTENING 91920\nheading again\n"
+    assert bridge.parse_netstat_listener_rows(text, [48884]) is None
+    assert bridge.parse_netstat_listener_rows("heading only\n", [48884]) is None

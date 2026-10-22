@@ -78,7 +78,7 @@ def register_status_routes(api):
                     "document_title": (
                         sanitize_string(doc.Title) if doc.Title else "Untitled"
                     ),
-                    "api_name": "revit_mcp",
+                    "api_name": api.name,
                 }
                 payload.update(registration)
                 if identity_error:
@@ -92,7 +92,7 @@ def register_status_routes(api):
                     "status": "unhealthy",
                     "revit_available": False,
                     "error": "No active Revit document",
-                    "api_name": "revit_mcp",
+                    "api_name": api.name,
                 }
                 payload.update(registration)
                 if identity_error:
@@ -107,7 +107,7 @@ def register_status_routes(api):
                 "status": "unhealthy",
                 "revit_available": False,
                 "error": str(e),
-                "api_name": "revit_mcp"
+                "api_name": api.name
             }
             if identity_data:
                 payload["process_identity"] = identity_data

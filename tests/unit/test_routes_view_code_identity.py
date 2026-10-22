@@ -431,6 +431,7 @@ def make_db(world):
     db.FilteredElementCollector = FilteredElementCollector
     db.IFailuresPreprocessor = IFailuresPreprocessor
     db.TransactionStatus = types.SimpleNamespace(Committed="Committed", RolledBack="RolledBack")
+    XYZ.Zero = XYZ(0.0, 0.0, 0.0)
     db.XYZ = XYZ
     db.BasicFileInfo = types.SimpleNamespace(Extract=lambda model_path: None)
     db.DetachFromCentralOption = types.SimpleNamespace(

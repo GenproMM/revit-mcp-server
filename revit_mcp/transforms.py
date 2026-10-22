@@ -5,6 +5,7 @@ Handles move, copy, rotate, and mirror operations on elements
 """
 
 from .utils import get_element_id_value, make_element_id, suppress_warnings, parse_request_data
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 from System.Collections.Generic import List
 import math
@@ -19,8 +20,7 @@ MM_TO_FEET = 1.0 / 304.8
 def register_transform_routes(api):
     """Register all transform routes with the API"""
 
-    @api.route("/transform_elements/", methods=["POST"])
-    def transform_elements_handler(doc, request):
+    def _transform_elements(doc, request):
         """Move, copy, rotate, or mirror elements."""
         try:
             if not doc:
@@ -199,5 +199,15 @@ def register_transform_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+    @api.route("/transform_elements/", methods=["POST"])
+    def transform_elements_handler(uiapp, doc, request):
+        """Move, copy, rotate, or mirror elements."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_transform_elements(document, request), descriptor, uiapp=uiapp)
 
     logger.info("Transform routes registered successfully")

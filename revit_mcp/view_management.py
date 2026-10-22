@@ -5,6 +5,7 @@ Handles view creation and active view switching
 """
 
 from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -14,11 +15,18 @@ logger = logging.getLogger(__name__)
 MM_TO_FEET = 1.0 / 304.8
 
 
+def _is_same_document(uidoc, document):
+    """True only when the UI's active UIDocument wraps exactly ``document``. Never raises."""
+    try:
+        return uidoc is not None and bool(uidoc.Document.Equals(document))
+    except Exception:
+        return False
+
+
 def register_view_management_routes(api):
     """Register all view management routes with the API"""
 
-    @api.route("/create_view/", methods=["POST"])
-    def create_view_handler(doc, request):
+    def _create_view(doc, request):
         """Create a new view in the Revit model."""
         try:
             if not doc:
@@ -316,13 +324,26 @@ def register_view_management_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/set_active_view/", methods=["POST"])
-    def set_active_view_handler(doc, uidoc, request):
+    def _set_active_view(doc, uidoc, request):
         """Set the active view in Revit UI."""
         try:
             if not doc:
                 return routes.make_response(
                     data={"error": "No active Revit document"}, status=503
+                )
+
+            # The injected uidoc is the UI's active document. It is only used when it is
+            # the very Document the guard resolved: this route changes the view of a
+            # document, it never activates one, so a mismatch changes nothing.
+            if not _is_same_document(uidoc, doc):
+                return routes.make_response(
+                    data={
+                        "error": "The active document in Revit is not the selected "
+                                 "document. This call does not activate a document and "
+                                 "did not change anything.",
+                        "error_code": "document-not-active",
+                    },
+                    status=412,
                 )
 
             data = parse_request_data(request.data)
@@ -380,5 +401,26 @@ def register_view_management_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+    @api.route("/create_view/", methods=["POST"])
+    def create_view_handler(uiapp, doc, request):
+        """Create a new view in the Revit model."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_view(document, request), descriptor, uiapp=uiapp)
+
+    @api.route("/set_active_view/", methods=["POST"])
+    def set_active_view_handler(uiapp, doc, uidoc, request):
+        """Set the active view in Revit UI."""
+        # G1 explicit guard: first. A view switch is a document-bound mutation, so an open
+        # but inactive selection is refused (412) and never made active to satisfy it.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_set_active_view(document, uidoc, request), descriptor, uiapp=uiapp)
 
     logger.info("View management routes registered successfully")

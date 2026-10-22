@@ -2103,6 +2103,21 @@ ACTIVATION_FAILED_BODY = {
 }
 
 
+@pytest.mark.parametrize("tool,kwargs,status", [
+    ("read_document_summary", {"document": "doc1.zzzzzzzzzzzz.9"}, 404),
+    ("activate_document", {"document": "doc1.zzzzzzzzzzzz.9"}, 404),
+])
+def test_a_refusal_rendered_with_the_attribution_lines_of_02_16_still_parses_as_a_named_refusal(tool, kwargs, status):
+    p = AccProcess(1111, 48884, T1, "doc1.1111aaaaaaaa")
+    p.open_doc("X", "C:/b/X.rvt", active=True)
+    bench = AccBench(p)
+    text = render_tool(bench, tool, target=bench.discovery()["usable"][0]["selector"], **kwargs)
+    assert "Verified Revit process:" in text and text.startswith("Error: {} - ".format(status))
+    parsed = proc.parse_summary_text(text) if tool == "read_document_summary" else proc.parse_activation_text(text)
+    assert parsed["kind"] == "refused" and parsed["http_status"] == status
+    assert parsed["error_code"] == "document-token-unknown" and parsed["identity"] == p.identity
+
+
 def test_g4_activation_failed_reply_keeps_its_full_text_and_classification_with_diagnostics():
     raw_json = "Error: 500 - " + json.dumps(ACTIVATION_FAILED_BODY)
     appended = raw_json + "\n\nException diagnostics from Revit (rendered by the tool):\n  exception: x"
@@ -2869,6 +2884,11 @@ def _update(path, **fields):
 
 NO_AUTH = {"value": False, "at": None, "words": None, "source": None}
 
+
+def _edit_selected(rec):
+    rec["collision"]["probe"]["selected"] = {"refused": False, "credits": True, "pids": [], "text": "x"}
+
+
 # (label, mutate, unit that must be stop, code that must be named; unit "global" = record-level reasons)
 ACC_STOP_CASES = [
     ("synthetic", _set(["synthetic"], True), "global", "synthetic"),
@@ -3060,6 +3080,21 @@ ACC_STOP_CASES = [
      "g6-dialog-required-input"),
     ("g6-step-sent-twice", _append_call(method="POST", route="/set_parameter/", tool="set_parameter",
                                         section="g6", step="g6:seq1"), "g6", "g6-send-count"),
+    # the remaining declared codes: another engineer word, an unusable capture, a refusal that was sent
+    ("g2-engineer-saw-something-else", _set(["engineer", "g2:after_close", "ui"], "unchanged"), "g2",
+     "g2-engineer-unexpected"),
+    ("two-engineer-saw-something-else", _set(["engineer", "two:setup", "ui"], "unchanged"), "two",
+     "two-engineer-unexpected"),
+    ("collision-engineer-saw-something-else", _set(["engineer", "collision:setup", "ui"], "unchanged"), "g5",
+     "collision-engineer-unexpected"),
+    ("collision-engineer-saw-a-dialog", _set(["engineer", "collision:cleanup", "dialog_required_input"], True),
+     "g5", "collision-dialog-required-input"),
+    ("g6-engineer-saw-something-else", _set(["engineer", "g6:seq2", "ui"], "changed"), "g6",
+     "g6-engineer-unexpected"),
+    ("two-discovery-reply-incomplete", _set(["two", "discovery", "ok"], False), "two", "two-discovery-incomplete"),
+    ("two-list-unusable", _set(["two", "list", "2", "ok"], False), "two", "two-list-unusable"),
+    ("collision-selected-call-was-not-refused",
+     _edit_selected, "g5", "collision-selected-not-refused"),
 ]
 
 
@@ -3716,18 +3751,14 @@ def test_g6_never_sends_anything_but_set_parameter_and_reads(tmp_path, monkeypat
     assert all("document" in r[2] for r in bench.routes if r[1] == "/set_parameter/")
 
 
-@pytest.mark.parametrize("argv,flag_args", [
-    (["collision-probe", "--port", "48884", "--setup-kind", "auxiliary-routes-server",
-      "--setup-method", "two temporary servers"], True),
-])
-def test_collision_probe_refuses_when_the_inventory_shows_no_collision_and_sends_nothing(
-        tmp_path, monkeypatch, argv, flag_args):
+def test_collision_probe_refuses_when_the_inventory_shows_no_collision_and_sends_nothing(tmp_path, monkeypatch):
     raw = acc_start(str(tmp_path))
     acc_authorize(raw, ("collision_authorized",))
     bench = one_process_bench()[0]
     install_acc_bench(monkeypatch, bench)
     before = open(raw, "rb").read()
-    assert cmd(argv[0], "--in", raw, *argv[1:]) == 1
+    assert cmd("collision-probe", "--in", raw, "--port", "48884", "--setup-kind", "auxiliary-routes-server",
+               "--setup-method", "two temporary servers") == 1
     assert bench.tool_calls == [] and open(raw, "rb").read() == before
 
 
@@ -3769,8 +3800,6 @@ def test_a_selected_call_at_a_collision_port_is_refused_and_recorded(tmp_path, m
                "--setup-method", "second Revit bound the same primary port", "--selector", selector) == 0
     selected = load(raw)["collision"]["probe"]["selected"]
     assert selected["refused"] is True and selected["pids"] == [3333, 4444] and selected["credits"] is False
-    assert not [r for r in bench.routes if r[1] == "/documents/" and r[3].get("target") == selector
-                and False]
     other = proc.make_selector("127.0.0.1", 48884, 3333, T3)
     raw2 = os.path.join(str(tmp_path), "second.json")
     assert cmd("phase2-start", "--out", raw2) == 0

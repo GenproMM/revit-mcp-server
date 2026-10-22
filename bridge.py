@@ -87,6 +87,17 @@ port to the discovery probe window, and discovery probes loopback addresses.
 REVIT_PORT is a deployment and development setting: users share one revit entry
 and do not add entries.
 
+Provenance
+----------
+A complete reply from an incarnation proven before the send is returned tagged
+with metadata (PROVENANCE_ATTR on a dict or str subclass, never a key in the
+body, so a route cannot forge it): the verified process, the HTTP status and
+whether the reply's own process stamp agrees. A reply whose stamp names another
+process is discarded. A result that was not received (refused before the send,
+queue busy, connect failure, no complete reply, outcome unknown) is tagged too
+but credits no process and no document. tools/utils.py format_response renders
+the tag; the document is only ever the one the route reports in its reply.
+
 This module must not import mcp at module level: it is imported on the cold
 start path and has to stay cheap.
 """
@@ -439,6 +450,118 @@ async def resolve_default_target():
             "session_token": entry["session_token"]}
 
 
+# --- Response provenance (02-16, D-05/D-06) -----------------------------------
+# Kinds: "received" (complete reply from a proven process), "not-sent" (nothing
+# left this process), "unknown" (a POST was sent and no complete, trustworthy
+# reply came back), "no-reply" (a read got no usable reply) and
+# "unverified-reply" (a reply arrived but the answering process was not proven).
+# Only "received" carries a process; no kind ever carries a document, which is
+# whatever the route itself reports in its body.
+
+PROVENANCE_ATTR = "revit_provenance"  # keep in step with tools/utils.py
+
+
+class ProvenanceDict(dict):
+    """A received reply body; provenance is an attribute, so equality and JSON are unchanged."""
+
+
+class ProvenanceText(str):
+    """An error text; provenance is an attribute, so equality and startswith are unchanged."""
+
+
+def _tag(value, provenance):
+    if isinstance(value, dict):
+        tagged = ProvenanceDict(value)
+    elif isinstance(value, str):
+        tagged = ProvenanceText(value)
+    else:
+        return value  # image bytes and other non-text results have no text channel
+    setattr(tagged, PROVENANCE_ATTR, provenance)
+    return tagged
+
+
+def _meta(kind, requested=None, process=None, http_status=None, corroborated=None):
+    return {"kind": kind, "requested": requested, "process": process,
+            "http_status": http_status, "corroborated": corroborated}
+
+
+def _requested_of(target):
+    """The target a call was ASKED to reach; never evidence of who answered."""
+    return {"address": _address_of(target), "pid": target["pid"]}
+
+
+def _process_of(identity):
+    return {"pid": identity["pid"], "actual_port": identity["actual_port"],
+            "session_token": identity["session_token"],
+            "revit_version": identity["revit_version"]}
+
+
+def _uncertain(text, kind, requested):
+    return _tag(text, _meta(kind, requested))
+
+
+_HTTP_ERROR_TEXT = re.compile(r"Error: (\d{3}) - ")
+
+
+def _reply_body(result):
+    """The JSON object of a received reply: the dict itself or an HTTP error text's body."""
+    if isinstance(result, dict):
+        return result
+    match = _HTTP_ERROR_TEXT.match(result)
+    if match is None:
+        return None
+    try:
+        body = json.loads(result[match.end():])
+    except ValueError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def _stamp_agrees(stamp, identity):
+    """True or False when the reply's own process stamp is well formed; None when it is not."""
+    if not _identity_fields_valid(stamp):
+        return None
+    return (stamp["pid"] == identity["pid"] and stamp["actual_port"] == identity["actual_port"]
+            and stamp["session_token"] == identity["session_token"])
+
+
+def _conflict_text(method, identity, stamp):
+    text = ("Error: the reply came from a different Revit process than the one verified before "
+            "the send (verified PID {} on port {}; the reply names PID {} on port {}); the reply "
+            "is discarded and credited to neither process.".format(
+                identity["pid"], identity["actual_port"], stamp["pid"], stamp["actual_port"]))
+    if method == "POST":
+        text += (" The request was sent, so its outcome is UNKNOWN - the change may have been "
+                 "applied. Verify the model state before retrying.")
+    return text
+
+
+def _received_reply(result, identity, requested, method):
+    """Tag a complete reply with the process proven before the send, or refuse a conflicting one.
+
+    Without a proven identity (a stubbed or skipped handshake) nothing is claimed
+    and the result is returned untouched.
+    """
+    if identity is None or not isinstance(result, (dict, str)):
+        return result
+    http_status = 200
+    if isinstance(result, str):
+        match = _HTTP_ERROR_TEXT.match(result)
+        http_status = int(match.group(1)) if match else None
+    corroborated = None
+    body = _reply_body(result)
+    if body is not None:
+        stamp = body.get("process_identity")
+        agrees = _stamp_agrees(stamp, identity)
+        if agrees is False:
+            kind = "unknown" if method == "POST" else "no-reply"
+            return _uncertain(_conflict_text(method, identity, stamp), kind, requested)
+        corroborated = agrees
+        if isinstance(result, dict):
+            result.pop("_verified_process", None)  # only this bridge may say who was verified
+    return _tag(result, _meta("received", requested, _process_of(identity), http_status, corroborated))
+
+
 # --- Per-incarnation state (02-03, D-03) --------------------------------------
 # One pooled client and one lock per validated incarnation. The key is the whole
 # incarnation, never the port or the document: a process restarted on a reused
@@ -447,7 +570,7 @@ async def resolve_default_target():
 class _TargetState(object):
     """Pool, queue and bookkeeping of ONE process incarnation."""
 
-    __slots__ = ("key", "client", "lock", "users", "verified", "evicted")
+    __slots__ = ("key", "client", "lock", "users", "verified", "evicted", "identity")
 
     def __init__(self, key):
         self.key = key
@@ -455,6 +578,7 @@ class _TargetState(object):
         self.lock = asyncio.Lock()
         self.users = 0          # calls currently queued on, holding or using this state
         self.verified = False   # an identity handshake has succeeded for this key
+        self.identity = None    # the process_identity that handshake proved (read with the lock held)
         self.evicted = False    # superseded: closed when the last user lets go
 
 
@@ -583,10 +707,12 @@ async def _verify_target(target, state, timeout):
     that restarted while the call queued is caught. Every refusal here says the
     request was NOT sent.
     """
+    state.identity = None
     try:
         # Capped: the lock is held, and a Revit that is still initializing hangs
         # instead of failing, so the handshake must never wait out a long call.
-        await _handshake(target, _client_of(state, target), min(timeout, HANDSHAKE_TIMEOUT))
+        _response, payload = await _handshake(
+            target, _client_of(state, target), min(timeout, HANDSHAKE_TIMEOUT))
     except _UnexpectedStatus as exc:
         state.verified = False
         return ("Error: Revit identity handshake answered HTTP {}; the request was NOT sent "
@@ -599,6 +725,7 @@ async def _verify_target(target, state, timeout):
     except ValueError as exc:
         state.verified = False
         return _error_text(exc)
+    state.identity = _process_of(payload["process_identity"])
     state.verified = True
     await _retire_stale(state.key[0], state.key[1], state.key)
     return None
@@ -613,32 +740,41 @@ async def _status_call(selector, timeout):
     shapes: the payload for 200, "Error: <code> - <body>" otherwise.
     """
     state = None
+    requested = None
     try:
         target = parse_target(selector) if selector is not None else await resolve_default_target()
+        requested = _requested_of(target)
         state = _state_for(target)
         state.users += 1
         response, payload = await _handshake(target, _client_of(state, target), timeout)
         state.verified = True
         await _retire_stale(state.key[0], state.key[1], state.key)
+        # The handshake proved PID, bound port and startup token before this reply
+        # is used, and the reply's own stamp is that same identity.
+        meta = _meta("received", requested, _process_of(payload["process_identity"]),
+                     response.status_code, True)
         if selector is None:
             if response.status_code == 200:
-                return payload
-            return "Error: {} - {}".format(response.status_code, response.text)
+                return _tag(payload, meta)
+            return _tag("Error: {} - {}".format(response.status_code, response.text), meta)
         # Per-response metadata, never mutable callable/session state. Strip any
         # server-supplied verification claim before attaching our own result.
         payload.pop("_verified_process", None)
         payload["_verified_process"] = dict(payload["process_identity"])
         if response.status_code == 503 and not payload.get("error"):
             payload["error"] = "Revit status returned HTTP 503"
-        return payload
+        return _tag(payload, meta)
     except _UnexpectedStatus as exc:
         if state is not None:
             state.verified = False
-        return "Error: {} - {}".format(exc.status, exc.text)
+        return _tag("Error: {} - {}".format(exc.status, exc.text),
+                    _meta("unverified-reply", requested, http_status=exc.status))
     except Exception as exc:
         if state is not None:
             state.verified = False
-        return _error_text(exc)
+        kind = "not-sent" if (not isinstance(exc, httpx.TransportError)
+                              or isinstance(exc, _NOT_SENT_ERRORS)) else "no-reply"
+        return _uncertain(_error_text(exc), kind, requested)
     finally:
         if state is not None:
             await _release(state)
@@ -841,8 +977,11 @@ async def _dispatch(method: str, endpoint: str, ctx: Any, timeout: float, exchan
     """
     budget = None  # must exist before the except clause reads it
     state = None
+    requested = None
+    progress = {"sent": False}  # whether the requested exchange was ever started
     try:
         resolved = parse_target(target) if target is not None else await resolve_default_target()
+        requested = _requested_of(resolved)
         state = _state_for(resolved)
         state.users += 1
         if _is_locked(method, endpoint):
@@ -854,31 +993,65 @@ async def _dispatch(method: str, endpoint: str, ctx: Any, timeout: float, exchan
                 async with state.lock:
                     # Lock held: the wait bound no longer applies.
                     budget.reschedule(None)
-                    refusal = await _verify_target(resolved, state, timeout)
-                    if refusal is not None:
-                        return refusal
-                    try:
-                        return await exchange(_client_of(state, resolved))
-                    except httpx.TransportError as e:
-                        # Returned, not raised: async with releases the lock on
-                        # every exit. Never hold it waiting for Revit (SER-03).
-                        # A read changes nothing, so only a POST may claim an
-                        # unknown outcome (D-13).
-                        if method == "POST":
-                            return _transport_failure_message(e, timeout, _address_of(resolved))
-                        return _error_text(e)
-        refusal = await _verify_target(resolved, state, timeout)
-        if refusal is not None:
-            return refusal
-        return await exchange(_client_of(state, resolved))
+                    # Returned, not raised: async with releases the lock on every
+                    # exit. Never hold it waiting for Revit (SER-03).
+                    return await _verified_exchange(
+                        method, exchange, state, resolved, requested, timeout, progress, True)
+        return await _verified_exchange(
+            method, exchange, state, resolved, requested, timeout, progress, False)
     except TimeoutError:
         # Only our own wait deadline means "queue busy"; any other TimeoutError
         # must not be mislabelled, and tool functions rely on never seeing a raise.
         if budget is not None and budget.expired():
-            return _queue_busy_message(timeout)
-        return "Error: TimeoutError"
+            return _uncertain(_queue_busy_message(timeout), "not-sent", requested)
+        return _uncertain("Error: TimeoutError", _unconfirmed_kind(method, progress), requested)
     except Exception as e:
-        return _error_text(e)
+        return _uncertain(_error_text(e), _unconfirmed_kind(method, progress), requested)
     finally:
         if state is not None:
             await _release(state)
+
+
+def _unconfirmed_kind(method: str, progress: dict) -> str:
+    """What an unclassified failure must be assumed to be: nothing sent, a read with no reply, or an unknown POST."""
+    if not progress["sent"]:
+        return "not-sent"
+    return "unknown" if method == "POST" else "no-reply"
+
+
+async def _verified_exchange(method: str, exchange: Any, state: "_TargetState", resolved: dict,
+                             requested: dict, timeout: float, progress: dict,
+                             locked: bool) -> Union[Dict, str, Any]:
+    """Prove the incarnation, perform the one exchange and tag the outcome.
+
+    A refusal is "not-sent". A complete reply is tagged with the process proven
+    just before the send (or replaced by a conflict error when its own stamp names
+    another process). A locked call turns transport failures into honest text
+    (D-13): only a POST may claim an unknown outcome, a read changes nothing.
+    """
+    refusal = await _verify_target(resolved, state, timeout)
+    if refusal is not None:
+        return _uncertain(refusal, "not-sent", requested)
+    identity = state.identity  # no await since the handshake: still this call's proof
+    progress["sent"] = True
+    client = _client_of(state, resolved)
+    if not locked:
+        return _received_reply(await exchange(client), identity, requested, method)
+    try:
+        result = await exchange(client)
+    except httpx.TransportError as e:
+        pre_send = isinstance(e, _NOT_SENT_ERRORS)
+        if method == "POST":
+            return _uncertain(_transport_failure_message(e, timeout, _address_of(resolved)),
+                              "not-sent" if pre_send else "unknown", requested)
+        return _uncertain(_error_text(e), "not-sent" if pre_send else "no-reply", requested)
+    except json.JSONDecodeError as e:
+        # Revit (or something in front of it) answered with a body that is not JSON.
+        if method == "POST":
+            return _uncertain(
+                "Error: the reply to this request was not valid JSON ({}); the request was sent "
+                "to Revit, so its outcome is UNKNOWN - the change may have been applied. Verify "
+                "the model state before retrying.".format(type(e).__name__),
+                "unknown", requested)
+        return _uncertain(_error_text(e), "no-reply", requested)
+    return _received_reply(result, identity, requested, method)

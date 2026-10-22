@@ -328,7 +328,11 @@ class Machine(object):
         reply = self.replies.get((port, route))
         if reply is None:
             return httpx.Response(200, json={"message": "ok"})
-        return reply(request) if callable(reply) else reply
+        if callable(reply):
+            reply = reply(request)
+            if asyncio.iscoroutine(reply):
+                reply = await reply
+        return reply
 
     def client(self, target):
         return httpx.AsyncClient(
@@ -382,11 +386,11 @@ def test_a_matching_reply_stamp_corroborates_the_verified_process(machine):
 ])
 def test_a_reply_stamp_of_another_process_is_never_attributed_to_the_selected_one(machine, changes):
     machine.replies[(PORT_A, "/edit/")] = httpx.Response(
-        200, json={"message": "edited", "process_identity": dict(IDENT_A, **changes)})
+        200, json={"message": "body-of-the-other-process", "process_identity": dict(IDENT_A, **changes)})
     result = run(bridge.revit_post("/edit/", {}, target=SEL_A))
     assert isinstance(result, str) and result.startswith("Error: ")
     assert "different" in result.lower() and "UNKNOWN" in result
-    assert "edited" not in result
+    assert "body-of-the-other-process" not in result
     meta = provenance(result)
     assert meta["kind"] == "unknown" and meta["process"] is None
     text = format_response(result)
@@ -487,7 +491,7 @@ def test_queue_busy_is_not_sent_and_names_the_requested_target(machine):
 
 
 def test_post_failure_after_send_is_outcome_unknown_and_credits_nobody(machine):
-    machine.faults[(PORT_A, "/edit/")] = lambda req: httpx.ReadTimeout("slow", request=req)
+    machine.faults[(PORT_A, "/edit/")] = lambda req: httpx.ReadTimeout("", request=req)
     result = run(bridge.revit_post("/edit/", {}, target=SEL_A))
     assert "outcome UNKNOWN" in result
     meta = provenance(result)
@@ -504,7 +508,7 @@ def test_connect_failure_is_not_sent(machine):
 
 
 def test_a_read_that_gets_no_reply_is_tagged_no_reply(machine):
-    machine.faults[(PORT_A, "/list/")] = lambda req: httpx.ReadTimeout("slow", request=req)
+    machine.faults[(PORT_A, "/list/")] = lambda req: httpx.ReadTimeout("", request=req)
     result = run(bridge.revit_get("/list/", target=SEL_A))
     assert result == "Error: ReadTimeout"
     assert provenance(result)["kind"] == "no-reply"

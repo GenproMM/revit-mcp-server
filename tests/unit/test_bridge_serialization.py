@@ -308,7 +308,13 @@ async def test_queue_bound_message_is_an_error_string():
     assert result.startswith("Error: ")
     after = result[len("Error: "):]
     assert after and not after[0].isdigit()
-    assert format_response(result) == result
+    # 02-16: formatting keeps the bridge text verbatim and only appends one
+    # attribution line, which credits no process (the request was not sent).
+    formatted = format_response(result)
+    assert formatted.startswith(result)
+    extra = formatted[len(result):].strip().splitlines()
+    assert len(extra) == 1 and extra[0].startswith("Attribution: none.")
+    assert "Verified Revit process" not in formatted
 
 
 # --- Release on every exit, failure honesty, wait message (SER-03, D-13, D-14) --

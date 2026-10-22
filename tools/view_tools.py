@@ -42,8 +42,9 @@ def register_view_tools(mcp, revit_get, revit_post, revit_image=None):
             ctx: MCP context for logging
         """
         response = await revit_image(f"/get_view/{view_name}", ctx, **_target_options(target))
-        # Note: revit_image already returns a formatted response (Image object or error string)
-        return str(response) if not isinstance(response, str) else response
+        # An Image has no text channel for provenance; an error string goes through
+        # the shared renderer so a received 4xx names the process that answered.
+        return format_response(response) if isinstance(response, str) else str(response)
 
     @mcp.tool()
     async def list_revit_views(target: str = None, ctx: Context = None) -> str:

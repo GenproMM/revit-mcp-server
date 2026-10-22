@@ -4,8 +4,11 @@
 Every other tool in this package is a thin wrapper over the pyRevit Routes
 bridge, which only exists while Revit is running. These two are the exception:
 they are what you call when it is *not*. They therefore talk to the local
-machine directly and use `revit_get` only to probe whether the bridge has come
-up yet.
+machine directly. Whether a Revit is running is decided by the discovery facade
+the injected `revit_get` carries (`revit_get.discover_targets`), never by one
+fixed-port guess: with a single shared MCP entry several Revit processes can
+run, two can listen on one port, and the listener inventory can fail. None of
+those is "Revit is closed", and only proven absence may launch another process.
 """
 
 import asyncio
@@ -86,61 +89,215 @@ async def _bridge_state(revit_get, ctx) -> str:
     return "down"
 
 
+_NO_FACADE = (
+    "Revit process discovery is not available on this transport, so no process list "
+    "was produced. That does not mean no Revit runs."
+)
+
+
+async def _survey(revit_get) -> dict:
+    """What discovery proves right now, as {"kind", "usable", "unusable", "detail"}.
+
+    kind is one of:
+      discovery_unavailable  the injected callable has no discover_targets facade
+      discovery_failed       the facade raised
+      inventory_failure      the OS listener inventory was missing or malformed
+      collision              some port has two or more LISTENING PIDs
+      many / one             one or more usable (identity-proven) incarnations
+      unresolved_listeners   listeners exist but none answered as Revit
+      none                   the inventory was read and nothing listens: proven absence
+
+    Only "none" is evidence that Revit is not running. Every other kind that has
+    no usable process is inconclusive, and a lifecycle tool must not launch on it.
+    """
+    discover = getattr(revit_get, "discover_targets", None)
+    if discover is None:
+        return {"kind": "discovery_unavailable", "usable": [], "unusable": [],
+                "detail": _NO_FACADE}
+    try:
+        found = await discover()
+    except Exception as exc:  # a tool never raises
+        return {"kind": "discovery_failed", "usable": [], "unusable": [],
+                "detail": "Revit process discovery failed: %s. That does not mean no "
+                          "Revit runs." % (str(exc) or type(exc).__name__)}
+    if (not isinstance(found, dict) or found.get("status") != "ok"
+            or not isinstance(found.get("usable"), list)
+            or not isinstance(found.get("unusable"), list)):
+        message = found.get("message") if isinstance(found, dict) else None
+        return {"kind": "inventory_failure", "usable": [], "unusable": [],
+                "detail": message or "Revit process discovery returned no usable "
+                                     "answer. That does not mean no Revit runs."}
+    usable, unusable = found["usable"], found["unusable"]
+    collisions = [u for u in unusable if u.get("reason") == "listener-collision"]
+    if collisions:
+        kind = "collision"
+    elif len(usable) > 1:
+        kind = "many"
+    elif usable:
+        kind = "one"
+    elif unusable:
+        kind = "unresolved_listeners"
+    else:
+        kind = "none"
+    return {"kind": kind, "usable": usable, "unusable": unusable, "detail": ""}
+
+
+def _pids(entries) -> str:
+    return ", ".join(str(p) for e in entries for p in e.get("pids", []))
+
+
+def _process_rows(usable) -> list:
+    return [{"pid": e.get("pid"), "port": e.get("port"),
+             "revit_version": e.get("revit_version"),
+             "document_open": e.get("document_open")} for e in usable]
+
+
+def _listener_rows(unusable) -> list:
+    return [{"port": e.get("port"), "pids": list(e.get("pids", [])),
+             "reason": e.get("reason")} for e in unusable]
+
+
 def register_process_tools(mcp, revit_get, revit_post=None, revit_image=None):
     """Register Revit process lifecycle tools."""
     _ = revit_post, revit_image  # Acknowledge unused parameters
 
     @mcp.tool()
     async def get_revit_process_status(ctx: Context = None) -> str:
-        """Report whether Revit is reachable and which versions are installed.
+        """Report which Revit processes are running and which versions are installed.
 
         Use this before any other Revit tool when you are unsure Revit is open,
         and to decide which version to pass to start_revit. It talks to the
-        local machine and to the pyRevit Routes port only; it never opens or
-        modifies a document, so it is always safe to call.
+        local machine only (the operating system's listener table and each
+        listener's identity answer); it never opens or modifies a document, so
+        it is always safe to call. It never reports "not running" unless the
+        listener table was read and nothing was listening.
 
         Returns lines of "Field: value" with:
-          ready            bool  - a document is open; every tool will work
-          revit_running    bool  - Revit is up and the bridge answers
+          process_state    str   - exactly one of:
+            none                   proven absence: no Revit process is listening
+            one_ready              one Revit, a document is open; every tool works
+            one_no_document        one Revit on its Home screen (HTTP 503); open a model
+            many                   several usable Revits; see processes
+            collision              a port has two LISTENING processes (both PIDs are
+                                   in ambiguous_listeners); no process is selected
+            inventory_failure      the OS listener listing was unavailable or malformed
+            discovery_failed       discovery raised an error
+            discovery_unavailable  this transport has no discovery
+            unresolved_listeners   something listens but did not answer as Revit
+            status_unavailable     one Revit was found but its own status call failed
+          ready            bool  - true only for one_ready
+          revit_running    bool or "unknown" - true when a usable Revit exists, false
+                           only for none, "unknown" when discovery is inconclusive
+          processes        list  - [{"pid", "port", "revit_version", "document_open"}]
+          ambiguous_listeners list - [{"port", "pids", "reason"}] never selected
           installed        list  - [{"version": "2027", "path": "..."}], newest first
           recommendation   str   - what to do next in plain words
 
-        The two booleans differ in one common case: Revit open on its Home
-        screen with no document. The bridge answers, so revit_running is true,
-        but model tools will fail until a document is opened - so ready is false.
+        With several processes or a collision the status of an individual process
+        is not read (that would pick one): call discover_revit_targets for the
+        exact target value of each usable process. A collision, an unavailable
+        listing and a listener that did not answer are all different from a
+        closed Revit: do not launch another one on their account.
 
-        Limitations: when revit_running is false this cannot distinguish Revit
-        being closed from Revit still starting up, or from the pyRevit Routes
-        server being disabled.
+        Limitations: only local loopback Revit processes in the probed port range
+        are covered, and the listing is a snapshot, not a reservation. It cannot
+        distinguish a still-starting Revit from a disabled pyRevit Routes server.
 
         Args:
             ctx: MCP context, used for progress logging. Optional.
         """
         installed = _discover()
-        state = await _bridge_state(revit_get, ctx)
+        survey = await _survey(revit_get)
+        kind, usable, unusable = survey["kind"], survey["usable"], survey["unusable"]
+        processes = _process_rows(usable)
+        state = kind
+        ready = False
 
-        if state == "ready":
-            recommendation = "Revit is reachable; use the other tools normally."
-        elif state == "no_document":
+        if kind == "one":
+            # The one validated incarnation: its own selected status, never an
+            # unselected route. HTTP 503 (selected payload carrying an error) means
+            # Revit is running with no document.
+            entry = usable[0]
+            try:
+                answer = await revit_get("/status/", ctx, target=entry["selector"],
+                                         timeout=5.0)
+            except Exception:
+                answer = None
+            if isinstance(answer, dict):
+                ready = not answer.get("error")
+                state = "one_ready" if ready else "one_no_document"
+                processes[0]["document_open"] = ready
+            else:
+                state = "status_unavailable"
+
+        if state == "none":
+            running = False
+        elif usable:
+            running = True
+        else:
+            running = "unknown"
+
+        if state == "none":
+            if installed:
+                recommendation = (
+                    "No Revit process is running. Call start_revit to launch it "
+                    "(version %s will be used by default)." % installed[0][0]
+                )
+            else:
+                recommendation = (
+                    "No Revit installation was found under %s. Set REVIT_EXE to the "
+                    "full path of Revit.exe if it lives elsewhere." % _INSTALL_GLOB
+                )
+        elif state == "one_ready":
+            recommendation = ("Revit is reachable; use the other tools normally. With one "
+                              "process a call may omit target.")
+        elif state == "one_no_document":
             recommendation = (
                 "Revit is running but no document is open. Open a model in "
                 "Revit; the other tools cannot work without one."
             )
-        elif installed:
+        elif state == "status_unavailable":
             recommendation = (
-                "Revit is not running. Call start_revit to launch it "
-                "(version %s will be used by default)." % installed[0][0]
+                "One Revit process was found (PID %s) but its own status call failed. "
+                "Call discover_revit_targets and retry; do not launch another Revit."
+                % usable[0].get("pid")
             )
-        else:
+        elif state == "many":
             recommendation = (
-                "No Revit installation was found under %s. Set REVIT_EXE to the "
-                "full path of Revit.exe if it lives elsewhere." % _INSTALL_GLOB
+                "%d usable Revit processes are running. Call discover_revit_targets "
+                "for the exact target value of each and pass one with every call; "
+                "no launch is needed." % len(usable)
+            )
+        elif state == "collision":
+            recommendation = (
+                "Two Revit processes listen on the same port (PIDs %s), so requests "
+                "would land on an unpredictable one and none is selected. Close the "
+                "extra Revit, then run discover_revit_targets. Launching another "
+                "Revit now would make it worse." % _pids(
+                    [u for u in unusable if u.get("reason") == "listener-collision"])
+            )
+        elif state == "unresolved_listeners":
+            recommendation = (
+                "Something listens on a Revit port (PIDs %s) but did not answer as "
+                "Revit: it may still be starting, hung, or not Revit. Wait and run "
+                "discover_revit_targets again; do not launch another Revit yet."
+                % _pids(unusable)
+            )
+        else:  # inventory_failure, discovery_failed, discovery_unavailable
+            recommendation = (
+                "%s Whether Revit is open is unknown: this is not proof that Revit is "
+                "closed, so do not launch another one on this evidence; run "
+                "discover_revit_targets once the listener listing works."
+                % survey["detail"]
             )
 
         return format_response(
             {
-                "ready": state == "ready",
-                "revit_running": state != "down",
+                "process_state": state,
+                "ready": ready,
+                "revit_running": running,
+                "processes": processes,
+                "ambiguous_listeners": _listener_rows(unusable),
                 "installed": [{"version": v, "path": p} for v, p in installed],
                 "recommendation": recommendation,
             }

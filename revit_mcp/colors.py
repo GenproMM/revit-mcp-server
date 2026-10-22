@@ -8,6 +8,7 @@ Provides tools for color splashing elements based on parameter values
 # (`from .utils import ...`) that used to sit below loaded revit_mcp/utils.py a
 # second time under a different module identity.
 from .utils import get_element_id_value, suppress_warnings, normalize_string, parse_request_data
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, DB
 import logging
 import random
@@ -1091,10 +1092,9 @@ def list_category_parameters(doc, category_name):
 def register_color_routes(api):
     """Register color-related routes with the API"""
 
-    @api.route("/color_splash/", methods=["POST"])
-    def color_splash(doc, request):
+    def _color_splash(doc, request):
         """
-        Color elements in a category based on parameter values
+        Color elements in a category based on parameter values (runs on the guarded document)
 
         Expected JSON payload:
         {
@@ -1128,10 +1128,19 @@ def register_color_routes(api):
             logger.error("Error in color_splash route: %s", e)
             return routes.make_response(data={"error": str(e)}, status=500)
 
-    @api.route("/clear_colors/", methods=["POST"])
-    def clear_colors(doc, request):
+    @api.route("/color_splash/", methods=["POST"])
+    def color_splash(uiapp, doc, request):
+        """Color elements in a category based on parameter values (optional "document" selector)."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_color_splash(document, request), descriptor, uiapp=uiapp)
+
+    def _clear_colors(doc, request):
         """
-        Clear color overrides for elements in a category
+        Clear color overrides for elements in a category (runs on the guarded document)
 
         Expected JSON payload:
         {
@@ -1155,6 +1164,15 @@ def register_color_routes(api):
         except Exception as e:
             logger.error("Error in clear_colors route: %s", e)
             return routes.make_response(data={"error": str(e)}, status=500)
+
+    @api.route("/clear_colors/", methods=["POST"])
+    def clear_colors(uiapp, doc, request):
+        """Clear color overrides for elements in a category (optional "document" selector)."""
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_clear_colors(document, request), descriptor, uiapp=uiapp)
 
     @api.route("/list_category_parameters/", methods=["POST"])
     def list_parameters(doc, request):

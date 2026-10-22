@@ -5,6 +5,7 @@ Handles detail line creation for view-specific annotation
 """
 
 from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -17,9 +18,8 @@ MM_TO_FEET = 1.0 / 304.8
 def register_detail_routes(api):
     """Register all detail routes with the API"""
 
-    @api.route("/create_detail_line/", methods=["POST"])
-    def create_detail_line_handler(doc, request):
-        """Create a detail line in a view."""
+    def _create_detail_line(doc, request):
+        """Create a detail line in a view (runs on the guarded document)."""
         try:
             if not doc:
                 return routes.make_response(
@@ -149,5 +149,15 @@ def register_detail_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+    @api.route("/create_detail_line/", methods=["POST"])
+    def create_detail_line_handler(uiapp, doc, request):
+        """Create a detail line in a view."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_detail_line(document, request), descriptor, uiapp=uiapp)
 
     logger.info("Detail routes registered successfully")

@@ -2911,6 +2911,26 @@ GROUP_ONE_TOOLS = {
         {"levels": [{"elevation": 0}]}),
 }
 
+GROUP_TWO_TOOLS = {
+    "check_clashes": _addressing(
+        "clash", "read", "POST", "/clash_check/",
+        ["set_a_categories", "set_b_categories", "max_clashes"], {}),
+    "color_splash": _addressing(
+        "colors", "mutation", "POST", "/color_splash/",
+        ["category_name", "parameter_name", "use_gradient", "custom_colors"],
+        {"category_name": "Walls", "parameter_name": "Mark"}),
+    "clear_colors": _addressing(
+        "colors", "mutation", "POST", "/clear_colors/", ["category_name"],
+        {"category_name": "Walls"}),
+    # A read that happens to travel as a POST: it lists parameters and changes nothing.
+    "list_category_parameters": _addressing(
+        "colors", "read", "POST", "/list_category_parameters/", ["category_name"],
+        {"category_name": "Walls"}),
+}
+
+ALL_ADDRESSING_TOOLS = dict(GROUP_ONE_TOOLS, **GROUP_TWO_TOOLS)
+ADDRESSING_MODULES = ["analysis", "annotation", "building", "clash", "colors"]
+
 DOCUMENT_SELECTOR = "doc1.aaaaaaaaaaaa.2"
 PROCESS_SELECTOR = "revit1:abc"
 
@@ -2951,15 +2971,15 @@ def tools_of(inventory, module):
     return sorted(name for name, entry in inventory.items() if entry["module"] == module)
 
 
-@pytest.mark.parametrize("module", ["analysis", "annotation", "building"])
-def test_first_group_registers_exactly_the_inventoried_tools(module):
+@pytest.mark.parametrize("module", ADDRESSING_MODULES)
+def test_addressing_registers_exactly_the_inventoried_tools(module):
     tools, _ = register_addressing_module(module)
-    assert sorted(tools) == tools_of(GROUP_ONE_TOOLS, module)
+    assert sorted(tools) == tools_of(ALL_ADDRESSING_TOOLS, module)
 
 
-@pytest.mark.parametrize("name", sorted(GROUP_ONE_TOOLS))
-def test_first_group_signatures_carry_target_and_only_mutations_carry_document(name):
-    entry = GROUP_ONE_TOOLS[name]
+@pytest.mark.parametrize("name", sorted(ALL_ADDRESSING_TOOLS))
+def test_addressing_signatures_carry_target_and_only_mutations_carry_document(name):
+    entry = ALL_ADDRESSING_TOOLS[name]
     tools, _ = register_addressing_module(entry["module"])
     names = list(inspect.signature(tools[name]).parameters)
     if entry["kind"] == "mutation":
@@ -2973,9 +2993,9 @@ def test_first_group_signatures_carry_target_and_only_mutations_carry_document(n
         assert parameters["document"].default is None
 
 
-@pytest.mark.parametrize("name", sorted(GROUP_ONE_TOOLS))
-def test_first_group_docstrings_name_every_argument_and_state_the_scope_rule(name):
-    entry = GROUP_ONE_TOOLS[name]
+@pytest.mark.parametrize("name", sorted(ALL_ADDRESSING_TOOLS))
+def test_addressing_docstrings_name_every_argument_and_state_the_scope_rule(name):
+    entry = ALL_ADDRESSING_TOOLS[name]
     tools, _ = register_addressing_module(entry["module"])
     doc = tools[name].__doc__
     args_block = doc.split("Args:", 1)[1]
@@ -2994,9 +3014,9 @@ def test_first_group_docstrings_name_every_argument_and_state_the_scope_rule(nam
         assert "inactive" in lowered
 
 
-@pytest.mark.parametrize("name", sorted(GROUP_ONE_TOOLS))
-def test_first_group_forwards_nothing_extra_when_no_selector_is_given(name):
-    entry = GROUP_ONE_TOOLS[name]
+@pytest.mark.parametrize("name", sorted(ALL_ADDRESSING_TOOLS))
+def test_addressing_forwards_nothing_extra_when_no_selector_is_given(name):
+    entry = ALL_ADDRESSING_TOOLS[name]
     text, calls = run_addressing_tool(name, entry)
     assert isinstance(text, str)
     assert len(calls) == 1
@@ -3007,9 +3027,9 @@ def test_first_group_forwards_nothing_extra_when_no_selector_is_given(name):
         assert "document" not in data and "target" not in data
 
 
-@pytest.mark.parametrize("name", sorted(GROUP_ONE_TOOLS))
-def test_first_group_forwards_target_as_a_transport_keyword_never_in_the_body(name):
-    entry = GROUP_ONE_TOOLS[name]
+@pytest.mark.parametrize("name", sorted(ALL_ADDRESSING_TOOLS))
+def test_addressing_forwards_target_as_a_transport_keyword_never_in_the_body(name):
+    entry = ALL_ADDRESSING_TOOLS[name]
     text, calls = run_addressing_tool(name, entry, target=PROCESS_SELECTOR)
     assert isinstance(text, str) and len(calls) == 1
     method, route, data, options = calls[0]
@@ -3019,9 +3039,9 @@ def test_first_group_forwards_target_as_a_transport_keyword_never_in_the_body(na
         assert "target" not in data and "document" not in data
 
 
-@pytest.mark.parametrize("name", sorted(n for n, e in GROUP_ONE_TOOLS.items() if e["kind"] == "mutation"))
-def test_first_group_mutations_forward_the_document_in_the_post_body(name):
-    entry = GROUP_ONE_TOOLS[name]
+@pytest.mark.parametrize("name", sorted(n for n, e in ALL_ADDRESSING_TOOLS.items() if e["kind"] == "mutation"))
+def test_addressing_mutations_forward_the_document_in_the_post_body(name):
+    entry = ALL_ADDRESSING_TOOLS[name]
     text, calls = run_addressing_tool(name, entry, document=DOCUMENT_SELECTOR, target=PROCESS_SELECTOR)
     assert isinstance(text, str) and len(calls) == 1
     method, route, data, options = calls[0]
@@ -3032,27 +3052,27 @@ def test_first_group_mutations_forward_the_document_in_the_post_body(name):
         assert data[key] == value
 
 
-@pytest.mark.parametrize("name", sorted(n for n, e in GROUP_ONE_TOOLS.items() if e["kind"] == "mutation"))
+@pytest.mark.parametrize("name", sorted(n for n, e in ALL_ADDRESSING_TOOLS.items() if e["kind"] == "mutation"))
 @pytest.mark.parametrize("blank", ["", "   ", 7])
-def test_first_group_mutations_refuse_a_blank_document_without_sending(name, blank):
+def test_addressing_mutations_refuse_a_blank_document_without_sending(name, blank):
     """A blank selector must never decay into the one-document default."""
-    entry = GROUP_ONE_TOOLS[name]
+    entry = ALL_ADDRESSING_TOOLS[name]
     text, calls = run_addressing_tool(name, entry, document=blank)
     assert calls == []
     assert "document" in text and "list_documents" in text
 
 
-@pytest.mark.parametrize("name", sorted(n for n, e in GROUP_ONE_TOOLS.items() if e["kind"] == "read"))
-def test_first_group_reads_offer_no_way_to_name_a_document(name):
-    entry = GROUP_ONE_TOOLS[name]
+@pytest.mark.parametrize("name", sorted(n for n, e in ALL_ADDRESSING_TOOLS.items() if e["kind"] == "read"))
+def test_addressing_reads_offer_no_way_to_name_a_document(name):
+    entry = ALL_ADDRESSING_TOOLS[name]
     tools, calls = register_addressing_module(entry["module"])
     with pytest.raises(TypeError):
         asyncio.run(tools[name](document=DOCUMENT_SELECTOR))
     assert calls == []
 
 
-@pytest.mark.parametrize("module", ["analysis", "annotation", "building"])
-def test_first_group_modules_never_import_the_transport(module):
+@pytest.mark.parametrize("module", ADDRESSING_MODULES)
+def test_addressing_modules_never_import_the_transport(module):
     with open(os.path.join(REPO_ROOT, "tools", "{}_tools.py".format(module)), encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
     imported = set()
@@ -3062,3 +3082,97 @@ def test_first_group_modules_never_import_the_transport(module):
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             imported.add(node.module.split(".")[0])
     assert not imported & {"bridge", "httpx"}, imported
+
+
+# ---------------------------------------------------------------- 02-08 Task 2
+# Clash and colors, plus the sweep over all five modules. The inventory stays
+# hand-classified: color_splash and clear_colors change view graphics, so they
+# take document; list_category_parameters is a read that happens to POST.
+
+
+def test_every_inventoried_tool_is_in_the_manifest():
+    with open(os.path.join(REPO_ROOT, "tests", "unit", "tool_manifest.txt"), encoding="utf-8") as handle:
+        manifest = {line.strip() for line in handle if line.strip() and not line.startswith("#")}
+    assert set(ALL_ADDRESSING_TOOLS) <= manifest
+
+
+@pytest.mark.parametrize("module", ADDRESSING_MODULES)
+def test_document_is_attached_exactly_once_per_mutation_in_the_module_source(module):
+    """The inventory and the source agree: one forwarding site per mutation, none for a read."""
+    with open(os.path.join(REPO_ROOT, "tools", "{}_tools.py".format(module)), encoding="utf-8") as handle:
+        source = handle.read()
+    mutations = [n for n, e in ALL_ADDRESSING_TOOLS.items() if e["module"] == module and e["kind"] == "mutation"]
+    assert source.count('data["document"] = document') == len(mutations)
+
+
+def test_clash_check_forwards_its_scope_and_the_process_and_offers_no_document():
+    entry = GROUP_TWO_TOOLS["check_clashes"]
+    text, calls = run_addressing_tool(
+        "check_clashes", entry, set_a_categories=["beams"], set_b_categories=["ducts"],
+        max_clashes=5, target=PROCESS_SELECTOR)
+    assert isinstance(text, str)
+    assert calls == [("POST", "/clash_check/",
+                      {"set_a_categories": ["beams"], "set_b_categories": ["ducts"], "max_clashes": 5},
+                      {"target": PROCESS_SELECTOR})]
+    tools, _ = register_addressing_module("clash")
+    doc = tools["check_clashes"].__doc__
+    assert "Scope rules" in doc and "approximate clash location" in doc
+    assert "active document" in doc.lower()
+
+
+def test_color_mutations_put_the_document_in_the_body_beside_their_own_fields():
+    text, calls = run_addressing_tool(
+        "color_splash", GROUP_TWO_TOOLS["color_splash"], use_gradient=True,
+        custom_colors=["#FF0000"], document=DOCUMENT_SELECTOR, target=PROCESS_SELECTOR)
+    assert calls == [("POST", "/color_splash/",
+                      {"category_name": "Walls", "parameter_name": "Mark", "use_gradient": True,
+                       "custom_colors": ["#FF0000"], "document": DOCUMENT_SELECTOR},
+                      {"target": PROCESS_SELECTOR})]
+    text, calls = run_addressing_tool(
+        "clear_colors", GROUP_TWO_TOOLS["clear_colors"], document=DOCUMENT_SELECTOR)
+    assert calls == [("POST", "/clear_colors/",
+                      {"category_name": "Walls", "document": DOCUMENT_SELECTOR}, {})]
+
+
+def test_color_splash_keeps_its_legacy_body_when_no_document_is_given():
+    text, calls = run_addressing_tool("color_splash", GROUP_TWO_TOOLS["color_splash"])
+    assert calls == [("POST", "/color_splash/",
+                      {"category_name": "Walls", "parameter_name": "Mark", "use_gradient": False}, {})]
+
+
+def test_list_category_parameters_is_a_read_even_though_it_posts():
+    entry = GROUP_TWO_TOOLS["list_category_parameters"]
+    text, calls = run_addressing_tool("list_category_parameters", entry, target=PROCESS_SELECTOR)
+    assert calls == [("POST", "/list_category_parameters/", {"category_name": "Walls"},
+                      {"target": PROCESS_SELECTOR})]
+    tools, _ = register_addressing_module("colors")
+    assert "document" not in inspect.signature(tools["list_category_parameters"]).parameters
+    assert "document" not in tools["list_category_parameters"].__doc__.split("Args:", 1)[1]
+
+
+@pytest.mark.parametrize("name", ["color_splash", "clear_colors"])
+def test_color_mutations_keep_their_error_wrapper_and_never_raise(name):
+    entry = GROUP_TWO_TOOLS[name]
+    calls = []
+
+    async def revit_get(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("colors never GET")
+
+    async def revit_post(path, data, ctx=None, **options):
+        calls.append((path, data, options))
+        raise RuntimeError("boom")
+
+    mcp = FakeMCP()
+    addressing_registrar("colors")(mcp, revit_get, revit_post, None)
+    text = asyncio.run(mcp.tools[name](**dict(entry["minimal"], document=DOCUMENT_SELECTOR)))
+    assert isinstance(text, str) and text.startswith("Error") and "boom" in text
+    assert len(calls) == 1 and calls[0][1]["document"] == DOCUMENT_SELECTOR
+
+
+@pytest.mark.parametrize("module", ADDRESSING_MODULES)
+def test_none_of_the_five_modules_fetches_an_image_so_no_image_path_loses_a_target(module):
+    with open(os.path.join(REPO_ROOT, "tools", "{}_tools.py".format(module)), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    called = {node.func.id for node in ast.walk(tree)
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert "revit_image" not in called

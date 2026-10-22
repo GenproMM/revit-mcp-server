@@ -115,8 +115,8 @@ TASK_TWO_TOOLS = {
         {"family_name": "Chair"}),
 }
 
-TOOLS = dict(TASK_ONE_TOOLS)
-MODULES = ["detail", "documentation"]
+TOOLS = dict(TASK_ONE_TOOLS, **TASK_TWO_TOOLS)
+MODULES = ["detail", "document", "documentation", "editing", "family"]
 MUTATIONS = sorted(name for name, row in TOOLS.items() if row["kind"] == "mutation")
 READS = sorted(name for name, row in TOOLS.items() if row["kind"] == "read")
 ADDRESSED = sorted(name for name, row in TOOLS.items() if row["kind"] == "addressed")
@@ -324,6 +324,74 @@ def test_create_detail_line_keeps_its_optional_fields_out_of_the_body_unless_giv
 
 def test_route_replies_pass_through_format_response_unchanged_in_shape():
     text, _ = run_tool("create_sheet", response={"error": "boom", "status": "error"},
+                       document=DOCUMENT_SELECTOR)
+    assert isinstance(text, str) and "boom" in text
+
+
+def test_save_document_keeps_its_legacy_body_and_adds_only_the_document():
+    text, calls = run_tool("save_document", file_path="C:/Models/ESB.rvt", overwrite=False,
+                           document=DOCUMENT_SELECTOR, target=PROCESS_SELECTOR)
+    assert calls == [("POST", "/save_document/",
+                      {"file_path": "C:/Models/ESB.rvt", "overwrite": False,
+                       "document": DOCUMENT_SELECTOR}, {"target": PROCESS_SELECTOR})]
+    text, calls = run_tool("save_document", as_central=True)
+    assert calls == [("POST", "/save_document/",
+                      {"file_path": None, "overwrite": True, "as_central": True}, {})]
+    text, calls = run_tool("save_document")
+    assert calls == [("POST", "/save_document/", {"file_path": None, "overwrite": True}, {})]
+
+
+def test_save_document_still_refuses_a_mangled_path_before_sending_even_with_a_document():
+    text, calls = run_tool("save_document", file_path="C:\x08ad\new.rvt", document=DOCUMENT_SELECTOR,
+                           target=PROCESS_SELECTOR)
+    assert calls == []
+    assert "control characters" in text
+
+
+def test_load_family_still_refuses_a_mangled_path_before_sending():
+    text, calls = run_tool("load_family", file_path="C:\x08ad\new.rfa", document=DOCUMENT_SELECTOR)
+    assert calls == []
+    assert "control characters" in text
+
+
+def test_save_document_docstring_does_not_imply_activation_of_the_saved_document():
+    tools, _ = register_module("document")
+    lowered = " ".join(tools["save_document"].__doc__.lower().split())
+    assert "save as" in lowered
+    assert "412" in lowered and "nothing is activated" in lowered
+
+
+def test_list_families_forwards_its_filter_params_and_the_target_together():
+    text, calls = run_tool("list_families", contains="chair", limit=10, target=PROCESS_SELECTOR)
+    assert calls == [("GET", "/list_families/", None,
+                      {"params": {"contains": "chair", "limit": "10"}, "target": PROCESS_SELECTOR})]
+
+
+def test_edit_family_keeps_its_optional_fields_out_of_the_body_unless_given():
+    text, calls = run_tool("edit_family")
+    assert calls[0][2] == {"family_name": "Chair", "reload": True}
+    text, calls = run_tool("edit_family", type_name="T1", parameters={"W": 1}, new_type_name="T2",
+                           reload=False, document=DOCUMENT_SELECTOR)
+    assert calls[0][2] == {"family_name": "Chair", "reload": False, "type_name": "T1",
+                           "parameters": {"W": 1}, "new_type_name": "T2",
+                           "document": DOCUMENT_SELECTOR}
+
+
+def test_route_replies_pass_through_format_response_unchanged_in_shape():
+    text, _ = run_tool("delete_elements", response={"error": "boom", "status": "error"},
+                       document=DOCUMENT_SELECTOR)
+    assert isinstance(text, str) and "boom" in text
+    text, _ = run_tool("get_selected_elements", response="plain text reply")
+    assert text == "plain text reply"
+
+
+def test_a_plain_text_reply_from_a_read_is_returned_as_is():
+    text, _ = run_tool("get_selected_elements", response="plain text reply")
+    assert text == "plain text reply"
+
+
+def test_a_failed_mutation_reply_keeps_its_error_text():
+    text, _ = run_tool("delete_elements", response={"error": "boom", "status": "error"},
                        document=DOCUMENT_SELECTOR)
     assert isinstance(text, str) and "boom" in text
 

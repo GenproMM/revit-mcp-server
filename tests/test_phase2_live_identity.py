@@ -957,6 +957,17 @@ _ANSWERING_RE = re.compile(
     re.MULTILINE,
 )
 _ERROR_RE = re.compile(r"^Error: (\d{3}) - (.*)$", re.DOTALL)
+# activate_document appends readable exception diagnostics after the JSON body of an
+# activation-failed reply, introduced by this marker (tools/document_tools.py). Only
+# that exact block is cut off before the JSON is parsed; any other trailing text still
+# makes the body unparseable, as before.
+_DIAGNOSTICS_MARKER = "\n\nException diagnostics from Revit"
+
+
+def _without_diagnostics(body_text):
+    return body_text.split(_DIAGNOSTICS_MARKER, 1)[0]
+
+
 _LISTING_HEAD_RE = re.compile(r"^Open documents in this Revit process: (\d+)[ \t]*$")
 _LISTING_NONE = "No documents are open in this Revit process."
 _ACTIVE_FLAG = "  [ACTIVE]"
@@ -1006,7 +1017,7 @@ def _error_fields(text):
         return fields
     status = int(found.group(1))
     try:
-        body = json.loads(found.group(2))
+        body = json.loads(_without_diagnostics(found.group(2)))
     except ValueError:
         body = None
     fields["http_status"] = status
@@ -1915,6 +1926,29 @@ def _cmd_g3_read(args):
         "(--ui takes the word unchanged or changed; --data takes the word matches or mismatch)".format(path, step))
 
 
+def _exception_lines(text):
+    """Printable exception diagnostics of an activation-failed reply text; [] for any other reply.
+
+    Display only: it is never read by a classifier. The full reply text stays in the record.
+    """
+    found = _ERROR_RE.match(text) if isinstance(text, str) else None
+    if not found:
+        return []
+    try:
+        body = json.loads(_without_diagnostics(found.group(2)))
+    except ValueError:
+        return []
+    detail = body.get("exception") if isinstance(body, dict) else None
+    if not isinstance(detail, dict):
+        return []
+    lines = ["  exception: {}: {}".format(
+        detail.get("net_type") or detail.get("python_type"), detail.get("message"))]
+    for index, entry in enumerate(detail.get("inner_exceptions") or [], 1):
+        if isinstance(entry, dict):
+            lines.append("  inner exception {}: {}: {}".format(index, entry.get("net_type"), entry.get("message")))
+    return lines
+
+
 def _cmd_g4_case(args):
     values = _read_options(args, ("--in", "--case", "--target", "--port"), ("--in", "--case", "--target"))
     if (values is None or values["--case"] not in G4_CASES or _positive_int(values["--target"]) is None):
@@ -1979,6 +2013,8 @@ def _cmd_g4_case(args):
     print("  reply: kind={} http={} activation={} reason={} observed_active_document={}".format(
         reply["kind"], reply.get("http_status"), reply.get("activation"), reply.get("reason"),
         reply.get("observed_active_document")))
+    for line in _exception_lines(reply.get("text")):
+        print(line)
     print("  active before: {}  after: {}".format(
         entry["before_listing"].get("active_document"), entry["after_listing"].get("active_document")))
     print("OPEN DOCUMENTS now (numbers for the next --target):")

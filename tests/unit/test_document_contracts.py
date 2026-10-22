@@ -2573,7 +2573,7 @@ def test_activation_failed_reply_names_the_net_type_inner_chain_and_stack():
             raise python_exc_with_net(net)
 
     app, plain, reg, tokens, docs = rig(mode="raise")
-    uiapp = NetRaisingUIApp(app, docs["other"], "raise")
+    uiapp = NetRaisingUIApp(app, docs["other"], "noop")   # the parent must not raise first
     status, payload = activate(uiapp, reg, tokens["coord"])
     assert status == 500 and len(uiapp.calls) == 1
     detail = payload["exception"]

@@ -15,6 +15,7 @@ text is `str` and bytes are `bytes`. Behaviour on the Revit side is unchanged.
 """
 
 import json
+import logging
 
 # `bytes is str` is the discriminator, and the probe has to be this one: it is
 # true only on Python 2, where the two really are one type.
@@ -93,6 +94,138 @@ def normalize_string(text):
         return sanitize_string(text).strip()
     except Exception:
         return "Unnamed"
+
+
+# ---------------------------------------------------------------- exception diagnostics
+#
+# Revit often raises a .NET exception whose Python-visible text is generic ("A
+# managed exception was thrown by Revit or by one of its external applications.")
+# while the real cause sits in the .NET type, the InnerException chain or the
+# stack trace. exception_diagnostics() collects those into one small dict of
+# bounded plain strings for a route to put in its error reply. Duck-typed and
+# pure, so it is unit tested under CPython with fake exception objects.
+
+_DIAG_MESSAGE_CAP = 1000
+_DIAG_INNER_MESSAGE_CAP = 500
+_DIAG_STACK_CAP = 2000
+_DIAG_MAX_INNER = 5
+_DIAG_TRUNCATED = "...[truncated]"
+
+logger = logging.getLogger(__name__)
+
+
+def _diag_read(obj, name):
+    """getattr that returns None instead of raising (a hostile wrapper may raise anything)."""
+    try:
+        return getattr(obj, name)
+    except AttributeError:
+        return None  # absent, which is the normal case for a plain Python exception
+    except Exception:
+        logger.warning("exception diagnostics: attribute {} could not be read".format(name))
+        return None
+
+
+def _diag_text(value, cap):
+    """(bounded text, truncated); (None, False) for None or anything that cannot be rendered."""
+    if value is None:
+        return None, False
+    try:
+        text = sanitize_value(value)
+        if len(text) > cap:
+            return text[:cap] + _DIAG_TRUNCATED, True
+        return text, False
+    except Exception:
+        logger.warning("exception diagnostics: a value could not be rendered as text")
+        return None, False
+
+
+def _diag_net_type_name(net):
+    """Full .NET type name of ``net`` via GetType().FullName, or None."""
+    getter = _diag_read(net, "GetType")
+    if getter is None:
+        return None
+    try:
+        net_type = getter()
+    except Exception:
+        logger.warning("exception diagnostics: GetType() failed")
+        return None
+    return _diag_text(_diag_read(net_type, "FullName"), _DIAG_INNER_MESSAGE_CAP)[0]
+
+
+def _diag_net_exception(exc):
+    """The .NET exception behind ``exc`` (clsException, or exc itself when it is one), or None."""
+    for candidate in (_diag_read(exc, "clsException"), exc):
+        if candidate is not None and _diag_read(candidate, "GetType") is not None:
+            return candidate
+    return None
+
+
+def _diag_stack_trace(net):
+    """(text, truncated) from the .NET StackTrace, falling back to ToString()."""
+    trace = _diag_read(net, "StackTrace")
+    if trace is None or not _diag_text(trace, 1)[0]:
+        try:
+            trace = net.ToString()
+        except Exception:
+            logger.warning("exception diagnostics: ToString() failed")
+            trace = None
+    return _diag_text(trace, _DIAG_STACK_CAP)
+
+
+def _diag_inner_chain(net):
+    """[{net_type, message}] for the InnerException chain, at most _DIAG_MAX_INNER deep."""
+    chain = []
+    current = net
+    for _ in range(_DIAG_MAX_INNER):
+        inner = _diag_read(current, "InnerException")
+        if inner is None:
+            break
+        chain.append({
+            "net_type": _diag_net_type_name(inner),
+            "message": _diag_text(_diag_read(inner, "Message"), _DIAG_INNER_MESSAGE_CAP)[0],
+        })
+        current = inner
+    return chain
+
+
+def exception_diagnostics(exc):
+    """Bounded plain-string diagnostics of one caught exception; never raises.
+
+    Keys: python_type (class name), net_type (.NET full type name or None),
+    message (Python text of the exception), net_message (the .NET Message or
+    None), inner_exceptions (list of {net_type, message}, at most five deep),
+    stack_trace (.NET stack trace, at most 2000 characters, or None) and
+    stack_trace_truncated. Duck-typed over IronPython (a Python exception exposes
+    its .NET exception as clsException, a caught .NET exception is its own) and
+    over the fake objects the unit tests use. Non-ASCII text is kept: the routes
+    serializer escapes it. Nothing here calls the Revit API.
+    """
+    try:
+        python_type = type(exc).__name__
+    except Exception:
+        python_type = "unknown"
+    info = {
+        "python_type": python_type,
+        "net_type": None,
+        "message": None,
+        "net_message": None,
+        "inner_exceptions": [],
+        "stack_trace": None,
+        "stack_trace_truncated": False,
+    }
+    try:
+        info["message"] = _diag_text(exc, _DIAG_MESSAGE_CAP)[0] if exc is not None else None
+        net = _diag_net_exception(exc)
+        if net is not None:
+            info["net_type"] = _diag_net_type_name(net)
+            info["net_message"] = _diag_text(_diag_read(net, "Message"), _DIAG_MESSAGE_CAP)[0]
+            if net is exc and info["net_message"]:
+                info["message"] = info["net_message"]
+            info["inner_exceptions"] = _diag_inner_chain(net)
+            info["stack_trace"], info["stack_trace_truncated"] = _diag_stack_trace(net)
+    except Exception:
+        logger.warning("exception diagnostics: collection stopped early")
+    return info
 
 
 def parse_request_data(data):

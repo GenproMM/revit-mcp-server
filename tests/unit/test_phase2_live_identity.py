@@ -2091,6 +2091,40 @@ def test_usage_names_every_g34_command():
         assert name in proc.USAGE or name in proc.G34_USAGE, name
 
 
+ACTIVATION_FAILED_BODY = {
+    "error": "Activating document failed", "error_code": "activation-failed",
+    "reason": "activation-failed", "document": {"document": "doc1.aaaaaaaaaaaa.2"},
+    "observed_active_document": None,
+    "exception": {"python_type": "InvalidOperationException",
+                  "net_type": "Autodesk.Revit.Exceptions.InvalidOperationException",
+                  "message": "A managed exception was thrown",
+                  "inner_exceptions": [{"net_type": "System.IO.IOException", "message": "root"}],
+                  "stack_trace": "   at Frame()"},
+}
+
+
+def test_g4_activation_failed_reply_keeps_its_full_text_and_classification_with_diagnostics():
+    raw_json = "Error: 500 - " + json.dumps(ACTIVATION_FAILED_BODY)
+    appended = raw_json + "\n\nException diagnostics from Revit (rendered by the tool):\n  exception: x"
+    plain = proc.build_activation_entry(raw_json)
+    rendered = proc.build_activation_entry(appended)
+    assert rendered["text"] == appended                      # the full reply text is recorded
+    for key in ("kind", "http_status", "error_code", "reason", "document"):
+        assert rendered[key] == plain[key]
+    assert rendered["http_status"] == 500 and rendered["error_code"] == "activation-failed"
+
+
+def test_g4_case_prints_the_exception_class_and_message_lines():
+    lines = proc._exception_lines(
+        "Error: 500 - " + json.dumps(ACTIVATION_FAILED_BODY) + "\n\nException diagnostics from Revit: x")
+    assert lines[0] == ("  exception: Autodesk.Revit.Exceptions.InvalidOperationException: "
+                        "A managed exception was thrown")
+    assert "System.IO.IOException: root" in lines[1]
+    assert proc._exception_lines('Error: 422 - {"error": "no"}') == []
+    assert proc._exception_lines("Error: 500 - not json") == []
+    assert proc._exception_lines(None) == []
+
+
 def test_non_ascii_document_titles_survive_capture_and_printing(tmp_path, bench, capsys):
     bench.docs[0]["title"] = "Проект Альфа"
     raw = str(tmp_path / "g34.json")

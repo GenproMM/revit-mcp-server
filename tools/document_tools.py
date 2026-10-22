@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Document tools — saving and persistence"""
 
+import json
+
 from mcp.server.fastmcp import Context
 from .utils import describe_broken_path, format_response
 
@@ -58,6 +60,54 @@ def _render_activation(payload):
     if identity_line:
         lines.append(identity_line)
     return "\n".join(lines)
+
+
+def _failure_body(response):
+    """The reply body as a dict, from a dict reply or an "Error: <code> - <json>" text; else None."""
+    if isinstance(response, dict):
+        return response
+    if isinstance(response, str) and response.startswith("Error: "):
+        start = response.find(" - ")
+        if start >= 0:
+            try:
+                body = json.loads(response[start + 3:])
+            except ValueError:
+                return None
+            if isinstance(body, dict):
+                return body
+    return None
+
+
+def _activation_exception_lines(response):
+    """Readable lines for the exception diagnostics of an activation-failed reply, or [].
+
+    Only the documented "exception" dict of an activation-failed body is rendered;
+    anything else (a refusal, other failures, a malformed body) adds nothing.
+    """
+    body = _failure_body(response)
+    if body is None or body.get("error_code") != "activation-failed":
+        return []
+    detail = body.get("exception")
+    if not isinstance(detail, dict):
+        return []
+    kind = detail.get("net_type") or detail.get("python_type") or "unknown"
+    lines = ["Exception diagnostics from Revit (the activation call was made once and not retried):",
+             "  exception: {}: {}".format(kind, detail.get("message") or detail.get("net_message") or "")]
+    if detail.get("python_type"):
+        lines.append("  python type: {}".format(detail["python_type"]))
+    if detail.get("net_message") and detail.get("net_message") != detail.get("message"):
+        lines.append("  .NET message: {}".format(detail["net_message"]))
+    inner = detail.get("inner_exceptions")
+    for index, entry in enumerate(inner if isinstance(inner, list) else [], 1):
+        if isinstance(entry, dict):
+            lines.append("  inner exception {}: {}: {}".format(
+                index, entry.get("net_type") or "unknown", entry.get("message") or ""))
+    trace = detail.get("stack_trace")
+    if trace:
+        lines.append("  stack trace{}:".format(" (truncated)" if detail.get("stack_trace_truncated") else ""))
+        for row in str(trace).splitlines():
+            lines.append("    {}".format(row.rstrip()))
+    return lines
 
 
 def _active_token_text(token):
@@ -204,7 +254,12 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
         that answered. Success is reported only when the re-read active
         document is the requested one; otherwise the text says it was not
         activated and names the document that is active. A refusal or failure
-        gives the HTTP status, the reason and the same identity details.
+        gives the HTTP status, the reason and the same identity details. When
+        the reason is activation-failed (Revit raised an error on the one
+        activation call, which is never retried) the reply also carries
+        exception diagnostics: the exception type (including the .NET type), its
+        message, the chain of inner exceptions and a truncated stack trace, so
+        the real cause is visible and not only a generic "managed exception" text.
 
         Args:
             document: The opaque "document" selector from list_documents (required)
@@ -225,7 +280,9 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
         if (isinstance(response, dict) and not response.get("error")
                 and response.get("activation") in ("activated", "already-active")):
             return format_response(_render_activation(response))
-        return format_response(response)
+        text = format_response(response)
+        extra = _activation_exception_lines(response)
+        return text + "\n\n" + "\n".join(extra) if extra else text
 
     @mcp.tool()
     async def read_document_summary(document: str, target: str = None, ctx: Context = None) -> str:

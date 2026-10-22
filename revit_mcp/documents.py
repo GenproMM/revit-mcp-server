@@ -163,6 +163,7 @@ def run_activation(selector, uiapp, read_snapshot=None, registry=None, file_exis
     document Equals the target (else 409 with the observed active document).
     """
     from .identity import current_document_descriptors, read_live_snapshot, resolve_document
+    from .textutils import exception_diagnostics
 
     read = read_snapshot or read_live_snapshot
     try:
@@ -233,6 +234,10 @@ def run_activation(selector, uiapp, read_snapshot=None, registry=None, file_exis
             "error_code": "activation-failed",
             "reason": "activation-failed",
             "document": descriptor,
+            # Bounded plain strings about the exception itself (.NET type, inner
+            # chain, stack trace), so a generic "managed exception" text is not the
+            # only evidence. Collected from the exception object only; no API call.
+            "exception": exception_diagnostics(exc),
         }
         return 500, _with_observed(payload, observed, observed_error)
 

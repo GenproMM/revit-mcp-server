@@ -1428,7 +1428,7 @@ G4_STOP_CASES = [
     ("workshared-wrong-reason", _case_reply(CW, "reason", "detached"), "refusal-reason-mismatch"),
     ("unsaved-ui-changed-by-the-refusal", _set(CU + ["after_listing", "active_document"], SEL_U),
      "active-document-changed"),
-    ("detached-ui-changed-by-the-refusal", _set(CD + ["after_listing", "active_document"], SEL_A),
+    ("detached-ui-changed-by-the-refusal", _set(CD + ["after_listing", "active_document"], SEL_D),
      "active-document-changed"),
     ("unsaved-reply-observed-another-document", _case_reply(CU, "observed_active_document", SEL_U),
      "observed-active-mismatch"),
@@ -2089,3 +2089,14 @@ def test_the_identity_commands_are_unchanged_and_keep_g3_g4_as_not_run(tmp_path,
 def test_usage_names_every_g34_command():
     for name in ("g34-template", "g34-start", "g3-read", "g4-case", "g34-observe", "g34-classify"):
         assert name in proc.USAGE or name in proc.G34_USAGE, name
+
+
+def test_non_ascii_document_titles_survive_capture_and_printing(tmp_path, bench, capsys):
+    bench.docs[0]["title"] = "Проект Альфа"
+    raw = str(tmp_path / "g34.json")
+    assert cmd("g34-start", "--out", raw) == 0
+    assert cmd("g3-read", "--in", raw, "--slot", "a_active_b_read", "--target", "2") == 0
+    capsys.readouterr()
+    assert load(raw)["listing_0"]["documents"][0]["title"] == "Проект Альфа"
+    assert cmd("g34-classify", raw) == 1  # engineer fields unset: nothing is observed
+    assert G3_OBS not in capsys.readouterr().out

@@ -11,7 +11,6 @@ The handler takes no injected document: a process with no open document must
 still answer with an empty list rather than a 503.
 """
 
-from pyrevit import routes
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 def register_documents_routes(api):
     """Register the document listing route with the API"""
+    from pyrevit import routes  # inside: keeps cold start cheap and the module importable offline
 
     @api.route("/documents/", methods=["GET"])
     def list_documents():

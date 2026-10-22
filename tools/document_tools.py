@@ -28,6 +28,38 @@ def _render_listing(payload):
     return "\n".join(lines)
 
 
+def _identity_line(payload):
+    identity = payload.get("process_identity")
+    if isinstance(identity, dict):
+        return "Answering Revit process: PID {}; Revit {}; port {}; session {}".format(
+            identity.get("pid"), identity.get("revit_version"),
+            identity.get("actual_port"), identity.get("session_token"))
+    if payload.get("identity_error"):
+        return "Answering process identity unavailable: {}".format(payload["identity_error"])
+    return None
+
+
+def _describe(entry):
+    return "{} (document {}; path: {})".format(
+        entry.get("title", ""), entry.get("document", ""), entry.get("path") or "(never saved)")
+
+
+def _render_activation(payload):
+    """Readable text for a received /activate_document/ success, naming the re-read active document."""
+    if payload.get("activation") == "activated":
+        lines = ["Activated: {}".format(_describe(payload.get("document") or {}))]
+    else:
+        lines = ["Already the active document, no activation call was made: {}".format(
+            _describe(payload.get("document") or {}))]
+    observed = payload.get("observed_active_document")
+    if isinstance(observed, dict):
+        lines.append("Active document now (re-read from Revit): {}".format(_describe(observed)))
+    identity_line = _identity_line(payload)
+    if identity_line:
+        lines.append(identity_line)
+    return "\n".join(lines)
+
+
 def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
     """Register document persistence tools with the MCP server."""
     _ = revit_image  # Acknowledge unused parameter
@@ -69,6 +101,60 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
         if (isinstance(response, dict) and not response.get("error")
                 and isinstance(response.get("documents"), list)):
             return format_response(_render_listing(response))
+        return format_response(response)
+
+    @mcp.tool()
+    async def activate_document(document: str, target: str = None, ctx: Context = None) -> str:
+        """Make one already-open Revit document the active one, as an explicit action.
+
+        This is the only way to switch the document shown in the Revit window.
+        Reads and mutations never activate a document implicitly: a call that
+        names a document that is open but not active is refused (HTTP 412), and
+        you then use this tool and retry. Get the "document" value from
+        list_documents.
+
+        Supported: a document that is already open, has been saved, is not
+        workshared and whose file exists on disk. It is activated using its own
+        file path, and nothing is saved, reopened or opened from another path.
+        If it is already the active document the call succeeds without doing
+        anything.
+
+        Everything else is refused before Revit is touched, with one of these
+        reasons: unsaved (never saved, no path), detached (a detached copy),
+        no-usable-file-path (the path is not an existing file, e.g. a cloud
+        path), linked-unsupported, family-unmeasured, cloud-unmeasured,
+        workshared-unmeasured (any workshared model, even a saved one) and
+        eligibility-unreadable (a needed property could not be read). The
+        "unmeasured" classes have not been verified safe, so they are refused,
+        not tried. A selector that is closed, stale, unknown, ambiguous or
+        missing is also refused; no other document is ever activated instead.
+
+        Returns the activated document and, from a fresh read of Revit, the
+        document that is active now, plus a final line naming the Revit process
+        that answered. Success is reported only when the re-read active
+        document is the requested one; otherwise the text says it was not
+        activated and names the document that is active. A refusal or failure
+        gives the HTTP status, the reason and the same identity details.
+
+        Args:
+            document: The opaque "document" selector from list_documents (required)
+            target: Optional opaque process selector from discover_revit_targets;
+                omit it only when exactly one Revit process is usable
+            ctx: MCP context for logging
+        """
+        if not isinstance(document, str) or not document.strip():
+            return format_response({
+                "error": "document is required: pass the 'document' value of one document "
+                         "from list_documents. Activation never chooses a default."})
+        if ctx:
+            await ctx.info("Activating document {}".format(document))
+        options = {}
+        if target is not None:
+            options["target"] = target
+        response = await revit_post("/activate_document/", {"document": document}, ctx, **options)
+        if (isinstance(response, dict) and not response.get("error")
+                and response.get("activation") in ("activated", "already-active")):
+            return format_response(_render_activation(response))
         return format_response(response)
 
     @mcp.tool()

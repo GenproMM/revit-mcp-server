@@ -89,9 +89,16 @@ def get_process_identity(revit_version):
     }
 
 
-def process_identity_or_error():
-    """(identity, None) or (None, reason): a route reports, it never raises."""
+def process_identity_or_error(uiapp=None):
+    """(identity, None) or (None, reason): a route reports, it never raises.
+
+    A route handler that pyRevit dispatches in the Revit API context passes the
+    ``uiapp`` it was injected with; the version is then read from that object. Without
+    one the process-global HOST_APP is used, as before.
+    """
     try:
+        if uiapp is not None:
+            return get_process_identity(uiapp.Application.VersionNumber), None
         from pyrevit import HOST_APP
 
         return get_process_identity(HOST_APP.app.VersionNumber), None
@@ -333,16 +340,26 @@ def get_document_registry(store=None):
     return registry
 
 
-def read_live_snapshot():
+def read_live_snapshot(uiapp=None):
     """(documents, active_document) read from Revit now; never cached.
 
     ``documents`` is a fresh enumeration of Application.Documents; the active
     document is the UI's active document, or None when no document is active.
-    """
-    from pyrevit import HOST_APP
 
-    documents = [document for document in HOST_APP.app.Documents]
-    ui_document = HOST_APP.uiapp.ActiveUIDocument
+    A route handler that pyRevit dispatches in the Revit API context passes the
+    ``uiapp`` it was injected with, and everything is then read through that object
+    (``uiapp.Application`` and ``uiapp.ActiveUIDocument``). Without one the
+    process-global HOST_APP is used, as before.
+    """
+    if uiapp is not None:
+        application = uiapp.Application
+    else:
+        from pyrevit import HOST_APP
+
+        uiapp = HOST_APP.uiapp
+        application = HOST_APP.app
+    documents = [document for document in application.Documents]
+    ui_document = uiapp.ActiveUIDocument
     return documents, (ui_document.Document if ui_document is not None else None)
 
 

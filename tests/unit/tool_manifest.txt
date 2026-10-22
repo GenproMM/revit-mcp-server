@@ -19,6 +19,7 @@ create_structural_framing
 create_surface_based_element
 create_view
 delete_elements
+discover_revit_targets
 edit_family
 execute_revit_code
 export_document

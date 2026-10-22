@@ -289,6 +289,170 @@ async def resolve_target(selector: str) -> dict:
     return target
 
 
+# --- Discovery (02-03, D-01/D-02/D-04) ---------------------------------------
+# Discovery reports what a complete netstat snapshot shows inside a bounded probe
+# window and what each singleton listener answers on GET /status/. It never
+# predicts which port a process will take, never uses /routes/sisters, and never
+# turns an unavailable inventory into an empty list.
+
+DISCOVERY_PORT_SPAN = 128          # probe window: DEFAULT_REVIT_PORT .. +SPAN-1, plus REVIT_PORT
+DISCOVERY_PROBE_HOST = "127.0.0.1"
+DISCOVERY_PROBE_TIMEOUT = 3.0
+
+
+def _discovery_ports():
+    ports = set(range(DEFAULT_REVIT_PORT, DEFAULT_REVIT_PORT + DISCOVERY_PORT_SPAN))
+    ports.add(REVIT_PORT)
+    return sorted(p for p in ports if 1 <= p <= 65535)
+
+
+def _selector_for(target):
+    """Encode a validated incarnation as the opaque revit1 selector parse_target reads."""
+    raw = json.dumps({"host": target["host"], "port": target["port"], "pid": target["pid"],
+                      "session_token": target["session_token"]},
+                     separators=(",", ":")).encode("utf-8")
+    return "revit1:" + base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _identity_fields_valid(identity):
+    """Shape of a received process_identity, before comparing it with anything."""
+    if not isinstance(identity, dict):
+        return False
+    if type(identity.get("pid")) is not int or type(identity.get("actual_port")) is not int:
+        return False
+    token = identity.get("session_token")
+    try:
+        if not isinstance(token, str) or str(uuid.UUID(token)) != token:
+            return False
+    except ValueError:
+        return False
+    version = identity.get("revit_version")
+    return isinstance(version, str) and bool(version.strip())
+
+
+def _json_or_none(response):
+    try:
+        return response.json()
+    except ValueError:
+        return None
+
+
+_INVENTORY_REFUSAL = (
+    "Listener inventory unavailable (the full netstat listing was missing, "
+    "malformed or incomplete); request not sent. This is not proof that no Revit "
+    "is running. Rediscover targets once the OS listing works."
+)
+
+
+async def _probe_port(port, owner, timeout):
+    """Handshake with ONE singleton listener: ("usable"|"unusable", entry). Never raises."""
+    base = {"port": port, "pids": [owner]}
+    try:
+        async with _selected_client({"host": DISCOVERY_PROBE_HOST, "port": port}) as client:
+            response = await client.get("status/", timeout=timeout)
+    except Exception as exc:
+        name = type(exc).__name__
+        return "unusable", dict(base, reason="handshake-failed", detail=(
+            "PID {} listens on port {} but did not answer the identity handshake ({}): "
+            "Revit may still be initializing, the Routes server may be hung, or this "
+            "is not Revit. Not offered as a target.".format(owner, port, name)))
+    payload = _json_or_none(response) if response.status_code in (200, 503) else None
+    identity = payload.get("process_identity") if isinstance(payload, dict) else None
+    if not _identity_fields_valid(identity):
+        return "unusable", dict(base, reason="not-revit-status", detail=(
+            "PID {} listens on port {} and answered HTTP {}, but not with a Revit "
+            "process identity (another service, or an extension without identity). "
+            "Not offered as a target.".format(owner, port, response.status_code)))
+    if identity["pid"] != owner or identity["actual_port"] != port:
+        return "unusable", dict(base, reason="identity-mismatch", detail=(
+            "PID {} owns port {} but the responder claims PID {} on port {}. "
+            "Not offered as a target.".format(owner, port, identity["pid"], identity["actual_port"])))
+    target = {"host": DISCOVERY_PROBE_HOST, "port": port, "pid": owner,
+              "session_token": identity["session_token"]}
+    return "usable", {
+        "selector": _selector_for(target), "host": target["host"], "port": port, "pid": owner,
+        "session_token": identity["session_token"],
+        "revit_version": identity["revit_version"],
+        "document_open": response.status_code == 200,
+    }
+
+
+async def discover_targets(timeout=DISCOVERY_PROBE_TIMEOUT):
+    """List usable Revit incarnations and unusable listeners; the discovery facade.
+
+    Returns {"status": "ok"|"inventory-unavailable", "message": str, "usable": [...],
+    "unusable": [...]}. A port with more than one LISTENING PID is reported as an
+    unusable collision naming every PID and is never handshaken. An unavailable
+    inventory is its own status with empty lists: it is never "no Revit".
+    """
+    ports = _discovery_ports()
+    snapshot = await asyncio.to_thread(listener_snapshot, ports)
+    refusal = {"status": "inventory-unavailable", "message": _INVENTORY_REFUSAL,
+               "usable": [], "unusable": []}
+    if not isinstance(snapshot, dict):
+        return refusal
+    unusable, probes = [], []
+    for port in ports:
+        owners = snapshot.get(port)
+        if not isinstance(owners, list) or any(type(p) is not int or p <= 0 for p in owners):
+            return refusal
+        owners = sorted(set(owners))
+        if len(owners) > 1:
+            unusable.append({"port": port, "pids": owners, "reason": "listener-collision", "detail": (
+                "Port {} has {} LISTENING processes (PIDs {}): requests would land on an "
+                "unpredictable one. Neither is offered as a target; close the extra "
+                "Revit.".format(port, len(owners), ", ".join(str(p) for p in owners)))})
+        elif owners:
+            probes.append((port, owners[0]))
+    answers = await asyncio.gather(*[_probe_port(p, o, timeout) for p, o in probes])
+    usable = []
+    for kind, entry in answers:
+        (usable if kind == "usable" else unusable).append(entry)
+    usable.sort(key=lambda e: e["port"])
+    unusable.sort(key=lambda e: e["port"])
+    return {"status": "ok", "message": "", "usable": usable, "unusable": unusable}
+
+
+def _candidate_lines(usable):
+    return "\n".join("- PID {}; Revit {}; port {}; target={}".format(
+        e["pid"], e["revit_version"], e["port"], e["selector"]) for e in usable)
+
+
+async def resolve_default_target():
+    """The target of a call that names none: exactly one usable incarnation, else refuse.
+
+    Never the latest, the active-looking or the default-port process (D-02). A
+    port collision anywhere in the probe window also refuses, because a hidden
+    second Revit means "the only one" is not established.
+    """
+    found = await discover_targets()
+    if found["status"] != "ok":
+        raise ValueError(found["message"])
+    usable, unusable = found["usable"], found["unusable"]
+    collisions = [u for u in unusable if u["reason"] == "listener-collision"]
+    if collisions:
+        raise ValueError("Listener collision: {}; request not sent. Close the extra Revit "
+                         "or choose a target from discover_revit_targets.".format(
+                             "; ".join("port {} PIDs {}".format(
+                                 u["port"], ", ".join(str(p) for p in u["pids"]))
+                                 for u in collisions)))
+    if not usable:
+        extra = ""
+        if unusable:
+            extra = " Unusable listeners: {}".format(
+                "; ".join("port {} PID {} ({})".format(u["port"], u["pids"][0], u["reason"])
+                          for u in unusable))
+        raise ValueError("No usable Revit process found in the probed local ports; request "
+                         "not sent. Start Revit or check discover_revit_targets.{}".format(extra))
+    if len(usable) > 1:
+        raise ValueError("Multiple usable Revit processes ({}); request not sent. Pass "
+                         "target=<selector> to choose one:\n{}".format(
+                             len(usable), _candidate_lines(usable)))
+    entry = usable[0]
+    return {"host": entry["host"], "port": entry["port"], "pid": entry["pid"],
+            "session_token": entry["session_token"]}
+
+
 def _selected_client(target):
     # A scoped status-only tracer; per-incarnation pools and locks belong to 02-03.
     host = target["host"]
@@ -342,6 +506,9 @@ async def revit_get(endpoint: str, ctx: Any = None, target: Optional[str] = None
 # Seam read with getattr by the status tool: tool modules never import the
 # transport, and the registrar signature is pinned by scripts/conventions.py.
 revit_get.revit_target = REVIT_TARGET
+# Discovery facade (02-03): tools reach discovery through the injected callable,
+# never by importing this module, so the four-argument registrar stays fixed.
+revit_get.discover_targets = discover_targets
 
 
 async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None,

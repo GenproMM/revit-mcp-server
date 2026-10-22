@@ -59,20 +59,33 @@ waiting for Revit (D-13).
 
 Target
 ------
-REVIT_HOST and REVIT_PORT are read once at import. An invalid REVIT_PORT makes
-the server refuse to start. One process means one target; the port names a
-launch slot, not a model. REVIT_PORT is a deployment and development setting:
-users share one revit entry and do not add entries. An explicit incarnation
-selector currently supports only GET /status/ (02-01); all other selected calls
-refuse rather than falling back to this configured address. No-selector calls
-retain the legacy configured path, not discovery/ambiguity guarantees. Discovery,
-full selected routing and incarnation-keyed locks remain 02-03 (D-29).
+One shared revit entry serves every Revit process on this machine (D-01). A
+call names its process with an opaque revit1 selector (the target argument, from
+discover_revit_targets), or names none: then exactly one usable process must
+exist, otherwise the call is refused with the candidates and nothing is sent
+(D-02). Never the latest, the active-looking or the default-port process, and
+never a mutable per-session choice. A process incarnation is host, port, PID and
+session token: a restart is a new incarnation even on a reused port or PID, so
+its selector must be rediscovered.
 
-Selected status checks a complete Windows netstat snapshot before HTTP and
-compares the received PID, bound port and startup token. Snapshot-to-connect is
-still a finite TOCTOU window, not a socket reservation or authentication. Identity
-is initialized at extension startup in a fresh process, not literal OS creation.
-The scoped status client never mutates the legacy base URL or a shared selection.
+Each incarnation owns one pooled client and one lock (D-03). Calls to one
+process queue behind each other whatever document they address; calls to
+different processes overlap. A superseded incarnation's state is evicted, and an
+in-flight call keeps its client until it finishes.
+
+Before every requested send the bridge reads a complete Windows netstat snapshot,
+refuses a missing, duplicated or foreign listener, and proves the incarnation with
+a GET /status/ identity handshake (PID, bound port, startup token). A refusal says
+the request was NOT sent. Snapshot-to-send is still a finite TOCTOU window, not a
+socket reservation or authentication. Identity is initialized at extension
+startup in a fresh process, not literal OS creation. A usable process with no open
+document answers its handshake with HTTP 503 and stays addressable.
+
+REVIT_HOST and REVIT_PORT are read once at import. An invalid REVIT_PORT makes
+the server refuse to start. They no longer route a call: REVIT_PORT only adds its
+port to the discovery probe window, and discovery probes loopback addresses.
+REVIT_PORT is a deployment and development setting: users share one revit entry
+and do not add entries.
 
 This module must not import mcp at module level: it is imported on the cold
 start path and has to stay cheap.
@@ -124,41 +137,6 @@ REVIT_HOST = os.environ.get("REVIT_HOST", "localhost")
 REVIT_PORT = _resolve_port(os.environ.get("REVIT_PORT"))
 BASE_URL = f"http://{REVIT_HOST}:{REVIT_PORT}/genpro_revit_mcp"
 REVIT_TARGET = "{}:{}".format(REVIT_HOST, REVIT_PORT)
-
-# Shared HTTP client with keep-alive connection pooling. Reusing a single
-# AsyncClient across all tool calls avoids the per-request TCP/handshake cost
-# of creating a new client each time — meaningful when a session fires dozens
-# of calls at the local Routes server.
-_http_client: Optional[httpx.AsyncClient] = None
-
-# One lock per Revit target; one target per process, so one module-global lock.
-# Created lazily so it binds to the running event loop, not the import-time one.
-_lock: Optional[asyncio.Lock] = None
-
-
-def _get_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(
-            base_url=BASE_URL,
-            # The MCP subprocess inherits Windows proxy settings from the
-            # desktop agent.  httpx may then send localhost traffic through
-            # that proxy unless NO_PROXY happens to be configured, which the
-            # pyRevit Routes HTTP/1.0 server surfaces as an empty ReadError.
-            # The bridge is strictly local, so environment proxies must never
-            # participate in these requests.
-            trust_env=False,
-            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
-        )
-    return _http_client
-
-
-def _get_lock() -> asyncio.Lock:
-    global _lock
-    if _lock is None:
-        _lock = asyncio.Lock()
-    return _lock
-
 
 def parse_target(selector: str) -> dict:
     """Decode a local incarnation selector, not an authentication credential."""
@@ -272,7 +250,11 @@ def listener_snapshot(ports, run=subprocess.run, platform=None):
 
 async def resolve_target(selector: str) -> dict:
     """Validate ownership before any HTTP; a snapshot does not reserve a socket."""
-    target = parse_target(selector)
+    return await _check_owner(parse_target(selector))
+
+
+async def _check_owner(target: dict) -> dict:
+    """Exactly one LISTENING PID on the target's port, and it is the target's PID."""
     snapshot = await asyncio.to_thread(listener_snapshot, [target["port"]])
     if not isinstance(snapshot, dict):
         raise ValueError("Listener inventory unavailable; request not sent. Rediscover targets.")
@@ -298,6 +280,7 @@ async def resolve_target(selector: str) -> dict:
 DISCOVERY_PORT_SPAN = 128          # probe window: DEFAULT_REVIT_PORT .. +SPAN-1, plus REVIT_PORT
 DISCOVERY_PROBE_HOST = "127.0.0.1"
 DISCOVERY_PROBE_TIMEOUT = 3.0
+HANDSHAKE_TIMEOUT = 10.0           # cap on the identity handshake before a locked send
 
 
 def _discovery_ports():
@@ -410,6 +393,9 @@ async def discover_targets(timeout=DISCOVERY_PROBE_TIMEOUT):
         (usable if kind == "usable" else unusable).append(entry)
     usable.sort(key=lambda e: e["port"])
     unusable.sort(key=lambda e: e["port"])
+    for entry in usable:
+        # A freshly proven incarnation supersedes older state on its port.
+        await _retire_stale(entry["host"], entry["port"], _target_key(entry))
     return {"status": "ok", "message": "", "usable": usable, "unusable": unusable}
 
 
@@ -453,54 +439,221 @@ async def resolve_default_target():
             "session_token": entry["session_token"]}
 
 
+# --- Per-incarnation state (02-03, D-03) --------------------------------------
+# One pooled client and one lock per validated incarnation. The key is the whole
+# incarnation, never the port or the document: a process restarted on a reused
+# port or PID gets fresh state, and two documents of one process share one lock.
+
+class _TargetState(object):
+    """Pool, queue and bookkeeping of ONE process incarnation."""
+
+    __slots__ = ("key", "client", "lock", "users", "verified", "evicted")
+
+    def __init__(self, key):
+        self.key = key
+        self.client = None
+        self.lock = asyncio.Lock()
+        self.users = 0          # calls currently queued on, holding or using this state
+        self.verified = False   # an identity handshake has succeeded for this key
+        self.evicted = False    # superseded: closed when the last user lets go
+
+
+_states = {}
+
+
+def _target_key(target):
+    host = target["host"]
+    if host == "localhost":
+        host = "127.0.0.1"
+    return (host, target["port"], target["pid"], target["session_token"])
+
+
+def _state_for(target):
+    key = _target_key(target)
+    state = _states.get(key)
+    if state is None:
+        state = _states[key] = _TargetState(key)
+    return state
+
+
+def _client_of(state, target):
+    if state.client is None or state.client.is_closed:
+        state.client = _selected_client(target)
+    return state.client
+
+
+def _get_client(target):
+    return _client_of(_state_for(target), target)
+
+
+def _get_lock(target):
+    return _state_for(target).lock
+
+
 def _selected_client(target):
-    # A scoped status-only tracer; per-incarnation pools and locks belong to 02-03.
+    """Build (not cache) a client for one process; _get_client pools it per incarnation."""
     host = target["host"]
     if host == "::1":
         host = "[::1]"
     return httpx.AsyncClient(
         base_url="http://{}:{}/genpro_revit_mcp/".format(host, target["port"]),
+        # The MCP subprocess inherits Windows proxy settings from the desktop
+        # agent. httpx may then send localhost traffic through that proxy unless
+        # NO_PROXY happens to be configured, which the pyRevit Routes HTTP/1.0
+        # server surfaces as an empty ReadError. The bridge is strictly local, so
+        # environment proxies must never participate in these requests.
         trust_env=False, follow_redirects=False,
+        limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
     )
 
 
-async def _selected_status(selector, timeout):
+def _address_of(target):
+    return "{}:{}".format(target["host"], target["port"])
+
+
+async def _close_state(state):
+    client, state.client = state.client, None
+    if client is not None and not client.is_closed:
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+
+
+async def _retire_stale(host, port, keep_key):
+    """A verified incarnation supersedes every other one on its host and port.
+
+    The old state leaves the map at once, so nothing new can use it. Its client
+    is closed now if idle, otherwise by the last in-flight call that releases it.
+    """
+    for key in [k for k in _states if k[0] == host and k[1] == port and k != keep_key]:
+        old = _states.pop(key, None)  # another task may have retired it across an await
+        if old is None:
+            continue
+        old.evicted = True
+        if old.users == 0:
+            await _close_state(old)
+
+
+async def _release(state):
+    state.users -= 1
+    if state.users > 0:
+        return
+    if state.evicted or not state.verified:
+        # Superseded, or never proven: a stale selector must leave nothing behind.
+        if _states.get(state.key) is state:
+            del _states[state.key]
+        await _close_state(state)
+
+
+class _UnexpectedStatus(Exception):
+    """The identity route answered something other than 200 or 503."""
+
+    def __init__(self, status, text):
+        Exception.__init__(self, "HTTP {}".format(status))
+        self.status = status
+        self.text = text
+
+
+async def _handshake(target, client, timeout):
+    """Prove ownership, then identity: (response, payload).
+
+    A ValueError means the incarnation is refused before any requested send. The
+    handshake requests GET /status/ only, never a model route.
+    """
+    await _check_owner(target)
+    response = await client.get("status/", timeout=timeout)
+    if response.status_code not in (200, 503):
+        raise _UnexpectedStatus(response.status_code, response.text)
+    payload = _json_or_none(response)
+    identity = payload.get("process_identity") if isinstance(payload, dict) else None
+    if not (_identity_fields_valid(identity)
+            and identity["pid"] == target["pid"]
+            and identity["actual_port"] == target["port"]
+            and identity["session_token"] == target["session_token"]):
+        raise ValueError("Revit identity missing or stale; request not sent. "
+                         "Rediscover Revit targets.")
+    return response, payload
+
+
+async def _verify_target(target, state, timeout):
+    """Refusal text if the incarnation cannot be proven right now, else None.
+
+    Runs with the lock held, immediately before the requested send, so a process
+    that restarted while the call queued is caught. Every refusal here says the
+    request was NOT sent.
+    """
     try:
-        target = await resolve_target(selector)
-        async with _selected_client(target) as client:
-            response = await client.get("status/", timeout=timeout)
-        if response.status_code not in (200, 503):
+        # Capped: the lock is held, and a Revit that is still initializing hangs
+        # instead of failing, so the handshake must never wait out a long call.
+        await _handshake(target, _client_of(state, target), min(timeout, HANDSHAKE_TIMEOUT))
+    except _UnexpectedStatus as exc:
+        state.verified = False
+        return ("Error: Revit identity handshake answered HTTP {}; the request was NOT sent "
+                "to Revit and nothing was changed. Rediscover Revit targets.".format(exc.status))
+    except httpx.HTTPError as exc:
+        state.verified = False
+        return ("Error: {} - identity handshake with Revit at {} failed; the request was NOT "
+                "sent to Revit and nothing was changed. Rediscover Revit "
+                "targets.".format(type(exc).__name__, _address_of(target)))
+    except ValueError as exc:
+        state.verified = False
+        return _error_text(exc)
+    state.verified = True
+    await _retire_stale(state.key[0], state.key[1], state.key)
+    return None
+
+
+async def _status_call(selector, timeout):
+    """GET /status/ for one incarnation, the single unlocked route.
+
+    With a selector the result is the received payload plus per-response
+    _verified_process metadata (a 503 keeps its identity and gains an error). With
+    none, exactly one usable process must exist and the result keeps the legacy
+    shapes: the payload for 200, "Error: <code> - <body>" otherwise.
+    """
+    state = None
+    try:
+        target = parse_target(selector) if selector is not None else await resolve_default_target()
+        state = _state_for(target)
+        state.users += 1
+        response, payload = await _handshake(target, _client_of(state, target), timeout)
+        state.verified = True
+        await _retire_stale(state.key[0], state.key[1], state.key)
+        if selector is None:
+            if response.status_code == 200:
+                return payload
             return "Error: {} - {}".format(response.status_code, response.text)
-        payload = response.json()
-        identity = payload.get("process_identity") if isinstance(payload, dict) else None
-        if (not isinstance(identity, dict)
-                or type(identity.get("pid")) is not int
-                or type(identity.get("actual_port")) is not int
-                or identity.get("pid") != target["pid"]
-                or identity.get("actual_port") != target["port"]
-                or identity.get("session_token") != target["session_token"]
-                or not isinstance(identity.get("revit_version"), str)
-                or not identity["revit_version"].strip()):
-            return "Error: Revit identity missing or stale; rediscover Revit targets."
         # Per-response metadata, never mutable callable/session state. Strip any
         # server-supplied verification claim before attaching our own result.
         payload.pop("_verified_process", None)
-        payload["_verified_process"] = dict(identity)
+        payload["_verified_process"] = dict(payload["process_identity"])
         if response.status_code == 503 and not payload.get("error"):
             payload["error"] = "Revit status returned HTTP 503"
         return payload
+    except _UnexpectedStatus as exc:
+        if state is not None:
+            state.verified = False
+        return "Error: {} - {}".format(exc.status, exc.text)
     except Exception as exc:
+        if state is not None:
+            state.verified = False
         return _error_text(exc)
+    finally:
+        if state is not None:
+            await _release(state)
 
 
 async def revit_get(endpoint: str, ctx: Any = None, target: Optional[str] = None,
-                    **kwargs) -> Union[Dict, str]:
-    """GET with an optional explicit incarnation on the status tracer only."""
-    if target is not None:
-        if endpoint != "/status/" or set(kwargs) - {"timeout"}:
-            return "Error: Explicit targets currently support only GET /status/; request not sent."
-        return await _selected_status(target, kwargs.get("timeout", 30.0))
-    return await _revit_call("GET", endpoint, ctx=ctx, **kwargs)
+                    timeout: float = 30.0, params: Optional[Dict] = None) -> Union[Dict, str]:
+    """GET one Revit route, on the selected incarnation or the only usable one."""
+    if endpoint == "/status/" and params is None:
+        return await _status_call(target, timeout)
+
+    async def read(client) -> Union[Dict, str]:
+        return await _send(client, "GET", endpoint, None, timeout, params)
+
+    return await _dispatch("GET", endpoint, ctx, timeout, read, target)
 
 
 # Seam read with getattr by the status tool: tool modules never import the
@@ -512,27 +665,27 @@ revit_get.discover_targets = discover_targets
 
 
 async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None,
-                     target: Optional[str] = None, **kwargs) -> Union[Dict, str]:
-    """Simple POST request to Revit API; selected mutation routing is not yet enabled."""
-    if target is not None:
-        return "Error: Explicit targets currently support only GET /status/; request not sent."
-    return await _revit_call("POST", endpoint, data=data, ctx=ctx, **kwargs)
+                     target: Optional[str] = None, timeout: float = 30.0,
+                     params: Optional[Dict] = None) -> Union[Dict, str]:
+    """POST to one Revit route, on the selected incarnation or the only usable one."""
+
+    async def write(client) -> Union[Dict, str]:
+        return await _send(client, "POST", endpoint, data, timeout, params)
+
+    return await _dispatch("POST", endpoint, ctx, timeout, write, target)
 
 
 async def revit_image(endpoint: str, ctx: Any = None, timeout: float = 60.0,
                       target: Optional[str] = None) -> Union[Any, str]:
     """GET request that returns an Image object.
 
-    Runs through the same bounded-wait lock path as every other call (d27-b).
+    Runs through the same bounded-wait, per-incarnation lock path as every other
+    call (d27-b, D-03).
     """
 
-    if target is not None:
-        return "Error: Explicit targets currently support only GET /status/; request not sent."
-
-    async def fetch() -> Union[Any, str]:
+    async def fetch(client) -> Union[Any, str]:
         from mcp.server.fastmcp import Image  # inside: keeps cold start cheap (D-24)
 
-        client = _get_client()
         response = await client.get(endpoint, timeout=timeout)
 
         if response.status_code == 200:
@@ -541,14 +694,12 @@ async def revit_image(endpoint: str, ctx: Any = None, timeout: float = 60.0,
             return Image(data=image_bytes, format="png")
         return "Error: {} - {}".format(response.status_code, response.text)
 
-    return await _serialized("GET", endpoint, ctx, timeout, fetch)
+    return await _dispatch("GET", endpoint, ctx, timeout, fetch, target)
 
 
-async def _send(method: str, endpoint: str, data: Optional[Dict],
+async def _send(client: httpx.AsyncClient, method: str, endpoint: str, data: Optional[Dict],
                 timeout: float, params: Optional[Dict]) -> Union[Dict, str]:
     """The one HTTP send. Does no locking; callers decide."""
-    client = _get_client()
-
     if method == "GET":
         response = await client.get(endpoint, params=params, timeout=timeout)
     else:  # POST
@@ -635,7 +786,8 @@ def _error_text(e: Exception) -> str:
     return "Error: {}".format(str(e) or type(e).__name__)
 
 
-def _transport_failure_message(e: httpx.TransportError, timeout: float) -> str:
+def _transport_failure_message(e: httpx.TransportError, timeout: float,
+                               address: str = REVIT_TARGET) -> str:
     """Honest wording for a transport failure on a locked POST (D-13).
 
     A pre-send failure certainly changed nothing. Anything else may have been
@@ -647,7 +799,7 @@ def _transport_failure_message(e: httpx.TransportError, timeout: float) -> str:
     if isinstance(e, _NOT_SENT_ERRORS):
         return (
             "Error: {} - could not reach Revit at {}; the request was not sent "
-            "to Revit and nothing was changed.".format(name, REVIT_TARGET)
+            "to Revit and nothing was changed.".format(name, address)
         )
     return (
         "Error: {} - the request was sent to Revit but no complete response "
@@ -672,12 +824,15 @@ def _queue_busy_message(timeout: float) -> str:
     )
 
 
-async def _serialized(method: str, endpoint: str, ctx: Any, timeout: float,
-                      send: Any) -> Union[Dict, str, Any]:
-    """The one bounded-wait lock path, shared by _revit_call and revit_image.
+async def _dispatch(method: str, endpoint: str, ctx: Any, timeout: float, exchange: Any,
+                    target: Optional[str] = None) -> Union[Dict, str, Any]:
+    """The one bounded-wait, per-incarnation lock path for every non-status call.
 
-    ``send`` is a zero-argument coroutine function performing exactly one HTTP
-    exchange. Every call except GET /status/ runs inside the lock (d27-b).
+    ``exchange`` is a coroutine function taking the incarnation's client and
+    performing exactly one HTTP exchange. The process is the explicit target or
+    the only usable one (a refusal is returned, nothing sent). Every call except
+    GET /status/ runs inside that incarnation's lock (d27-b, D-03), and the
+    incarnation is proven again with the lock held, right before the send.
 
     A locked call's wait for the lock is bounded by the call's own timeout, and
     that bound stops applying the moment the lock is held. The request then gets
@@ -685,27 +840,37 @@ async def _serialized(method: str, endpoint: str, ctx: Any, timeout: float,
     call's own budget (SER-04). Worst case is about twice the call timeout.
     """
     budget = None  # must exist before the except clause reads it
+    state = None
     try:
+        resolved = parse_target(target) if target is not None else await resolve_default_target()
+        state = _state_for(resolved)
+        state.users += 1
         if _is_locked(method, endpoint):
             # Emitted before the wait bound starts, so the message's own
             # latency does not consume it. Once per call, best-effort.
-            if _get_lock().locked():
+            if state.lock.locked():
                 await _say(ctx, WAIT_MESSAGE)
             async with asyncio.timeout(timeout) as budget:
-                async with _get_lock():
+                async with state.lock:
                     # Lock held: the wait bound no longer applies.
                     budget.reschedule(None)
+                    refusal = await _verify_target(resolved, state, timeout)
+                    if refusal is not None:
+                        return refusal
                     try:
-                        return await send()
+                        return await exchange(_client_of(state, resolved))
                     except httpx.TransportError as e:
                         # Returned, not raised: async with releases the lock on
                         # every exit. Never hold it waiting for Revit (SER-03).
                         # A read changes nothing, so only a POST may claim an
                         # unknown outcome (D-13).
                         if method == "POST":
-                            return _transport_failure_message(e, timeout)
+                            return _transport_failure_message(e, timeout, _address_of(resolved))
                         return _error_text(e)
-        return await send()
+        refusal = await _verify_target(resolved, state, timeout)
+        if refusal is not None:
+            return refusal
+        return await exchange(_client_of(state, resolved))
     except TimeoutError:
         # Only our own wait deadline means "queue busy"; any other TimeoutError
         # must not be mislabelled, and tool functions rely on never seeing a raise.
@@ -714,16 +879,6 @@ async def _serialized(method: str, endpoint: str, ctx: Any, timeout: float,
         return "Error: TimeoutError"
     except Exception as e:
         return _error_text(e)
-
-
-async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Any = None,
-                      timeout: float = 30.0, params: Dict = None) -> Union[Dict, str]:
-    """Internal function handling all HTTP calls.
-
-    Every call except GET /status/ runs inside the lock (d27-b); see _serialized.
-    """
-
-    async def send() -> Union[Dict, str]:
-        return await _send(method, endpoint, data, timeout, params)
-
-    return await _serialized(method, endpoint, ctx, timeout, send)
+    finally:
+        if state is not None:
+            await _release(state)

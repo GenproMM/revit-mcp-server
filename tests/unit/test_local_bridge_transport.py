@@ -8,7 +8,7 @@ def test_local_revit_bridge_ignores_environment_proxies():
     """Local pyRevit Routes calls must never use inherited proxy settings."""
     source = (ROOT / "bridge.py").read_text(encoding="utf-8")
 
-    client_block = source.split("def _get_client()", 1)[1].split(
+    client_block = source.split("def _get_client(", 1)[1].split(
         "async def revit_get", 1
     )[0]
 

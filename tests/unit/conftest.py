@@ -50,6 +50,8 @@ def _no_live_revit_from_the_bridge(monkeypatch):
                                  transport=httpx.MockTransport(refuse), trust_env=False)
 
     monkeypatch.setattr(bridge, "listener_snapshot", guarded_snapshot)
+    if hasattr(bridge, "_states"):  # pooled clients and locks never leak between tests
+        monkeypatch.setattr(bridge, "_states", {})
     if hasattr(bridge, "_selected_client"):
         monkeypatch.setattr(bridge, "_selected_client", refusing_client)
     if hasattr(bridge, "_http_client"):  # the single-target client, until it is retired

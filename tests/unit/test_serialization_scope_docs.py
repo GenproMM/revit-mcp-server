@@ -91,7 +91,7 @@ def test_serialization_scope_docstring_has_no_transport_markers():
     comes first, so a literal copy would shift every slice."""
     doc = _bridge_docstring()
     markers = (
-        "def _get_client()",  # tests/unit/test_local_bridge_transport.py
+        "def _get_client(",  # tests/unit/test_local_bridge_transport.py
         "async def revit_get",  # tests/unit/test_local_bridge_transport.py
         "else:  # POST",  # tests/unit/test_textutils.py
     )

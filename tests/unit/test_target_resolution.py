@@ -118,9 +118,18 @@ def test_missing_identity_is_not_inferred_from_selector(monkeypatch):
     assert "Verified Revit process:" not in out
 
 
-def test_explicit_target_never_falls_back_to_model_route():
+def test_explicit_target_with_unavailable_inventory_sends_no_model_route(monkeypatch):
+    # 02-03: a selected model route is dispatched like any other call, but only
+    # after the incarnation is proven. Without a listener inventory it is
+    # refused before any HTTP, and never falls back to a configured address.
+    sent = []
+    original = httpx.AsyncClient
+    monkeypatch.setattr(bridge, "_selected_client", lambda target: original(
+        base_url="http://127.0.0.1:48885/genpro_revit_mcp/",
+        transport=httpx.MockTransport(lambda request: sent.append(request) or httpx.Response(200, json={}))))
     out = asyncio.run(bridge.revit_get("/model_info/", target=selector()))
-    assert out.startswith("Error:") and "status" in out.lower()
+    assert out.startswith("Error:") and "inventory" in out.lower() and "not sent" in out.lower()
+    assert sent == []
 
 
 def test_production_parser_matches_approved_dual_bind():
@@ -137,10 +146,11 @@ def test_selector_syntax_refuses(value):
 
 
 @pytest.mark.parametrize("method", ["post", "image"])
-def test_selected_non_status_never_sends(method, monkeypatch):
-    def forbidden():
-        pytest.fail("Legacy client must not be created for a selected unsupported route")
+def test_selected_non_status_never_sends_without_a_proven_incarnation(method, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("No client may be used for a selected route before its incarnation is proven")
     monkeypatch.setattr(bridge, "_get_client", forbidden)
+    monkeypatch.setattr(bridge, "listener_snapshot", lambda ports, **kwargs: None)
     if method == "post":
         out = asyncio.run(bridge.revit_post("/execute_code/", {}, target=selector()))
     else:

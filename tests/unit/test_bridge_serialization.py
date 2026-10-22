@@ -25,20 +25,40 @@ def anyio_backend():
     return "asyncio"
 
 
+# The bridge keeps one client and one lock per validated process incarnation
+# (02-03). These Phase-1 tests exercise ONE incarnation: the single process
+# discovery would pick. Discovery and the identity handshake have their own tests
+# (test_target_resolution.py, test_target_locks.py); here they are fixed so every
+# assertion below still proves the queue, timeout and failure-wording contract.
+TOKEN = "11111111-1111-4111-8111-111111111111"
+TARGET = {"host": "127.0.0.1", "port": 48884, "pid": 4242, "session_token": TOKEN}
+IDENTITY = {"pid": 4242, "actual_port": 48884, "session_token": TOKEN, "revit_version": "2024"}
+
+
 @pytest.fixture(autouse=True)
-def _reset_bridge_state():
+def _reset_bridge_state(monkeypatch):
     # A lock contended in one test's event loop is bound to that loop, and a
-    # pooled client belongs to the loop it was first used in.
-    bridge._lock = None
-    bridge._http_client = None
+    # pooled client belongs to the loop it was first used in: fresh state per test.
+    bridge._states.clear()
+
+    async def only_process():
+        return dict(TARGET)
+
+    async def proven(target, state, timeout):
+        state.verified = True
+        return None
+
+    monkeypatch.setattr(bridge, "resolve_default_target", only_process)
+    monkeypatch.setattr(bridge, "_verify_target", proven)
+    monkeypatch.setattr(bridge, "listener_snapshot",
+                        lambda ports, **kwargs: {TARGET["port"]: [TARGET["pid"]]})
     yield
-    bridge._lock = None
-    bridge._http_client = None
+    bridge._states.clear()
 
 
 def _install_client(handler):
-    bridge._http_client = httpx.AsyncClient(
-        base_url="http://test:1/genpro_revit_mcp",
+    bridge._state_for(TARGET).client = httpx.AsyncClient(
+        base_url="http://test:1/genpro_revit_mcp/",
         transport=httpx.MockTransport(handler),
         trust_env=False,
     )
@@ -59,6 +79,9 @@ class _Gate(object):
         if request.url.path.endswith("/p1/"):
             self.p1_started.set()
             await self.release.wait()
+        if request.url.path.endswith("/status/"):
+            return httpx.Response(200, json={"path": request.url.path,
+                                             "process_identity": IDENTITY})
         return httpx.Response(200, json={"path": request.url.path})
 
 
@@ -91,7 +114,7 @@ async def test_status_passes_while_locked():
     await asyncio.wait_for(gate.p1_started.wait(), 1.0)
 
     result = await asyncio.wait_for(bridge.revit_get("/status/"), 1.0)
-    assert result == {"path": "/genpro_revit_mcp/status/"}
+    assert result["path"] == "/genpro_revit_mcp/status/"
 
     gate.release.set()
     await asyncio.wait_for(first, 1.0)
@@ -266,7 +289,7 @@ async def test_queue_bound_returns_not_sent_without_sending():
     gate.release.set()
     await asyncio.wait_for(first, 1.0)
     assert gate.seen == ["/genpro_revit_mcp/p1/"]
-    assert bridge._get_lock().locked() is False
+    assert bridge._get_lock(TARGET).locked() is False
 
 
 @pytest.mark.anyio
@@ -323,7 +346,7 @@ async def test_releases_after_handler_exception():
 
     result = await bridge.revit_post("/boom/", {})
     assert result == "Error: boom"
-    assert bridge._get_lock().locked() is False
+    assert bridge._get_lock(TARGET).locked() is False
 
     assert await asyncio.wait_for(bridge.revit_post("/next/", {}), 1.0) == {"path": "/genpro_revit_mcp/next/"}
 
@@ -338,7 +361,7 @@ async def test_releases_after_post_send_timeout():
     assert "outcome UNKNOWN" in result
     assert "may have been applied" in result
     assert "Verify" in result
-    assert bridge._get_lock().locked() is False
+    assert bridge._get_lock(TARGET).locked() is False
 
     assert await asyncio.wait_for(bridge.revit_post("/next/", {}), 1.0) == {"path": "/genpro_revit_mcp/next/"}
 
@@ -354,7 +377,7 @@ async def test_releases_after_cancellation_of_holder():
     with pytest.raises(asyncio.CancelledError):
         await holder
 
-    assert bridge._get_lock().locked() is False
+    assert bridge._get_lock(TARGET).locked() is False
     assert await asyncio.wait_for(bridge.revit_post("/p2/", {}), 1.0) == {"path": "/genpro_revit_mcp/p2/"}
 
 
@@ -374,7 +397,7 @@ async def test_releases_cancelled_waiter_is_never_sent():
     gate.release.set()
     assert await asyncio.wait_for(holder, 1.0) == {"path": "/genpro_revit_mcp/p1/"}
     assert gate.seen == ["/genpro_revit_mcp/p1/"]
-    assert bridge._get_lock().locked() is False
+    assert bridge._get_lock(TARGET).locked() is False
     assert await asyncio.wait_for(bridge.revit_post("/p2/", {}), 1.0) == {"path": "/genpro_revit_mcp/p2/"}
 
 
@@ -409,7 +432,7 @@ async def test_outcome_unknown_not_claimed_on_connect_error(error_class):
     assert result.startswith("Error: ")
     assert "was not sent to Revit" in result
     assert "UNKNOWN" not in result
-    assert bridge._get_lock().locked() is False
+    assert bridge._get_lock(TARGET).locked() is False
 
 
 @pytest.mark.anyio
@@ -612,7 +635,7 @@ async def test_image_queue_bound_returns_not_sent():
     gate.release.set()
     await asyncio.wait_for(holder, 1.0)
     assert gate.seen == ["/genpro_revit_mcp/p1/"]
-    assert bridge._get_lock().locked() is False
+    assert bridge._get_lock(TARGET).locked() is False
 
 
 @pytest.mark.anyio
@@ -630,7 +653,7 @@ async def test_get_queue_bound_returns_not_sent():
     gate.release.set()
     await asyncio.wait_for(holder, 1.0)
     assert gate.seen == ["/genpro_revit_mcp/p1/"]
-    assert bridge._get_lock().locked() is False
+    assert bridge._get_lock(TARGET).locked() is False
 
 
 @pytest.mark.anyio
@@ -734,7 +757,7 @@ async def test_get_post_send_failure_is_not_outcome_unknown():
     result = await bridge.revit_get("/slow/")
     assert result == "Error: ReadTimeout"
     assert "UNKNOWN" not in result
-    assert bridge._get_lock().locked() is False
+    assert bridge._get_lock(TARGET).locked() is False
 
 
 class _FakeMCP(object):

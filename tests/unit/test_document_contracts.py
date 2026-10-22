@@ -842,12 +842,17 @@ def load_documents_route(monkeypatch, fake_routes):
     return captured[("/documents/", ("GET",))]
 
 
+def listing_uiapp():
+    """An injected UIApplication double with nothing open (FakeUIApp is defined further down)."""
+    return FakeUIApp(FakeApplication())
+
+
 def test_documents_route_answers_an_empty_list_with_identity_and_status_200(monkeypatch, fake_routes):
     handler = load_documents_route(monkeypatch, fake_routes)
-    monkeypatch.setattr(identity, "process_identity_or_error", lambda: (dict(IDENT), None))
-    monkeypatch.setattr(identity, "current_document_descriptors", lambda: {
+    monkeypatch.setattr(identity, "process_identity_or_error", lambda *a, **k: (dict(IDENT), None))
+    monkeypatch.setattr(identity, "current_document_descriptors", lambda *a, **k: {
         "ok": True, "documents": [], "count": 0, "active_document": None})
-    handler()
+    handler(listing_uiapp())
     payload, status = fake_routes[-1]
     assert status == 200 and payload["documents"] == [] and payload["count"] == 0
     assert payload["process_identity"] == IDENT and "error" not in payload
@@ -855,19 +860,19 @@ def test_documents_route_answers_an_empty_list_with_identity_and_status_200(monk
 
 def test_documents_route_refusal_keeps_its_status_and_never_raises(monkeypatch, fake_routes):
     handler = load_documents_route(monkeypatch, fake_routes)
-    monkeypatch.setattr(identity, "process_identity_or_error", lambda: (None, "no retained RoutesServer"))
-    monkeypatch.setattr(identity, "current_document_descriptors", lambda: {
+    monkeypatch.setattr(identity, "process_identity_or_error", lambda *a, **k: (None, "no retained RoutesServer"))
+    monkeypatch.setattr(identity, "current_document_descriptors", lambda *a, **k: {
         "ok": False, "status": 503, "code": "document-identity-unavailable", "error": "cannot tell apart"})
-    handler()
+    handler(listing_uiapp())
     payload, status = fake_routes[-1]
     assert status == 503 and payload["error_code"] == "document-identity-unavailable"
     assert payload["identity_error"] == "no retained RoutesServer" and "process_identity" not in payload
 
-    def boom():
+    def boom(*args, **kwargs):
         raise RuntimeError("Revit exploded")
 
     monkeypatch.setattr(identity, "current_document_descriptors", boom)
-    handler()
+    handler(listing_uiapp())
     payload, status = fake_routes[-1]
     assert status == 500 and payload["error"] == "Revit exploded"
 
@@ -933,6 +938,11 @@ class FakeUIApp(object):
         self.active = active
         self.mode = mode
         self.calls = []
+
+    @property
+    def Application(self):
+        """UIApplication.Application: what the injected handler context enumerates."""
+        return self.app
 
     @property
     def ActiveUIDocument(self):
@@ -1191,18 +1201,42 @@ def test_a_call_that_does_not_make_the_target_active_is_not_reported_as_activate
 # ----------------------------------------------------------------- the route
 
 
+class HostAppTrap(object):
+    """Stands in for pyrevit.HOST_APP.uiapp / .app: any use is recorded and answered with a failure.
+
+    The routes run in the Revit API context with an INJECTED uiapp (pyRevit hands one
+    to a handler that declares the argument); nothing in them may reach for the
+    process-global HOST_APP instead, so every touch here is a defect.
+    """
+
+    def __init__(self):
+        object.__setattr__(self, "touched", [])
+
+    def __getattr__(self, name):
+        self.touched.append(name)
+        raise AssertionError("HOST_APP was used instead of the injected uiapp: " + name)
+
+
+def host_app_trap():
+    return sys.modules["pyrevit"].HOST_APP.uiapp
+
+
 def activate_handlers(monkeypatch, fake_routes, uiapp, registry, identity_value=None):
-    """Register revit_mcp/documents.py against a fake pyrevit; return its handlers by (path, methods)."""
+    """Register revit_mcp/documents.py against a fake pyrevit; return its handlers by (path, methods).
+
+    pyrevit.HOST_APP is a trap (HostAppTrap): the handlers are given ``uiapp`` as an
+    argument, as pyRevit does, and must never fall back to the global.
+    """
     monkeypatch.setitem(sys.modules, "pyrevit", types.SimpleNamespace(
         routes=sys.modules["pyrevit"].routes,
-        HOST_APP=types.SimpleNamespace(uiapp=uiapp, app=uiapp.app)))
+        HOST_APP=types.SimpleNamespace(uiapp=HostAppTrap(), app=HostAppTrap())))
     monkeypatch.setattr(identity, "get_document_registry", lambda store=None: registry)
     if identity_value == "none":
         monkeypatch.setattr(identity, "process_identity_or_error",
-                            lambda: (None, "no retained RoutesServer"))
+                            lambda *a, **k: (None, "no retained RoutesServer"))
     else:
         monkeypatch.setattr(identity, "process_identity_or_error",
-                            lambda: (dict(identity_value or IDENT), None))
+                            lambda *a, **k: (dict(identity_value or IDENT), None))
     monkeypatch.setattr(documents, "_file_exists", exists_everywhere)
     captured = {}
 
@@ -1222,19 +1256,21 @@ class FakeRequest(object):
         self.data = body
 
 
-def test_the_route_is_registered_as_a_post_handler_taking_only_the_request(monkeypatch, fake_routes):
+def test_the_route_is_registered_as_a_post_handler_taking_the_injected_uiapp_and_the_request(
+        monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = rig()
     captured = activate_handlers(monkeypatch, fake_routes, uiapp, reg)
     handler = captured[("/activate_document/", ("POST",))]
-    assert list(inspect.signature(handler).parameters) == ["request"]
+    assert list(inspect.signature(handler).parameters) == ["uiapp", "request"]
     assert ("/documents/", ("GET",)) in captured
+    assert list(inspect.signature(captured[("/documents/", ("GET",))]).parameters) == ["uiapp"]
 
 
 def test_route_activates_from_a_text_plain_bytes_body_and_names_the_process(monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = rig()
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
     body = ('{"document": "%s"}' % tokens["coord"]).encode("utf-8")
-    handler(FakeRequest(body))
+    handler(uiapp, FakeRequest(body))
     payload, status = fake_routes[-1]
     assert status == 200 and payload["activation"] == "activated"
     assert payload["process_identity"] == IDENT
@@ -1245,7 +1281,7 @@ def test_route_activates_from_a_text_plain_bytes_body_and_names_the_process(monk
 def test_route_refusal_keeps_process_and_observed_active_identity(monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = rig(IsWorkshared=True)
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
-    handler(FakeRequest({"document": tokens["coord"]}))     # a dict body is accepted too
+    handler(uiapp, FakeRequest({"document": tokens["coord"]}))     # a dict body is accepted too
     payload, status = fake_routes[-1]
     assert status == 422 and payload["reason"] == "workshared-unmeasured" and payload["error"]
     assert payload["process_identity"] == IDENT
@@ -1257,7 +1293,7 @@ def test_route_without_a_document_or_with_a_bad_body_is_a_400_not_an_exception(m
     app, uiapp, reg, tokens, docs = rig()
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
     for body in (None, b"", b"{}", b"not json", b"[1, 2]"):
-        handler(FakeRequest(body))
+        handler(uiapp, FakeRequest(body))
         payload, status = fake_routes[-1]
         assert status == 400 and payload["error"], body
         assert payload["process_identity"] == IDENT
@@ -1268,7 +1304,7 @@ def test_route_without_process_identity_says_so_instead_of_inventing_one(monkeyp
     app, uiapp, reg, tokens, docs = rig()
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg, identity_value="none")[
         ("/activate_document/", ("POST",))]
-    handler(FakeRequest({"document": tokens["other"]}))
+    handler(uiapp, FakeRequest({"document": tokens["other"]}))
     payload, status = fake_routes[-1]
     assert status == 200 and "process_identity" not in payload
     assert payload["identity_error"] == "no retained RoutesServer"
@@ -1478,7 +1514,7 @@ def test_run_activation_never_raises_when_the_uiapplication_is_missing():
 def test_route_exception_reply_keeps_process_and_observed_active_identity(monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = rig(mode="raise")
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
-    handler(FakeRequest({"document": tokens["coord"]}))
+    handler(uiapp, FakeRequest({"document": tokens["coord"]}))
     payload, status = fake_routes[-1]
     assert status == 500 and payload["error"] and payload["error_code"] == "activation-failed"
     assert payload["process_identity"] == IDENT
@@ -1489,7 +1525,7 @@ def test_route_exception_reply_keeps_process_and_observed_active_identity(monkey
 def test_route_no_change_reply_keeps_process_and_observed_active_identity(monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = rig(mode="noop")
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
-    handler(FakeRequest({"document": tokens["coord"]}))
+    handler(uiapp, FakeRequest({"document": tokens["coord"]}))
     payload, status = fake_routes[-1]
     assert status == 409 and payload["error"] and payload["error_code"] == "document-not-activated"
     assert payload["process_identity"] == IDENT
@@ -1502,29 +1538,35 @@ def test_route_never_raises_and_always_names_the_process(monkeypatch, fake_route
     handler = handlers[("/activate_document/", ("POST",))]
 
     class BrokenUIApp(object):
-        app = uiapp.app
+        Application = uiapp.app
 
         @property
         def ActiveUIDocument(self):
             raise RuntimeError("UI unavailable")
 
-    monkeypatch.setattr(sys.modules["pyrevit"], "HOST_APP",
-                        types.SimpleNamespace(uiapp=BrokenUIApp(), app=uiapp.app))
-    handler(FakeRequest({"document": tokens["coord"]}))
+    handler(BrokenUIApp(), FakeRequest({"document": tokens["coord"]}))
     payload, status = fake_routes[-1]
     assert status >= 500 and payload["error"] and payload["process_identity"] == IDENT
 
     class NoUIApp(object):
         @property
-        def uiapp(self):
+        def Application(self):
             raise RuntimeError("no UIApplication")
 
-    monkeypatch.setattr(sys.modules["pyrevit"], "HOST_APP", NoUIApp())
-    handler(FakeRequest({"document": tokens["coord"]}))
+    handler(NoUIApp(), FakeRequest({"document": tokens["coord"]}))
     payload, status = fake_routes[-1]
-    assert status == 500 and payload["error_code"] == "activation-error"
+    assert status == 503 and payload["error_code"] == "document-registry-unavailable"
     assert payload["process_identity"] == IDENT
     assert uiapp.calls == []
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("activation machinery failed")
+
+    monkeypatch.setattr(documents, "run_activation", explode)
+    handler(uiapp, FakeRequest({"document": tokens["coord"]}))
+    payload, status = fake_routes[-1]
+    assert status == 500 and payload["error_code"] == "activation-error"
+    assert payload["process_identity"] == IDENT and uiapp.calls == []
 
 
 # --------------------------------------------------- AST scan of the whole file
@@ -1906,6 +1948,14 @@ def code_identifiers(node):
     return found
 
 
+def uiapp_attribute_uses(node):
+    """Attribute accesses on a name ``uiapp`` (uiapp.X). The read orchestration may only
+    receive the injected uiapp and pass it on to the snapshot reader; it never calls it."""
+    return [child.attr for child in ast.walk(node)
+            if isinstance(child, ast.Attribute) and isinstance(child.value, ast.Name)
+            and child.value.id == "uiapp"]
+
+
 def test_the_summary_collector_and_its_helpers_have_no_ui_or_active_document_dependency():
     for name in ("collect_document_summary", "_project_information", "_count_elements", "_db"):
         assert code_identifiers(function_node(name)) & UI_DEPENDENT_NAMES == set(), name
@@ -1915,7 +1965,8 @@ def test_the_read_orchestration_never_activates_and_never_reads_the_ui_document_
     for name in ("run_document_read", "run_document_summary"):
         node = function_node(name)
         assert "OpenAndActivateDocument" not in callee_names(node), name
-        assert code_identifiers(node) & {"ActiveUIDocument", "HOST_APP", "uiapp", "OpenAndActivateDocument"} == set()
+        assert code_identifiers(node) & {"ActiveUIDocument", "HOST_APP", "OpenAndActivateDocument"} == set()
+        assert uiapp_attribute_uses(node) == [], name
     # The only place the UI document is read is the identity snapshot, never this module.
     assert "ActiveUIDocument" not in code_identifiers(documents_tree())
 
@@ -1929,11 +1980,12 @@ def read_handlers(monkeypatch, fake_routes, uiapp, registry, db, identity_value=
     return captured
 
 
-def test_the_summary_route_is_a_post_handler_taking_only_the_request(monkeypatch, fake_routes):
+def test_the_summary_route_is_a_post_handler_taking_the_injected_uiapp_and_the_request(
+        monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = read_rig()
     captured = read_handlers(monkeypatch, fake_routes, uiapp, reg, FakeDB())
     handler = captured[("/document_summary/", ("POST",))]
-    assert list(inspect.signature(handler).parameters) == ["request"]
+    assert list(inspect.signature(handler).parameters) == ["uiapp", "request"]
     assert ("/documents/", ("GET",)) in captured and ("/activate_document/", ("POST",)) in captured
 
 
@@ -1941,7 +1993,7 @@ def test_the_summary_route_reads_a_text_plain_bytes_body_and_names_the_process(m
     app, uiapp, reg, tokens, docs = read_rig()
     db = FakeDB()
     handler = read_handlers(monkeypatch, fake_routes, uiapp, reg, db)[("/document_summary/", ("POST",))]
-    handler(FakeRequest(('{"document": "%s"}' % tokens["b"]).encode("utf-8")))
+    handler(uiapp, FakeRequest(('{"document": "%s"}' % tokens["b"]).encode("utf-8")))
     payload, status = fake_routes[-1]
     assert status == 200 and payload["summary"]["title"] == "COORD"
     assert payload["process_identity"] == IDENT and payload["ui_switched"] is False
@@ -1953,7 +2005,7 @@ def test_the_summary_route_refusal_keeps_its_status_and_the_process(monkeypatch,
     app.close_document(docs["b"])
     db = FakeDB()
     handler = read_handlers(monkeypatch, fake_routes, uiapp, reg, db)[("/document_summary/", ("POST",))]
-    handler(FakeRequest({"document": tokens["b"]}))     # a dict body is accepted too
+    handler(uiapp, FakeRequest({"document": tokens["b"]}))     # a dict body is accepted too
     payload, status = fake_routes[-1]
     assert status == 404 and payload["error_code"] == "document-closed" and "summary" not in payload
     assert payload["process_identity"] == IDENT and db.collected == []
@@ -1964,7 +2016,7 @@ def test_the_summary_route_answers_a_bad_or_empty_body_with_400(monkeypatch, fak
     db = FakeDB()
     handler = read_handlers(monkeypatch, fake_routes, uiapp, reg, db)[("/document_summary/", ("POST",))]
     for body in (None, b"", b"{}", b"not json", b"[1, 2]"):
-        handler(FakeRequest(body))
+        handler(uiapp, FakeRequest(body))
         payload, status = fake_routes[-1]
         assert status == 400 and payload["error"], body
         assert payload["process_identity"] == IDENT
@@ -1975,7 +2027,7 @@ def test_the_summary_route_without_process_identity_says_so(monkeypatch, fake_ro
     app, uiapp, reg, tokens, docs = read_rig()
     handler = read_handlers(monkeypatch, fake_routes, uiapp, reg, FakeDB(), identity_value="none")[
         ("/document_summary/", ("POST",))]
-    handler(FakeRequest({"document": tokens["b"]}))
+    handler(uiapp, FakeRequest({"document": tokens["b"]}))
     payload, status = fake_routes[-1]
     assert status == 200 and "process_identity" not in payload
     assert payload["identity_error"] == "no retained RoutesServer"
@@ -1990,18 +2042,17 @@ def test_the_summary_route_never_raises(monkeypatch, fake_routes):
         raise RuntimeError("DB namespace unavailable")
 
     monkeypatch.setattr(documents, "_db", no_db)
-    handler(FakeRequest({"document": tokens["b"]}))
+    handler(uiapp, FakeRequest({"document": tokens["b"]}))
     payload, status = fake_routes[-1]
     assert status == 500 and payload["error_code"] == "document-read-failed"
     assert "DB namespace unavailable" in payload["error"] and payload["process_identity"] == IDENT
 
     class NoUIApp(object):
         @property
-        def uiapp(self):
+        def Application(self):
             raise RuntimeError("no UIApplication")
 
-    monkeypatch.setattr(sys.modules["pyrevit"], "HOST_APP", NoUIApp())
-    handler(FakeRequest({"document": tokens["b"]}))
+    handler(NoUIApp(), FakeRequest({"document": tokens["b"]}))
     payload, status = fake_routes[-1]
     assert status == 503 and payload["error_code"] == "document-registry-unavailable"
     assert payload["process_identity"] == IDENT and uiapp.calls == []
@@ -2256,7 +2307,8 @@ def test_the_level_collector_and_its_helpers_have_no_ui_or_active_document_depen
         assert code_identifiers(function_node(name)) & UI_DEPENDENT_NAMES == set(), name
     node = function_node("run_document_levels")
     assert "OpenAndActivateDocument" not in callee_names(node)
-    assert code_identifiers(node) & {"ActiveUIDocument", "HOST_APP", "uiapp"} == set()
+    assert code_identifiers(node) & {"ActiveUIDocument", "HOST_APP"} == set()
+    assert uiapp_attribute_uses(node) == []
 
 
 # ------------------------------------------------- exactly two inactive-capable reads
@@ -2285,18 +2337,19 @@ def levels_handlers(monkeypatch, fake_routes, uiapp, registry, db, identity_valu
     return captured
 
 
-def test_the_levels_route_is_a_post_handler_taking_only_the_request(monkeypatch, fake_routes):
+def test_the_levels_route_is_a_post_handler_taking_the_injected_uiapp_and_the_request(
+        monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = read_rig()
     captured = levels_handlers(monkeypatch, fake_routes, uiapp, reg, FakeDB())
     handler = captured[("/document_levels/", ("POST",))]
-    assert list(inspect.signature(handler).parameters) == ["request"]
+    assert list(inspect.signature(handler).parameters) == ["uiapp", "request"]
 
 
 def test_the_levels_route_reads_a_text_plain_bytes_body_and_names_the_process(monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = read_rig()
     db = FakeDB()
     handler = levels_handlers(monkeypatch, fake_routes, uiapp, reg, db)[("/document_levels/", ("POST",))]
-    handler(FakeRequest(('{"document": "%s"}' % tokens["b"]).encode("utf-8")))
+    handler(uiapp, FakeRequest(('{"document": "%s"}' % tokens["b"]).encode("utf-8")))
     payload, status = fake_routes[-1]
     assert status == 200 and [level["name"] for level in payload["levels"]] == ["COORD L1", "COORD L2"]
     assert payload["process_identity"] == IDENT and payload["ui_switched"] is False
@@ -2308,11 +2361,11 @@ def test_the_levels_route_refusals_keep_status_and_process_and_it_never_raises(m
     db = FakeDB()
     handler = levels_handlers(monkeypatch, fake_routes, uiapp, reg, db)[("/document_levels/", ("POST",))]
     for body in (None, b"", b"{}", b"not json", b"[1, 2]"):
-        handler(FakeRequest(body))
+        handler(uiapp, FakeRequest(body))
         payload, status = fake_routes[-1]
         assert status == 400 and payload["error"] and payload["process_identity"] == IDENT, body
     app.close_document(docs["b"])
-    handler(FakeRequest({"document": tokens["b"]}))
+    handler(uiapp, FakeRequest({"document": tokens["b"]}))
     payload, status = fake_routes[-1]
     assert status == 404 and payload["error_code"] == "document-closed" and "levels" not in payload
     assert payload["process_identity"] == IDENT and db.collected == []
@@ -2323,7 +2376,7 @@ def test_the_levels_route_refusals_keep_status_and_process_and_it_never_raises(m
     app2, uiapp2, reg2, tokens2, docs2 = read_rig()
     handler2 = levels_handlers(monkeypatch, fake_routes, uiapp2, reg2, FakeDB())[("/document_levels/", ("POST",))]
     monkeypatch.setattr(documents, "_db", no_db)
-    handler2(FakeRequest({"document": tokens2["b"]}))
+    handler2(uiapp2, FakeRequest({"document": tokens2["b"]}))
     payload, status = fake_routes[-1]
     assert status == 500 and payload["error_code"] == "document-read-failed"
     assert "DB namespace unavailable" in payload["error"] and payload["process_identity"] == IDENT
@@ -2333,7 +2386,7 @@ def test_the_levels_route_without_process_identity_says_so(monkeypatch, fake_rou
     app, uiapp, reg, tokens, docs = read_rig()
     handler = levels_handlers(monkeypatch, fake_routes, uiapp, reg, FakeDB(), identity_value="none")[
         ("/document_levels/", ("POST",))]
-    handler(FakeRequest({"document": tokens["b"]}))
+    handler(uiapp, FakeRequest({"document": tokens["b"]}))
     payload, status = fake_routes[-1]
     assert status == 200 and "process_identity" not in payload
     assert payload["identity_error"] == "no retained RoutesServer"
@@ -2649,3 +2702,162 @@ def test_activate_document_docstring_states_the_exception_diagnostics():
     doc = mcp.tools["activate_document"].__doc__
     assert "activation-failed" in doc and "exception diagnostics" in doc.lower()
     assert "OpenAndActivateDocument" not in doc
+
+
+# ===========================================================================
+# 02-04 gap closure: every documents route runs in the Revit API context.
+#
+# pyRevit runs a route handler in the API context (UI.ExternalEvent ->
+# RequestHandler.Execute(uiapp), the Revit main thread) ONLY if the handler
+# function declares an argument named uiapp, uidoc or doc (handler.py
+# wants_api_context -> modutils.has_any_arguments). A handler with only
+# ``request`` runs directly on the HTTP server thread, outside the API context;
+# there OpenAndActivateDocument raised InternalException in the live 02-07 G4
+# bench. The routes therefore declare ``uiapp`` and use the INJECTED object, never
+# pyrevit.HOST_APP, for every Revit API touch. Offline evidence only: the live
+# recheck is 02-07 after a full Revit restart (never pyRevit Reload).
+# ===========================================================================
+
+API_CONTEXT_ARGUMENTS = {"uiapp", "uidoc", "doc"}
+
+
+def route_handler_arguments(path="revit_mcp/documents.py"):
+    """{function name: [argument names]} of every @api.route handler in a route module."""
+    with open(os.path.join(REPO_ROOT, *path.split("/")), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    found = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for decorator in node.decorator_list:
+            if (isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute)
+                    and decorator.func.attr == "route"
+                    and isinstance(decorator.func.value, ast.Name) and decorator.func.value.id == "api"):
+                found[node.name] = [arg.arg for arg in node.args.args]
+    return found
+
+
+def test_every_documents_route_handler_declares_an_api_context_argument():
+    """pyRevit dispatches a handler through the ExternalEvent (Revit API context, main
+    thread) only when it declares uiapp, uidoc or doc; otherwise it runs on the HTTP
+    server thread, outside the API context (pyrevit/routes/server/handler.py
+    wants_api_context, modutils.has_any_arguments). Pinned for documents.py only."""
+    handlers = route_handler_arguments()
+    assert sorted(handlers) == ["activate_document", "document_levels", "document_summary", "list_documents"]
+    for name, arguments in sorted(handlers.items()):
+        assert set(arguments) & API_CONTEXT_ARGUMENTS, (
+            name + " declares " + repr(arguments) + " and would run on the HTTP thread")
+        assert "uiapp" in arguments, name
+
+
+def pyrevit_dispatch(handler, **available):
+    """What pyRevit's prepare_handler_kwargs does: offer uiapp, uidoc, doc and request,
+    pass the handler only the arguments it declares (modutils.filter_kwargs)."""
+    declared = set(inspect.signature(handler).parameters)
+    return handler(**{key: value for key, value in available.items() if key in declared})
+
+
+def test_handlers_answer_with_an_injected_uiapp_when_no_document_is_active(monkeypatch, fake_routes):
+    app = FlagApplication()
+    uiapp = FakeUIApp(app)                       # no document open, nothing active
+    handlers = activate_handlers(monkeypatch, fake_routes, uiapp, identity.DocumentRegistry())
+    pyrevit_dispatch(handlers[("/documents/", ("GET",))], uiapp=uiapp, uidoc=None, doc=None,
+                     request=FakeRequest(None))
+    payload, status = fake_routes[-1]
+    assert status == 200 and payload["documents"] == [] and payload["count"] == 0
+    assert payload["process_identity"] == IDENT and "error" not in payload
+    for path in ("/activate_document/", "/document_summary/", "/document_levels/"):
+        pyrevit_dispatch(handlers[(path, ("POST",))], uiapp=uiapp, uidoc=None, doc=None,
+                         request=FakeRequest(b'{"document": "doc1.aaaaaaaaaaaa.1"}'))
+        payload, status = fake_routes[-1]
+        assert status in (400, 404, 503) and payload["error"] and payload["process_identity"] == IDENT, path
+    assert uiapp.calls == [] and host_app_trap().touched == []
+
+
+def test_the_activation_call_is_made_on_the_injected_uiapp_and_never_on_host_app(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig()
+    handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
+    pyrevit_dispatch(handler, uiapp=uiapp, uidoc=None, doc=None,
+                     request=FakeRequest(('{"document": "%s"}' % tokens["coord"]).encode("utf-8")))
+    payload, status = fake_routes[-1]
+    assert status == 200 and payload["activation"] == "activated", payload
+    assert uiapp.calls == [("C:/Models/COORD.rvt",)]
+    trap = sys.modules["pyrevit"].HOST_APP
+    assert trap.uiapp.touched == [] and trap.app.touched == []
+
+
+def test_the_addressed_reads_use_the_injected_uiapp_and_never_host_app(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB()
+    handlers = levels_handlers(monkeypatch, fake_routes, uiapp, reg, db)
+    for path in ("/document_summary/", "/document_levels/"):
+        pyrevit_dispatch(handlers[(path, ("POST",))], uiapp=uiapp, uidoc=None, doc=None,
+                         request=FakeRequest(('{"document": "%s"}' % tokens["b"]).encode("utf-8")))
+        payload, status = fake_routes[-1]
+        assert status == 200 and payload["ui_switched"] is False, (path, payload)
+    pyrevit_dispatch(handlers[("/documents/", ("GET",))], uiapp=uiapp, uidoc=None, doc=None)
+    payload, status = fake_routes[-1]
+    assert status == 200 and payload["count"] == 2 and payload["active_document"] == tokens["a"]
+    assert only_from(db, docs["b"], docs["a"]) and uiapp.calls == []
+    trap = sys.modules["pyrevit"].HOST_APP
+    assert trap.uiapp.touched == [] and trap.app.touched == []
+
+
+def test_the_live_snapshot_reads_the_injected_uiapp_not_host_app(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig()
+    activate_handlers(monkeypatch, fake_routes, uiapp, reg)       # installs the HOST_APP trap
+    documents_now, active = identity.read_live_snapshot(uiapp)
+    assert len(documents_now) == 2 and active.Equals(docs["other"])
+    assert sys.modules["pyrevit"].HOST_APP.uiapp.touched == []
+    assert sys.modules["pyrevit"].HOST_APP.app.touched == []
+    app.close_document(docs["coord"])
+    assert len(identity.read_live_snapshot(uiapp)[0]) == 1        # read again, never cached
+    empty = FakeUIApp(FakeApplication())
+    assert identity.read_live_snapshot(empty) == ([], None)
+
+
+def test_the_live_snapshot_without_an_injected_uiapp_keeps_the_host_app_behavior(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig()
+    monkeypatch.setitem(sys.modules, "pyrevit", types.SimpleNamespace(
+        routes=sys.modules["pyrevit"].routes, HOST_APP=types.SimpleNamespace(uiapp=uiapp, app=uiapp.app)))
+    documents_now, active = identity.read_live_snapshot()
+    assert len(documents_now) == 2 and active.Equals(docs["other"])
+
+
+def test_process_identity_is_read_from_the_injected_uiapp_when_given(monkeypatch, fake_routes):
+    monkeypatch.setitem(sys.modules, "pyrevit", types.SimpleNamespace(
+        routes=sys.modules["pyrevit"].routes,
+        HOST_APP=types.SimpleNamespace(uiapp=HostAppTrap(), app=HostAppTrap())))
+    seen = []
+    monkeypatch.setattr(identity, "get_process_identity", lambda version: seen.append(version) or {"v": version})
+    injected = types.SimpleNamespace(Application=types.SimpleNamespace(VersionNumber="2027"))
+    assert identity.process_identity_or_error(injected) == ({"v": "2027"}, None)
+    assert seen == ["2027"]
+    value, problem = identity.process_identity_or_error()         # no uiapp: HOST_APP, which is the trap
+    assert value is None and problem
+
+
+def test_run_activation_reads_through_the_injected_uiapp_when_no_reader_is_given(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig()
+    activate_handlers(monkeypatch, fake_routes, uiapp, reg)       # installs the HOST_APP trap
+    status, payload = documents.run_activation(
+        tokens["coord"], uiapp, registry=reg, file_exists=exists_everywhere)
+    assert status == 200 and payload["activation"] == "activated", payload
+    assert uiapp.calls == [("C:/Models/COORD.rvt",)]
+    assert sys.modules["pyrevit"].HOST_APP.uiapp.touched == []
+    assert sys.modules["pyrevit"].HOST_APP.app.touched == []
+
+
+def test_run_document_summary_reads_through_the_injected_uiapp_when_no_reader_is_given(
+        monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    activate_handlers(monkeypatch, fake_routes, uiapp, reg)       # installs the HOST_APP trap
+    db = FakeDB()
+    status, payload = documents.run_document_summary(tokens["b"], registry=reg, db=db, uiapp=uiapp)
+    assert status == 200 and payload["target_is_active"] is False and payload["ui_switched"] is False
+    assert only_from(db, docs["b"], docs["a"])
+    status, payload = documents.run_document_levels(
+        tokens["b"], registry=reg, db=FakeDB(), element_id=lambda level: level.Id, uiapp=uiapp)
+    assert status == 200 and payload["total_levels"] == 2
+    assert sys.modules["pyrevit"].HOST_APP.uiapp.touched == []
+    assert sys.modules["pyrevit"].HOST_APP.app.touched == []

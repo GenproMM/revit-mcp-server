@@ -252,3 +252,253 @@ def test_unknown_text_after_first_row_still_fails_closed():
     text = "heading\nTCP 127.0.0.1:48884 0.0.0.0:0 LISTENING 91920\nheading again\n"
     assert bridge.parse_netstat_listener_rows(text, [48884]) is None
     assert bridge.parse_netstat_listener_rows("heading only\n", [48884]) is None
+
+
+# --- 02-03 Task 1: discovery, unambiguous default, discovery facade ----------
+# Offline throughout: netstat and HTTP are both replaced, so these tests never
+# touch a real Revit, the OS socket table or the network.
+
+TOKEN_B = "22222222-2222-4222-8222-222222222222"
+
+
+class World:
+    """A fake machine: listeners per port and what each port's HTTP side says."""
+
+    def __init__(self, listeners, revit=None, inventory=True):
+        self.listeners = listeners          # {port: [pid, ...]}
+        self.revit = revit or {}            # {port: ("ok", pid, token, status) | ("http", code) | ("raise", exc)}
+        self.inventory = inventory
+        self.requests = []                  # [(port, method, path)]
+        self.snapshot_ports = []
+
+    def snapshot(self, ports, **_kwargs):
+        self.snapshot_ports.append(list(ports))
+        if not self.inventory:
+            return None
+        return dict((p, list(self.listeners.get(p, []))) for p in ports)
+
+    def client(self, target):
+        def respond(request):
+            port = request.url.port
+            self.requests.append((port, request.method, request.url.path))
+            kind = self.revit.get(port, ("raise", httpx.ConnectError("refused")))
+            if kind[0] == "raise":
+                raise kind[1]
+            if kind[0] == "http":
+                return httpx.Response(kind[1], text="not ours")
+            _, pid, token, status = kind
+            body = {"status": "active" if status == 200 else "unhealthy",
+                    "process_identity": {"pid": pid, "actual_port": port,
+                                         "session_token": token, "revit_version": "2024"}}
+            if status == 503:
+                body["error"] = "No active Revit document"
+            return httpx.Response(status, json=body)
+        return httpx.AsyncClient(
+            base_url="http://127.0.0.1:{}/genpro_revit_mcp/".format(target["port"]),
+            transport=httpx.MockTransport(respond), trust_env=False)
+
+    def install(self, monkeypatch):
+        monkeypatch.setattr(bridge, "listener_snapshot", self.snapshot)
+        monkeypatch.setattr(bridge, "_selected_client", self.client)
+        return self
+
+
+def one_revit(port=48884, pid=1234, token=TOKEN, status=200):
+    return {"listeners": {port: [pid]}, "revit": {port: ("ok", pid, token, status)}}
+
+
+def test_discovery_zero_listeners_is_a_named_empty_result(monkeypatch):
+    world = World({}).install(monkeypatch)
+    result = asyncio.run(bridge.discover_targets())
+    assert result["status"] == "ok"
+    assert result["usable"] == [] and result["unusable"] == []
+    assert world.requests == []
+    with pytest.raises(ValueError) as caught:
+        asyncio.run(bridge.resolve_default_target())
+    assert "no usable revit process" in str(caught.value).lower()
+    assert "not sent" in str(caught.value).lower()
+
+
+def test_discovery_one_usable_defaults_to_that_incarnation(monkeypatch):
+    world = World(**one_revit(port=48886, pid=4321, token=TOKEN)).install(monkeypatch)
+    result = asyncio.run(bridge.discover_targets())
+    assert [u["pid"] for u in result["usable"]] == [4321]
+    entry = result["usable"][0]
+    assert entry["port"] == 48886 and entry["session_token"] == TOKEN
+    assert entry["revit_version"] == "2024" and entry["document_open"] is True
+    parsed = bridge.parse_target(entry["selector"])
+    assert (parsed["pid"], parsed["port"], parsed["session_token"]) == (4321, 48886, TOKEN)
+    target = asyncio.run(bridge.resolve_default_target())
+    assert (target["pid"], target["port"], target["session_token"]) == (4321, 48886, TOKEN)
+    # Only the identity route is ever requested while discovering.
+    assert world.requests and all(p == "/genpro_revit_mcp/status/" for _, _, p in world.requests)
+    assert all(m == "GET" for _, m, _ in world.requests)
+
+
+def test_discovery_no_document_503_is_usable_not_absent(monkeypatch):
+    World(**one_revit(status=503)).install(monkeypatch)
+    result = asyncio.run(bridge.discover_targets())
+    assert len(result["usable"]) == 1
+    assert result["usable"][0]["document_open"] is False
+    assert asyncio.run(bridge.resolve_default_target())["pid"] == 1234
+
+
+def test_discovery_two_usable_refuses_default_and_lists_every_candidate(monkeypatch):
+    world = World(
+        {48884: [111], 48885: [222]},
+        {48884: ("ok", 111, TOKEN, 200), 48885: ("ok", 222, TOKEN_B, 200)},
+    ).install(monkeypatch)
+    result = asyncio.run(bridge.discover_targets())
+    assert sorted(u["pid"] for u in result["usable"]) == [111, 222]
+    with pytest.raises(ValueError) as caught:
+        asyncio.run(bridge.resolve_default_target())
+    text = str(caught.value)
+    assert "not sent" in text.lower() and "multiple" in text.lower()
+    for entry in result["usable"]:
+        assert entry["selector"] in text and str(entry["pid"]) in text
+    assert all(p == "/genpro_revit_mcp/status/" for _, _, p in world.requests)
+
+
+def test_same_port_pair_is_unusable_names_both_pids_and_is_never_probed(monkeypatch):
+    world = World({48884: [111, 222]}, {48884: ("ok", 111, TOKEN, 200)}).install(monkeypatch)
+    result = asyncio.run(bridge.discover_targets())
+    assert result["usable"] == []
+    assert len(result["unusable"]) == 1
+    entry = result["unusable"][0]
+    assert entry["port"] == 48884 and entry["pids"] == [111, 222]
+    assert entry["reason"] == "listener-collision"
+    assert "111" in entry["detail"] and "222" in entry["detail"]
+    assert world.requests == []          # a duplicated listener is never handshaken
+    with pytest.raises(ValueError) as caught:
+        asyncio.run(bridge.resolve_default_target())
+    assert "111" in str(caught.value) and "222" in str(caught.value)
+
+
+def test_collision_beside_one_usable_process_still_refuses_the_default(monkeypatch):
+    world = World(
+        {48884: [111, 222], 48885: [333]},
+        {48885: ("ok", 333, TOKEN, 200)},
+    ).install(monkeypatch)
+    with pytest.raises(ValueError) as caught:
+        asyncio.run(bridge.resolve_default_target())
+    text = str(caught.value)
+    assert "111" in text and "222" in text and "collision" in text.lower()
+    assert [r[0] for r in world.requests] == [48885]
+
+
+def test_inventory_failure_is_a_named_refusal_not_an_empty_list(monkeypatch):
+    world = World({}, inventory=False).install(monkeypatch)
+    result = asyncio.run(bridge.discover_targets())
+    assert result["status"] == "inventory-unavailable"
+    assert result["usable"] == [] and result["unusable"] == []
+    assert "inventory" in result["message"].lower()
+    with pytest.raises(ValueError) as caught:
+        asyncio.run(bridge.resolve_default_target())
+    assert "inventory" in str(caught.value).lower()
+    assert "no usable" not in str(caught.value).lower()
+    assert world.requests == []
+
+
+@pytest.mark.parametrize("answer, reason", [
+    (("raise", httpx.ReadTimeout("late")), "handshake-failed"),
+    (("raise", httpx.ConnectError("refused")), "handshake-failed"),
+    (("http", 404), "not-revit-status"),
+    (("ok", 999, TOKEN, 200), "identity-mismatch"),      # answers as another PID
+])
+def test_singleton_listener_that_cannot_prove_identity_is_unusable(monkeypatch, answer, reason):
+    World({48884: [111]}, {48884: answer}).install(monkeypatch)
+    result = asyncio.run(bridge.discover_targets())
+    assert result["usable"] == []
+    assert [(u["port"], u["pids"], u["reason"]) for u in result["unusable"]] == [(48884, [111], reason)]
+    with pytest.raises(ValueError):
+        asyncio.run(bridge.resolve_default_target())
+
+
+def test_discovery_probe_window_covers_default_and_configured_port(monkeypatch):
+    world = World({}).install(monkeypatch)
+    asyncio.run(bridge.discover_targets())
+    probed = world.snapshot_ports[0]
+    assert bridge.DEFAULT_REVIT_PORT in probed and bridge.REVIT_PORT in probed
+    assert probed == sorted(set(probed))
+
+
+def test_probe_client_never_uses_environment_proxies_and_never_redirects():
+    client = bridge._selected_client({"host": "127.0.0.1", "port": 48884})
+    assert client._trust_env is False
+    assert client.follow_redirects is False
+    assert str(client.base_url) == "http://127.0.0.1:48884/genpro_revit_mcp/"
+
+
+def test_restarted_process_on_reused_pid_and_port_is_rejected_for_old_selector(monkeypatch):
+    # Same PID, same port, new token: the old selector must not be accepted.
+    world = World(**one_revit(token=TOKEN_B)).install(monkeypatch)
+    out = asyncio.run(bridge.revit_get("/status/", target=selector(port=48884)))
+    assert out.startswith("Error:") and "rediscover" in out.lower()
+    assert "Verified" not in out
+    assert all(p == "/genpro_revit_mcp/status/" for _, _, p in world.requests)
+
+
+def test_facade_is_attached_to_the_injected_get_callable():
+    assert bridge.revit_get.discover_targets is bridge.discover_targets
+    assert bridge.revit_get.revit_target == bridge.REVIT_TARGET
+
+
+class FakeServer:
+    """Collects tools the way FastMCP would, without importing the server."""
+
+    def __init__(self):
+        self.tools = {}
+
+    def tool(self):
+        def register(fn):
+            self.tools[fn.__name__] = fn
+            return fn
+        return register
+
+
+def _registered_discovery_tool(get_callable):
+    import tools
+    server = FakeServer()
+
+    async def unused(*args, **kwargs):  # pragma: no cover - must never run
+        raise AssertionError("discovery must not use the post/image transports")
+
+    tools.register_tools(server, get_callable, unused, unused)
+    return server.tools["discover_revit_targets"]
+
+
+def test_discovery_tool_through_the_actual_registration_callable(monkeypatch):
+    World(
+        {48884: [111, 222], 48885: [333], 48886: [444]},
+        {48885: ("ok", 333, TOKEN, 200), 48886: ("ok", 444, TOKEN_B, 503)},
+    ).install(monkeypatch)
+    tool = _registered_discovery_tool(bridge.revit_get)
+    out = asyncio.run(tool())
+    assert isinstance(out, str)
+    for port, pid, token in ((48885, 333, TOKEN), (48886, 444, TOKEN_B)):
+        assert selector(port=port, pid=pid, session_token=token) in out
+    assert "333" in out and "444" in out
+    assert "111" in out and "222" in out and "collision" in out.lower()
+    assert "no document" in out.lower()
+    # The collision is never offered as a selector.
+    assert out.count("revit1:") == 2
+
+
+def test_discovery_tool_reports_inventory_failure_visibly(monkeypatch):
+    World({}, inventory=False).install(monkeypatch)
+    out = asyncio.run(_registered_discovery_tool(bridge.revit_get)())
+    assert out.startswith("Error:") and "inventory" in out.lower()
+    assert "no usable" not in out.lower()
+
+
+def test_discovery_tool_reports_zero_processes_distinctly(monkeypatch):
+    World({}).install(monkeypatch)
+    out = asyncio.run(_registered_discovery_tool(bridge.revit_get)())
+    assert "no usable revit" in out.lower() and "inventory" not in out.lower()
+
+
+def test_discovery_tool_without_facade_fails_visibly_and_never_reports_none():
+    async def plain_get(endpoint, ctx=None, **kwargs):  # pragma: no cover - never called
+        raise AssertionError("an unselected route must not be requested")
+    out = asyncio.run(_registered_discovery_tool(plain_get)())
+    assert out.startswith("Error:") and "discovery" in out.lower()

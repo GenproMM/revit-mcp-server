@@ -1572,3 +1572,551 @@ def test_the_activation_call_takes_one_positional_path_read_from_the_target_own_
     value = assigned[0].value
     assert isinstance(value, ast.Attribute) and value.attr == "PathName"
     assert isinstance(value.value, ast.Name) and value.value.id == "document"
+
+
+# ===========================================================================
+# 02-06 Task 1: read the summary of the explicitly selected document (D-11, the
+# accepted G3 document-only-path). Offline evidence only: a fake DB records the
+# Document every collector is built on. Whether the production route preserves the
+# UI focus on live Revit is NOT proved here; 02-07 rechecks it after a full Revit
+# restart (never pyRevit Reload).
+# ===========================================================================
+
+
+class FakeLevel(object):
+    """A Level element: a raising Elevation models an unreadable one."""
+
+    def __init__(self, name, elevation, ident):
+        self.Name = name
+        self._elevation = elevation
+        self.Id = ident
+
+    @property
+    def Elevation(self):
+        if isinstance(self._elevation, Exception):
+            raise self._elevation
+        return self._elevation
+
+
+class FakeInfo(object):
+    """ProjectInfo: a value that is an Exception instance is raised when read."""
+
+    def __init__(self, values):
+        self._values = values
+
+    def __getattr__(self, name):
+        values = self.__dict__.get("_values", {})
+        if name not in values:
+            raise AttributeError(name)
+        value = values[name]
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+class ModelDocument(FlagDocument):
+    """A document that also holds model data: elements, levels and project information."""
+
+    @property
+    def ProjectInformation(self):
+        info = self._lifetime.info
+        if isinstance(info, Exception):
+            raise info
+        return FakeInfo(info)
+
+    @property
+    def model(self):
+        return self._lifetime.model
+
+
+class ModelApplication(FlagApplication):
+    def open_model(self, title, path, elements, levels, info=None, **flags):
+        lifetime = FlagApplication.open_document(self, title, path, **flags)._lifetime
+        lifetime.model = {"elements": list(range(elements)), "levels": levels}
+        lifetime.info = {"Name": title + " project", "Number": "N-" + title, "ClientName": "Client " + title,
+                         "Status": "Design"} if info is None else info
+        return ModelDocument(lifetime, self._raises)
+
+    @property
+    def Documents(self):
+        return [ModelDocument(lifetime, self._raises) for lifetime in self._open]
+
+
+class FakeBuiltInCategory(object):
+    OST_Levels = "OST_Levels"
+
+
+class FakeCollector(object):
+    def __init__(self, document):
+        self._document = document
+        self._category = None
+        self._types_excluded = False
+
+    def OfCategory(self, category):
+        self._category = category
+        return self
+
+    def WhereElementIsNotElementType(self):
+        self._types_excluded = True
+        return self
+
+    def _elements(self):
+        assert self._types_excluded, "only non-type elements are collected"
+        if self._category == FakeBuiltInCategory.OST_Levels:
+            return self._document.model["levels"]
+        assert self._category is None
+        return self._document.model["elements"]
+
+    def GetElementCount(self):
+        return len(self._elements())
+
+    def ToElements(self):
+        return list(self._elements())
+
+
+class FakeDB(object):
+    """The DB namespace: records the Document every collector is built on."""
+
+    BuiltInCategory = FakeBuiltInCategory
+
+    def __init__(self, on_collect=None, raises=None):
+        self.collected = []
+        self._on_collect = on_collect
+        self._raises = raises
+
+    def FilteredElementCollector(self, document):
+        self.collected.append(document)
+        if self._raises is not None:
+            raise self._raises
+        if self._on_collect is not None:
+            self._on_collect(document)
+        return FakeCollector(document)
+
+
+def read_rig(mode="activate"):
+    """OTHER (3 elements, 1 level) is active; COORD (10 elements, 2 levels) is open, not active."""
+    app = ModelApplication()
+    other = app.open_model("OTHER", "C:/Models/OTHER.rvt", 3, [FakeLevel("OTHER L1", 0.0, 11)])
+    coord = app.open_model("COORD", "C:/Models/COORD.rvt", 10,
+                           [FakeLevel("COORD L2", 10.0, 22), FakeLevel("COORD L1", 0.0, 21)],
+                           info={"Name": "Coordination", "Number": "B-200", "ClientName": "Client B",
+                                 "Status": "Design"})
+    uiapp = FakeUIApp(app, other, mode)
+    reg = identity.DocumentRegistry()
+    tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    return app, uiapp, reg, {"a": tokens[0], "b": tokens[1]}, {"a": other, "b": coord}
+
+
+def read_summary(uiapp, reg, selector, db, read_snapshot=None):
+    return documents.run_document_summary(
+        selector, read_snapshot=read_snapshot or uiapp.read_snapshot, registry=reg, db=db)
+
+
+def only_from(db, document, other):
+    return (bool(db.collected) and all(d.Equals(document) for d in db.collected)
+            and not any(d.Equals(other) for d in db.collected))
+
+
+# -------------------------------------------------------------- the read itself
+
+
+def test_summary_of_an_inactive_document_is_read_from_that_document_only():
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB()
+    status, payload = read_summary(uiapp, reg, tokens["b"], db)
+    assert status == 200 and payload["status"] == "success"
+    summary = payload["summary"]
+    assert summary["title"] == "COORD" and summary["path"] == "C:/Models/COORD.rvt"
+    assert summary["non_type_element_count"] == 10 and summary["level_count"] == 2
+    assert summary["project_information"] == {
+        "name": "Coordination", "number": "B-200", "client": "Client B", "status": "Design"}
+    assert summary["unreadable_fields"] == []
+    assert payload["document"]["document"] == tokens["b"] and payload["document"]["active"] is False
+    assert only_from(db, docs["b"], docs["a"])
+    assert uiapp.calls == []                       # nothing was activated
+
+
+def test_summary_reports_the_active_flag_and_the_before_and_after_diagnostics():
+    app, uiapp, reg, tokens, docs = read_rig()
+    status, payload = read_summary(uiapp, reg, tokens["b"], FakeDB())
+    assert payload["target_is_active"] is False and payload["ui_switched"] is False
+    assert payload["active_before"] == tokens["a"] == payload["active_after"]
+    assert uiapp.active.Equals(docs["a"])
+    status, payload = read_summary(uiapp, reg, tokens["a"], FakeDB())
+    assert status == 200 and payload["target_is_active"] is True and payload["ui_switched"] is False
+    assert payload["summary"]["title"] == "OTHER" and payload["summary"]["non_type_element_count"] == 3
+
+
+def test_a_switch_of_the_active_document_during_the_read_is_reported_not_hidden():
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB(on_collect=lambda document: setattr(uiapp, "active", docs["b"]))
+    status, payload = read_summary(uiapp, reg, tokens["b"], db)
+    assert status == 200 and payload["summary"]["title"] == "COORD"
+    assert payload["ui_switched"] is True
+    assert payload["active_before"] == tokens["a"] and payload["active_after"] == tokens["b"]
+
+
+def test_an_unreadable_after_state_leaves_the_switch_unknown_not_false():
+    app, uiapp, reg, tokens, docs = read_rig()
+    status, payload = read_summary(uiapp, reg, tokens["b"], FakeDB(),
+                                   read_snapshot=failing_read_after(uiapp, 1))
+    assert status == 200 and payload["summary"]["title"] == "COORD"
+    assert payload["ui_switched"] is None and payload["active_after"] is None
+    assert "Application.Documents unavailable" in payload["active_after_error"]
+
+
+def test_project_information_fields_that_cannot_be_read_are_omitted_and_named():
+    app = ModelApplication()
+    other = app.open_model("OTHER", "C:/Models/OTHER.rvt", 3, [])
+    app.open_model("COORD", "C:/Models/COORD.rvt", 10, [],
+                   info={"Name": "Coordination", "Number": RuntimeError("no number"),
+                         "ClientName": "Client B"})   # Status is absent altogether
+    uiapp = FakeUIApp(app, other)
+    reg = identity.DocumentRegistry()
+    tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    status, payload = read_summary(uiapp, reg, tokens[1], FakeDB())
+    summary = payload["summary"]
+    assert status == 200
+    assert summary["project_information"] == {"name": "Coordination", "client": "Client B"}
+    assert sorted(summary["unreadable_fields"]) == ["project_information.number", "project_information.status"]
+    assert summary["non_type_element_count"] == 10      # the measured fields do not depend on it
+
+
+def test_unreadable_project_information_never_borrows_another_documents_values():
+    app = ModelApplication()
+    other = app.open_model("OTHER", "C:/Models/OTHER.rvt", 3, [])
+    app.open_model("COORD", "C:/Models/COORD.rvt", 10, [], info=RuntimeError("no ProjectInformation"))
+    uiapp = FakeUIApp(app, other)
+    reg = identity.DocumentRegistry()
+    tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    status, payload = read_summary(uiapp, reg, tokens[1], FakeDB())
+    assert status == 200 and payload["summary"]["project_information"] == {}
+    assert payload["summary"]["unreadable_fields"] == ["project_information"]
+    assert "OTHER" not in str(payload["summary"])
+
+
+# ------------------------------------------------------------------- refusals
+
+
+def test_a_closed_token_is_refused_by_name_even_for_an_addressed_read():
+    app, uiapp, reg, tokens, docs = read_rig()
+    app.close_document(docs["b"])
+    db = FakeDB()
+    status, payload = read_summary(uiapp, reg, tokens["b"], db)
+    assert status == 404 and payload["error_code"] == "document-closed" and payload["error"]
+    assert db.collected == []
+    assert "summary" not in payload and "document" not in payload   # never relabeled as other data
+
+
+def test_a_replacement_with_the_same_title_and_path_does_not_inherit_the_token():
+    app, uiapp, reg, tokens, docs = read_rig()
+    app.close_document(docs["b"])
+    app.open_model("COORD", "C:/Models/COORD.rvt", 99, [])
+    db = FakeDB()
+    status, payload = read_summary(uiapp, reg, tokens["b"], db)
+    assert status == 404 and payload["error_code"] == "document-closed"
+    assert db.collected == [] and "summary" not in payload
+
+
+def test_unknown_stale_malformed_and_omitted_selectors_refuse_without_collecting():
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB()
+    cases = [
+        ("doc1.{}.99".format(reg.generation), 404, "document-token-unknown"),
+        ("doc1.000000000000.1", 404, "document-token-stale"),
+        ("COORD", 400, "document-selector-invalid"),
+        ("C:/Models/COORD.rvt", 400, "document-selector-invalid"),
+        (7, 400, "document-selector-invalid"),
+        (None, 400, "document-selector-required"),
+    ]
+    for selector, status_code, code in cases:
+        status, payload = read_summary(uiapp, reg, selector, db)
+        assert (status, payload["error_code"]) == (status_code, code), selector
+        assert "summary" not in payload
+    assert db.collected == []
+    status, payload = read_summary(uiapp, reg, None, db)
+    assert [c["document"] for c in payload["candidates"]] == [tokens["a"], tokens["b"]]
+
+
+def test_an_ambiguous_lifetime_refuses_and_collects_nothing():
+    app, uiapp, reg, tokens, docs = read_rig()
+    single = uiapp.read_snapshot
+
+    def doubled():
+        documents_now, active = single()
+        return documents_now + documents_now[1:], active
+
+    db = FakeDB()
+    status, payload = read_summary(uiapp, reg, tokens["b"], db, read_snapshot=doubled)
+    assert status == 400 and payload["error_code"] == "document-identity-ambiguous"
+    assert db.collected == [] and "summary" not in payload
+
+
+def test_an_unreadable_open_document_list_is_a_503_that_never_raises():
+    app, uiapp, reg, tokens, docs = read_rig()
+
+    def broken():
+        raise RuntimeError("Application.Documents unavailable")
+
+    db = FakeDB()
+    status, payload = read_summary(uiapp, reg, tokens["b"], db, read_snapshot=broken)
+    assert status == 503 and payload["error_code"] == "document-registry-unavailable"
+    assert "Application.Documents unavailable" in payload["error"]
+    assert db.collected == []
+
+
+def test_a_collector_that_raises_is_a_named_500_with_no_data_and_the_observed_active_document():
+    app, uiapp, reg, tokens, docs = read_rig()
+    status, payload = read_summary(uiapp, reg, tokens["b"], FakeDB(raises=RuntimeError("Document was closed")))
+    assert status == 500 and payload["error_code"] == "document-read-failed" and payload["error"]
+    assert "Document was closed" in payload["error"] and tokens["b"] in payload["error"]
+    assert "summary" not in payload
+    assert payload["document"]["document"] == tokens["b"]
+    assert payload["observed_active_document"]["document"] == tokens["a"]
+    assert uiapp.calls == []
+
+
+def test_every_request_resolves_the_live_token_again():
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB()
+    assert read_summary(uiapp, reg, tokens["b"], db)[0] == 200
+    app.close_document(docs["b"])
+    db_after = FakeDB()
+    status, payload = read_summary(uiapp, reg, tokens["b"], db_after)
+    assert status == 404 and payload["error_code"] == "document-closed"
+    assert db_after.collected == []
+
+
+# ----------------------------------------------- no UI dependency in the collector
+
+
+UI_DEPENDENT_NAMES = {"ActiveUIDocument", "HOST_APP", "uiapp", "UIDocument", "UIApplication",
+                      "ActiveView", "uidoc", "revit", "doc", "OpenAndActivateDocument"}
+
+
+def code_identifiers(node):
+    found = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Attribute):
+            found.add(child.attr)
+        elif isinstance(child, ast.Name):
+            found.add(child.id)
+        elif isinstance(child, ast.ImportFrom):
+            found.update(alias.name for alias in child.names)
+    return found
+
+
+def test_the_summary_collector_and_its_helpers_have_no_ui_or_active_document_dependency():
+    for name in ("collect_document_summary", "_project_information", "_db"):
+        assert code_identifiers(function_node(name)) & UI_DEPENDENT_NAMES == set(), name
+
+
+def test_the_read_orchestration_never_activates_and_never_reads_the_ui_document_itself():
+    for name in ("run_document_read", "run_document_summary"):
+        node = function_node(name)
+        assert "OpenAndActivateDocument" not in callee_names(node), name
+        assert code_identifiers(node) & {"ActiveUIDocument", "HOST_APP", "uiapp", "OpenAndActivateDocument"} == set()
+    # The only place the UI document is read is the identity snapshot, never this module.
+    assert "ActiveUIDocument" not in code_identifiers(documents_tree())
+
+
+# ----------------------------------------------------------------- the route
+
+
+def read_handlers(monkeypatch, fake_routes, uiapp, registry, db, identity_value=None):
+    captured = activate_handlers(monkeypatch, fake_routes, uiapp, registry, identity_value)
+    monkeypatch.setattr(documents, "_db", lambda: db)
+    return captured
+
+
+def test_the_summary_route_is_a_post_handler_taking_only_the_request(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    captured = read_handlers(monkeypatch, fake_routes, uiapp, reg, FakeDB())
+    handler = captured[("/document_summary/", ("POST",))]
+    assert list(inspect.signature(handler).parameters) == ["request"]
+    assert ("/documents/", ("GET",)) in captured and ("/activate_document/", ("POST",)) in captured
+
+
+def test_the_summary_route_reads_a_text_plain_bytes_body_and_names_the_process(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB()
+    handler = read_handlers(monkeypatch, fake_routes, uiapp, reg, db)[("/document_summary/", ("POST",))]
+    handler(FakeRequest(('{"document": "%s"}' % tokens["b"]).encode("utf-8")))
+    payload, status = fake_routes[-1]
+    assert status == 200 and payload["summary"]["title"] == "COORD"
+    assert payload["process_identity"] == IDENT and payload["ui_switched"] is False
+    assert only_from(db, docs["b"], docs["a"]) and uiapp.calls == []
+
+
+def test_the_summary_route_refusal_keeps_its_status_and_the_process(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    app.close_document(docs["b"])
+    db = FakeDB()
+    handler = read_handlers(monkeypatch, fake_routes, uiapp, reg, db)[("/document_summary/", ("POST",))]
+    handler(FakeRequest({"document": tokens["b"]}))     # a dict body is accepted too
+    payload, status = fake_routes[-1]
+    assert status == 404 and payload["error_code"] == "document-closed" and "summary" not in payload
+    assert payload["process_identity"] == IDENT and db.collected == []
+
+
+def test_the_summary_route_answers_a_bad_or_empty_body_with_400(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB()
+    handler = read_handlers(monkeypatch, fake_routes, uiapp, reg, db)[("/document_summary/", ("POST",))]
+    for body in (None, b"", b"{}", b"not json", b"[1, 2]"):
+        handler(FakeRequest(body))
+        payload, status = fake_routes[-1]
+        assert status == 400 and payload["error"], body
+        assert payload["process_identity"] == IDENT
+    assert db.collected == []
+
+
+def test_the_summary_route_without_process_identity_says_so(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    handler = read_handlers(monkeypatch, fake_routes, uiapp, reg, FakeDB(), identity_value="none")[
+        ("/document_summary/", ("POST",))]
+    handler(FakeRequest({"document": tokens["b"]}))
+    payload, status = fake_routes[-1]
+    assert status == 200 and "process_identity" not in payload
+    assert payload["identity_error"] == "no retained RoutesServer"
+
+
+def test_the_summary_route_never_raises(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    handlers = read_handlers(monkeypatch, fake_routes, uiapp, reg, FakeDB())
+    handler = handlers[("/document_summary/", ("POST",))]
+
+    def no_db():
+        raise RuntimeError("DB namespace unavailable")
+
+    monkeypatch.setattr(documents, "_db", no_db)
+    handler(FakeRequest({"document": tokens["b"]}))
+    payload, status = fake_routes[-1]
+    assert status == 500 and payload["error_code"] == "document-read-failed"
+    assert "DB namespace unavailable" in payload["error"] and payload["process_identity"] == IDENT
+
+    class NoUIApp(object):
+        @property
+        def uiapp(self):
+            raise RuntimeError("no UIApplication")
+
+    monkeypatch.setattr(sys.modules["pyrevit"], "HOST_APP", NoUIApp())
+    handler(FakeRequest({"document": tokens["b"]}))
+    payload, status = fake_routes[-1]
+    assert status == 503 and payload["error_code"] == "document-registry-unavailable"
+    assert payload["process_identity"] == IDENT and uiapp.calls == []
+
+
+# ------------------------------------------------------------------ the tool
+
+
+def run_read_tool(name, response, **kwargs):
+    from tools.document_tools import register_document_tools
+
+    calls = []
+
+    async def revit_get(*args, **options):  # pragma: no cover - never called
+        raise AssertionError(name + " must not GET")
+
+    async def revit_post(path, data, ctx=None, **options):
+        calls.append((path, data, options))
+        return response
+
+    mcp = FakeMCP()
+    register_document_tools(mcp, revit_get, revit_post)
+    return asyncio.run(mcp.tools[name](**kwargs)), calls
+
+
+B_DESCRIPTOR = {"document": "doc1.aaaaaaaaaaaa.2", "title": "COORD", "path": "C:/M/COORD.rvt",
+                "active": False, "saved": True}
+
+
+def summary_reply(**override):
+    reply = {
+        "status": "success", "process_identity": dict(IDENT), "document": dict(B_DESCRIPTOR),
+        "target_is_active": False, "ui_switched": False,
+        "active_before": "doc1.aaaaaaaaaaaa.1", "active_after": "doc1.aaaaaaaaaaaa.1",
+        "summary": {"title": "COORD", "path": "C:/M/COORD.rvt", "non_type_element_count": 1234,
+                    "level_count": 7,
+                    "project_information": {"name": "Coordination", "number": "B-200",
+                                            "client": "Client B", "status": "Design"},
+                    "unreadable_fields": []},
+    }
+    reply.update(override)
+    return reply
+
+
+def test_read_document_summary_tool_posts_the_token_and_target_and_renders_the_data():
+    text, calls = run_read_tool("read_document_summary", summary_reply(),
+                                document="doc1.aaaaaaaaaaaa.2", target="revit1:xyz")
+    assert calls == [("/document_summary/", {"document": "doc1.aaaaaaaaaaaa.2"}, {"target": "revit1:xyz"})]
+    for needle in ("COORD", "C:/M/COORD.rvt", "1234", "Coordination", "B-200", "Client B", "Design",
+                   "doc1.aaaaaaaaaaaa.2", "PID 4242", "48885", "tok-abc"):
+        assert needle in text, needle
+    lowered = text.lower()
+    assert "not activated" in lowered or "no activation" in lowered
+    assert "observation" in lowered and "unchanged" in lowered
+    assert "not the model_info" in lowered or "not model_info" in lowered
+
+
+def test_read_document_summary_tool_says_loudly_when_the_active_document_changed():
+    text, _ = run_read_tool("read_document_summary",
+                            summary_reply(ui_switched=True, active_after="doc1.aaaaaaaaaaaa.2"),
+                            document="doc1.aaaaaaaaaaaa.2")
+    assert "changed" in text.lower() and "unchanged" not in text.lower()
+    text, _ = run_read_tool("read_document_summary",
+                            summary_reply(ui_switched=None, active_after=None,
+                                          active_after_error="Application.Documents unavailable"),
+                            document="doc1.aaaaaaaaaaaa.2")
+    assert "unknown" in text.lower() and "unchanged" not in text.lower()
+
+
+def test_read_document_summary_tool_lists_unreadable_fields_instead_of_hiding_them():
+    reply = summary_reply()
+    reply["summary"]["unreadable_fields"] = ["project_information.number"]
+    del reply["summary"]["project_information"]["number"]
+    text, _ = run_read_tool("read_document_summary", reply, document="doc1.aaaaaaaaaaaa.2")
+    assert "project_information.number" in text and "B-200" not in text
+
+
+def test_read_document_summary_tool_never_renders_a_refusal_as_data():
+    refusal = 'Error: 404 - {"error": "closed", "error_code": "document-closed"}'
+    text, calls = run_read_tool("read_document_summary", refusal, document="doc1.aaaaaaaaaaaa.2")
+    assert "document-closed" in text and "Answering Revit process" not in text and len(calls) == 1
+    text, _ = run_read_tool("read_document_summary", {"error": "boom", "error_code": "document-read-failed"},
+                            document="doc1.aaaaaaaaaaaa.2")
+    assert "boom" in text and "COORD" not in text
+
+
+def test_read_document_summary_tool_refuses_a_missing_document_without_posting():
+    for bad in ("", "   ", None):
+        text, calls = run_read_tool("read_document_summary", summary_reply(), document=bad)
+        assert calls == [] and "document" in text.lower() and "list_documents" in text
+
+
+def test_read_document_summary_signature_and_docstring_are_the_api_contract():
+    from tools.document_tools import register_document_tools
+
+    mcp = FakeMCP()
+    register_document_tools(mcp, None, None)
+    function = mcp.tools["read_document_summary"]
+    names = list(inspect.signature(function).parameters)
+    assert names == ["document", "target", "ctx"]
+    assert inspect.signature(function).parameters["document"].default is inspect.Parameter.empty
+    doc = function.__doc__
+    for name in names:
+        assert name + ":" in doc, "docstring Args must name {}".format(name)
+    for field in ("title", "path", "non_type_element_count", "level_count", "project_information",
+                  "name", "number", "client", "status", "unreadable_fields", "ui_switched"):
+        assert field in doc, "docstring must list returned field {}".format(field)
+    lowered = doc.lower()
+    assert "exactly two" in lowered and "02-07" in doc and "list_documents" in doc
+    assert "does not activate" in lowered or "never activate" in lowered
+    assert "closed" in lowered and "refused" in lowered
+    assert "model_info" in doc and "OpenAndActivateDocument" not in doc
+
+
+def test_read_document_summary_is_in_the_tool_manifest():
+    manifest = os.path.join(REPO_ROOT, "tests", "unit", "tool_manifest.txt")
+    with open(manifest, encoding="utf-8") as handle:
+        assert "read_document_summary" in handle.read().split()

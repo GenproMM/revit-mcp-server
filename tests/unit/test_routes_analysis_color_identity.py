@@ -38,6 +38,8 @@ REGISTRARS = {
     "analysis": "register_analysis_routes",
     "annotation": "register_annotation_routes",
     "building": "register_building_routes",
+    "colors": "register_color_routes",
+    "detail": "register_detail_routes",
 }
 
 # (module, route) -> a body that gets past early validation and touches the document.
@@ -47,6 +49,10 @@ MUTATIONS = {
     ("building", "/create_line/"): {"elements": [{"element_type": "wall"}]},
     ("building", "/create_surface/"): {"elements": [{"element_type": "floor"}]},
     ("building", "/create_level/"): {"levels": [{"elevation": 3000, "name": "L1"}]},
+    ("colors", "/color_splash/"): {"category_name": "Walls", "parameter_name": "Mark"},
+    ("colors", "/clear_colors/"): {"category_name": "Walls"},
+    ("detail", "/create_detail_line/"): {"start_point": {"x": 0, "y": 0, "z": 0},
+                                         "end_point": {"x": 1000, "y": 0, "z": 0}},
 }
 
 # (module, route, method): no document selector, the active document of the process.
@@ -55,6 +61,7 @@ READS = {
     ("analysis", "/room_data/", "GET"): None,
     ("analysis", "/material_quantities/", "POST"): {},
     ("analysis", "/model_statistics/", "GET"): None,
+    ("colors", "/list_category_parameters/", "POST"): {"category_name": "Walls"},
 }
 
 MUTATION_IDS = ["{}:{}".format(module, route) for module, route in MUTATIONS]
@@ -535,15 +542,55 @@ def test_sole_active_document_is_used_without_a_selector_and_named(world, key):
     assert reply.data["process_identity"] == IDENT
 
 
+def is_failure(reply):
+    """A failed reply by any of the routes' own conventions: an HTTP error, an error key,
+    or (colors) HTTP 200 with status "error" and a message."""
+    data = reply.data
+    return reply.status >= 400 or bool(data.get("error")) or data.get("status") == "error"
+
+
 @pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
 def test_a_failure_after_the_guard_still_names_the_document_it_ran_on(world, key):
     world.open("Only", "C:/Models/Only.rvt", active=True)
     world.tokens()
     world.explode = True
     reply = call(world, handler_of(world, *key), MUTATIONS[key])
-    assert reply.status == 500 and reply.data["error"]
+    assert is_failure(reply)
     assert reply.data["document"]["title"] == "Only"
     assert reply.data["process_identity"] == IDENT
+
+
+@pytest.mark.parametrize("route", ["/color_splash/", "/clear_colors/"])
+def test_color_failures_keep_their_http_200_error_body_and_gain_the_identity(world, route):
+    """The colour routes answer HTTP 200 with status "error" and a message (their old
+    contract, untouched). That is exactly the shape a formatter would collapse to its
+    message, so the identity must sit in the body beside it."""
+    world.open("Only", "C:/Models/Only.rvt", active=True)
+    world.tokens()
+    world.explode = True
+    reply = call(world, handler_of(world, "colors", route), MUTATIONS[("colors", route)])
+    assert reply.status == 200
+    assert reply.data["status"] == "error" and reply.data["message"]
+    assert reply.data["document"]["title"] == "Only"
+    assert reply.data["process_identity"] == IDENT
+
+
+@pytest.mark.parametrize("route", ["/color_splash/", "/clear_colors/"])
+def test_color_mutations_never_reach_a_style_or_transaction_on_a_refused_document(world, route):
+    _, _, tokens = two_documents(world, active="beta")
+    reply = call(world, handler_of(world, "colors", route),
+                 dict(MUTATIONS[("colors", route)], document=tokens[0]))
+    assert reply.status == 412 and world.events == []
+    assert world.kinds("transaction") == [] and world.kinds("collector") == []
+
+
+def test_list_category_parameters_stays_a_read_and_reads_the_active_document(world):
+    world.open("Only", "C:/Models/Only.rvt", active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "colors", "/list_category_parameters/"),
+                 {"category_name": "Walls", "document": "doc1.000000000000.9"})
+    assert world.guard_calls == []
+    assert world.events_on("INJECTED") and "document" not in reply.data
 
 
 @pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)

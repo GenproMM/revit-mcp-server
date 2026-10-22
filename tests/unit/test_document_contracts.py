@@ -4,9 +4,11 @@
 Pure Python, no Revit, no pyRevit, no network. These are FIXTURES that model the
 retained-reference-equals-v1 semantics accepted at the 02-20 checkpoint (G2), so
 the document registry and routes of 02-04 onward have something to be written
-against. They are NOT production registry evidence: no token issuance, registry or
-route exists here, and nothing in this file proves how a real Revit Document
-behaves; the live G2 measurement was the 02-20 diagnostic capture.
+against. The doubles are NOT production evidence: nothing in this file proves how
+a real Revit Document behaves; the live G2 measurement was the 02-20 diagnostic
+capture. The tests added from "02-04 Task 1" on drive the production registry in
+revit_mcp/identity.py against these doubles, as offline evidence of its decision
+logic only (live recheck: 02-18, after a full Revit restart).
 
 Modelled semantics (G2 retained-reference-equals-v1):
 

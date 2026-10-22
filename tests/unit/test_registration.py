@@ -201,6 +201,7 @@ def test_every_route_domain_has_a_matching_tool_module():
     # differ. Documented deviations, not accidents.
     KNOWN_MAPPINGS = {
         "placement": "family_tools",   # also driven by model_tools
+        "documents": "document_tools",  # /documents/ is listed by list_documents (02-04)
         "model_info": "status_tools",  # get_revit_model_info lives with status
         "rooms": "room_tools",
         "views": "view_tools",

@@ -36,6 +36,7 @@ get_revit_view
 get_selected_elements
 link_file
 list_category_parameters
+list_documents
 list_families
 list_family_categories
 list_levels

@@ -2417,3 +2417,235 @@ def test_read_document_levels_is_in_the_tool_manifest():
     manifest = os.path.join(REPO_ROOT, "tests", "unit", "tool_manifest.txt")
     with open(manifest, encoding="utf-8") as handle:
         assert "read_document_levels" in handle.read().split()
+
+
+# ===========================================================================
+# 02-05 gap closure: the activation-failed reply carries exception diagnostics.
+#
+# The live 02-07 G4 bench got HTTP 500 activation-failed with only the generic
+# "A managed exception was thrown by Revit" text and no way to see the real
+# cause. The helper below is pure and duck-typed so it is tested here with fake
+# exception objects; the route puts its result under the "exception" key. It
+# changes nothing about the activation itself: still one call, never retried.
+# ===========================================================================
+
+import json
+
+from revit_mcp.textutils import exception_diagnostics
+
+
+class FakeNetType(object):
+    def __init__(self, full_name):
+        self.FullName = full_name
+
+
+class FakeNetException(object):
+    """Duck-typed System.Exception: GetType, Message, InnerException, StackTrace."""
+
+    def __init__(self, full_name, message, inner=None, stack_trace=None):
+        self._type = FakeNetType(full_name)
+        self.Message = message
+        self.InnerException = inner
+        self.StackTrace = stack_trace
+
+    def GetType(self):
+        return self._type
+
+    def ToString(self):
+        return "{}: {}".format(self._type.FullName, self.Message)
+
+
+class HostileObject(object):
+    """Every attribute read raises, as a broken COM/.NET wrapper might."""
+
+    def __getattribute__(self, name):
+        raise RuntimeError("hostile attribute " + name)
+
+
+def python_exc_with_net(net):
+    exc = RuntimeError("python level text")
+    exc.clsException = net
+    return exc
+
+
+def test_diagnostics_of_a_plain_python_exception_name_the_class_and_message_only():
+    info = exception_diagnostics(RuntimeError("Revit refused the activation"))
+    assert info["python_type"] == "RuntimeError"
+    assert info["message"] == "Revit refused the activation"
+    assert info["net_type"] is None
+    assert info["inner_exceptions"] == []
+    assert info["stack_trace"] is None
+
+
+def test_diagnostics_read_the_net_exception_behind_a_cls_exception():
+    inner = FakeNetException("System.IO.FileLoadException", "inner cause",
+                             stack_trace="   at Inner.Frame()")
+    net = FakeNetException("Autodesk.Revit.Exceptions.InvalidOperationException",
+                           "A managed exception was thrown by Revit", inner=inner,
+                           stack_trace="   at Autodesk.Revit.UI.UIApplication.OpenAndActivateDocument()")
+    info = exception_diagnostics(python_exc_with_net(net))
+    assert info["python_type"] == "RuntimeError"
+    assert info["net_type"] == "Autodesk.Revit.Exceptions.InvalidOperationException"
+    assert info["net_message"] == "A managed exception was thrown by Revit"
+    assert "OpenAndActivateDocument" in info["stack_trace"]
+    assert info["inner_exceptions"] == [
+        {"net_type": "System.IO.FileLoadException", "message": "inner cause"}]
+
+
+def test_diagnostics_accept_a_net_exception_that_is_itself_the_caught_object():
+    net = FakeNetException("System.InvalidOperationException", "direct", stack_trace="   at X()")
+    info = exception_diagnostics(net)
+    assert info["net_type"] == "System.InvalidOperationException"
+    assert info["message"] == "direct" and info["stack_trace"] == "   at X()"
+
+
+def test_diagnostics_bound_the_inner_exception_chain_and_survive_a_cycle():
+    chain = None
+    for index in range(20):
+        chain = FakeNetException("T{}".format(index), "m{}".format(index), inner=chain)
+    info = exception_diagnostics(python_exc_with_net(chain))
+    assert 1 <= len(info["inner_exceptions"]) <= 5
+    looped = FakeNetException("Loop", "again")
+    looped.InnerException = looped
+    info = exception_diagnostics(python_exc_with_net(looped))
+    assert len(info["inner_exceptions"]) <= 5
+
+
+def test_diagnostics_never_raise_for_hostile_objects():
+    for hostile in (HostileObject(), python_exc_with_net(HostileObject()), None, 42):
+        info = exception_diagnostics(hostile)
+        assert isinstance(info, dict) and "python_type" in info
+        json.dumps(info)
+
+    class BrokenText(Exception):
+        def __str__(self):
+            raise RuntimeError("no text")
+
+    info = exception_diagnostics(BrokenText())
+    assert info["python_type"] == "BrokenText"
+    json.dumps(info)
+
+    net = FakeNetException("T", "m")
+    net.InnerException = HostileObject()
+    info = exception_diagnostics(python_exc_with_net(net))
+    assert info["net_type"] == "T" and len(info["inner_exceptions"]) <= 5
+
+
+def test_diagnostics_truncate_a_very_long_stack_trace_and_message():
+    net = FakeNetException("T", "x" * 50000, stack_trace="   at Frame()\n" * 5000)
+    info = exception_diagnostics(python_exc_with_net(net))
+    assert len(info["stack_trace"]) <= 2100
+    assert info["stack_trace_truncated"] is True
+    assert len(info["net_message"]) <= 1100 and len(info["message"]) <= 1100
+
+
+def test_diagnostics_keep_non_ascii_text_json_safe():
+    net = FakeNetException("T", u"\u041e\u0448\u0438\u0431\u043a\u0430 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430",
+                           stack_trace=u"   at \u041c\u043e\u0434\u0435\u043b\u044c()")
+    info = exception_diagnostics(python_exc_with_net(net))
+    assert info["net_message"].startswith(u"\u041e\u0448\u0438\u0431\u043a\u0430")
+    assert isinstance(json.dumps(info), str)
+    info = exception_diagnostics(RuntimeError(u"\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442"))
+    assert info["message"] == u"\u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442"
+
+
+def test_activation_failed_reply_carries_the_exception_diagnostics_and_still_one_call():
+    app, uiapp, reg, tokens, docs = rig(mode="raise")
+    status, payload = activate(uiapp, reg, tokens["coord"])
+    assert status == 500 and len(uiapp.calls) == 1
+    assert payload["error_code"] == "activation-failed"
+    detail = payload["exception"]
+    assert detail["python_type"] == "RuntimeError"
+    assert "Revit refused the activation" in detail["message"]
+    json.dumps(payload["exception"])
+    assert payload["observed_active_document"]["document"] == tokens["other"]
+
+
+def test_activation_failed_reply_names_the_net_type_inner_chain_and_stack():
+    net = FakeNetException(
+        "Autodesk.Revit.Exceptions.InvalidOperationException", "A managed exception was thrown",
+        inner=FakeNetException("System.Runtime.InteropServices.COMException", "root cause"),
+        stack_trace="   at Autodesk.Revit.UI.UIApplication.OpenAndActivateDocument(String)")
+
+    class NetRaisingUIApp(FakeUIApp):
+        def OpenAndActivateDocument(self, *args):
+            FakeUIApp.OpenAndActivateDocument(self, *args)
+            raise python_exc_with_net(net)
+
+    app, plain, reg, tokens, docs = rig(mode="raise")
+    uiapp = NetRaisingUIApp(app, docs["other"], "raise")
+    status, payload = activate(uiapp, reg, tokens["coord"])
+    assert status == 500 and len(uiapp.calls) == 1
+    detail = payload["exception"]
+    assert detail["net_type"] == "Autodesk.Revit.Exceptions.InvalidOperationException"
+    assert detail["inner_exceptions"][0]["message"] == "root cause"
+    assert "OpenAndActivateDocument" in detail["stack_trace"]
+
+
+def test_other_activation_replies_do_not_carry_an_exception_key():
+    app, uiapp, reg, tokens, docs = rig(mode="noop")
+    status, payload = activate(uiapp, reg, tokens["coord"])
+    assert status == 409 and "exception" not in payload
+    app, uiapp, reg, tokens, docs = rig(IsWorkshared=True)
+    status, payload = activate(uiapp, reg, tokens["coord"])
+    assert status == 422 and "exception" not in payload
+
+
+FAILED_BODY = {
+    "error": "Activating document doc1.aaaaaaaaaaaa.2 (COORD) failed: A managed exception.",
+    "error_code": "activation-failed", "reason": "activation-failed",
+    "document": {"document": "doc1.aaaaaaaaaaaa.2", "title": "COORD", "path": "C:/M/COORD.rvt",
+                 "active": False, "saved": True},
+    "observed_active_document": None,
+    "exception": {
+        "python_type": "InvalidOperationException",
+        "net_type": "Autodesk.Revit.Exceptions.InvalidOperationException",
+        "message": "A managed exception was thrown",
+        "net_message": "A managed exception was thrown",
+        "inner_exceptions": [{"net_type": "System.IO.IOException", "message": "inner root cause"}],
+        "stack_trace": "   at Autodesk.Revit.UI.UIApplication.OpenAndActivateDocument(String)",
+        "stack_trace_truncated": False},
+    "process_identity": dict(IDENT),
+}
+
+
+def test_activate_document_tool_renders_the_exception_detail_of_a_500_text_reply():
+    reply = "Error: 500 - " + json.dumps(FAILED_BODY)
+    text, calls = run_activate_tool(reply, document="doc1.aaaaaaaaaaaa.2")
+    assert isinstance(text, str) and len(calls) == 1
+    assert text.startswith("Error: 500 - ")                 # the raw reply is kept first, unchanged
+    assert text.index(json.dumps(FAILED_BODY)) == len("Error: 500 - ")
+    assert "Autodesk.Revit.Exceptions.InvalidOperationException" in text
+    assert "inner root cause" in text and "System.IO.IOException" in text
+    assert "UIApplication.OpenAndActivateDocument" in text
+    assert "A managed exception was thrown" in text
+
+
+def test_activate_document_tool_renders_the_exception_detail_of_a_dict_reply():
+    body = dict(FAILED_BODY)
+    text, _ = run_activate_tool(body, document="doc1.aaaaaaaaaaaa.2")
+    assert "activation-failed" in text
+    assert "Autodesk.Revit.Exceptions.InvalidOperationException" in text
+    assert "inner root cause" in text
+
+
+def test_activate_document_tool_leaves_replies_without_exception_detail_alone():
+    refusal = 'Error: 422 - {"error": "no", "reason": "workshared-unmeasured"}'
+    text, _ = run_activate_tool(refusal, document="doc1.aaaaaaaaaaaa.2")
+    assert text == refusal
+    garbled = "Error: 500 - not json at all"
+    text, _ = run_activate_tool(garbled, document="doc1.aaaaaaaaaaaa.2")
+    assert text == garbled
+    hostile = 'Error: 500 - {"error_code": "activation-failed", "exception": "not a dict"}'
+    text, _ = run_activate_tool(hostile, document="doc1.aaaaaaaaaaaa.2")
+    assert text == hostile
+
+
+def test_activate_document_docstring_states_the_exception_diagnostics():
+    from tools.document_tools import register_document_tools
+
+    mcp = FakeMCP()
+    register_document_tools(mcp, None, None)
+    doc = mcp.tools["activate_document"].__doc__
+    assert "activation-failed" in doc and "exception diagnostics" in doc.lower()
+    assert "OpenAndActivateDocument" not in doc

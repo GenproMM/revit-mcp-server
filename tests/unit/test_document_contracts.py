@@ -2861,3 +2861,204 @@ def test_run_document_summary_reads_through_the_injected_uiapp_when_no_reader_is
     assert status == 200 and payload["total_levels"] == 2
     assert sys.modules["pyrevit"].HOST_APP.uiapp.touched == []
     assert sys.modules["pyrevit"].HOST_APP.app.touched == []
+
+
+# ===========================================================================
+# 02-08: per-call process (target) and mutation-document (document) arguments
+# on the analysis, annotation, building, clash and colors tools (D-01, D-09,
+# D-10, D-11).
+#
+# Every Revit-facing tool takes an optional ``target``. Only an actual
+# mutation takes an optional ``document``; a read has none, because the only
+# addressed reads of an inactive document are read_document_summary and
+# read_document_levels (D-11), so a read tool offers no way to ask for one.
+# The inventory below classifies EVERY tool of the five modules by hand: the
+# HTTP method is not a classifier (analysis, colors and clash read through POST).
+# Offline evidence only: the route-side document guard is plan 02-12.
+# ===========================================================================
+
+import importlib
+
+
+def _addressing(module, kind, method, route, legacy, minimal):
+    return {"module": module, "kind": kind, "method": method, "route": route,
+            "legacy": legacy, "minimal": minimal}
+
+
+GROUP_ONE_TOOLS = {
+    "ai_element_filter": _addressing(
+        "analysis", "read", "POST", "/ai_filter/",
+        ["category", "type_name", "visible_in_view", "bounding_box_min", "bounding_box_max",
+         "max_elements"], {}),
+    "export_room_data": _addressing("analysis", "read", "GET", "/room_data/", [], {}),
+    "get_material_quantities": _addressing(
+        "analysis", "read", "POST", "/material_quantities/", ["categories"], {}),
+    "analyze_model_statistics": _addressing(
+        "analysis", "read", "GET", "/model_statistics/", [], {}),
+    "create_dimensions": _addressing(
+        "annotation", "mutation", "POST", "/create_dimensions/",
+        ["element_ids", "dimension_type"], {"element_ids": [1]}),
+    "tag_walls": _addressing(
+        "annotation", "mutation", "POST", "/tag_walls/", ["use_leader", "tag_type_name"], {}),
+    "create_line_based_element": _addressing(
+        "building", "mutation", "POST", "/create_line/", ["elements"],
+        {"elements": [{"element_type": "wall"}]}),
+    "create_surface_based_element": _addressing(
+        "building", "mutation", "POST", "/create_surface/", ["elements"],
+        {"elements": [{"element_type": "floor"}]}),
+    "create_level": _addressing(
+        "building", "mutation", "POST", "/create_level/", ["levels"],
+        {"levels": [{"elevation": 0}]}),
+}
+
+DOCUMENT_SELECTOR = "doc1.aaaaaaaaaaaa.2"
+PROCESS_SELECTOR = "revit1:abc"
+
+
+def addressing_registrar(module):
+    loaded = importlib.import_module("tools.{}_tools".format(module))
+    return getattr(loaded, "register_{}_tools".format(module))
+
+
+def register_addressing_module(module, response=None):
+    """Register one module on a recording fake transport; returns (tools, calls)."""
+    calls = []
+    reply = {"status": "success"} if response is None else response
+
+    async def revit_get(path, ctx=None, **options):
+        calls.append(("GET", path, None, options))
+        return reply
+
+    async def revit_post(path, data, ctx=None, **options):
+        calls.append(("POST", path, data, options))
+        return reply
+
+    async def revit_image(*args, **kwargs):  # pragma: no cover - none of the five fetch images
+        raise AssertionError("none of these modules fetches an image")
+
+    mcp = FakeMCP()
+    addressing_registrar(module)(mcp, revit_get, revit_post, revit_image)
+    return mcp.tools, calls
+
+
+def run_addressing_tool(name, entry, response=None, **kwargs):
+    tools, calls = register_addressing_module(entry["module"], response)
+    text = asyncio.run(tools[name](**dict(entry["minimal"], **kwargs)))
+    return text, calls
+
+
+def tools_of(inventory, module):
+    return sorted(name for name, entry in inventory.items() if entry["module"] == module)
+
+
+@pytest.mark.parametrize("module", ["analysis", "annotation", "building"])
+def test_first_group_registers_exactly_the_inventoried_tools(module):
+    tools, _ = register_addressing_module(module)
+    assert sorted(tools) == tools_of(GROUP_ONE_TOOLS, module)
+
+
+@pytest.mark.parametrize("name", sorted(GROUP_ONE_TOOLS))
+def test_first_group_signatures_carry_target_and_only_mutations_carry_document(name):
+    entry = GROUP_ONE_TOOLS[name]
+    tools, _ = register_addressing_module(entry["module"])
+    names = list(inspect.signature(tools[name]).parameters)
+    if entry["kind"] == "mutation":
+        assert names == entry["legacy"] + ["target", "document", "ctx"], names
+    else:
+        assert names == entry["legacy"] + ["target", "ctx"], names
+        assert "document" not in names
+    parameters = inspect.signature(tools[name]).parameters
+    assert parameters["target"].default is None and parameters["ctx"].default is None
+    if entry["kind"] == "mutation":
+        assert parameters["document"].default is None
+
+
+@pytest.mark.parametrize("name", sorted(GROUP_ONE_TOOLS))
+def test_first_group_docstrings_name_every_argument_and_state_the_scope_rule(name):
+    entry = GROUP_ONE_TOOLS[name]
+    tools, _ = register_addressing_module(entry["module"])
+    doc = tools[name].__doc__
+    args_block = doc.split("Args:", 1)[1]
+    for argument in inspect.signature(tools[name]).parameters:
+        assert re.search(r"^\s+{}:".format(argument), args_block, re.M), (name, argument)
+    lowered = doc.lower()
+    assert "discover_revit_targets" in doc
+    if entry["kind"] == "mutation":
+        for phrase in ("list_documents", "activate_document", "412", "the only open document",
+                       "several"):
+            assert phrase in lowered, (name, phrase)
+    else:
+        assert not re.search(r"^\s+document:", args_block, re.M)
+        assert "active document" in lowered
+        assert "read_document_summary" in doc and "read_document_levels" in doc
+        assert "inactive" in lowered
+
+
+@pytest.mark.parametrize("name", sorted(GROUP_ONE_TOOLS))
+def test_first_group_forwards_nothing_extra_when_no_selector_is_given(name):
+    entry = GROUP_ONE_TOOLS[name]
+    text, calls = run_addressing_tool(name, entry)
+    assert isinstance(text, str)
+    assert len(calls) == 1
+    method, route, data, options = calls[0]
+    assert (method, route) == (entry["method"], entry["route"])
+    assert options == {}
+    if method == "POST":
+        assert "document" not in data and "target" not in data
+
+
+@pytest.mark.parametrize("name", sorted(GROUP_ONE_TOOLS))
+def test_first_group_forwards_target_as_a_transport_keyword_never_in_the_body(name):
+    entry = GROUP_ONE_TOOLS[name]
+    text, calls = run_addressing_tool(name, entry, target=PROCESS_SELECTOR)
+    assert isinstance(text, str) and len(calls) == 1
+    method, route, data, options = calls[0]
+    assert (method, route) == (entry["method"], entry["route"])
+    assert options == {"target": PROCESS_SELECTOR}
+    if method == "POST":
+        assert "target" not in data and "document" not in data
+
+
+@pytest.mark.parametrize("name", sorted(n for n, e in GROUP_ONE_TOOLS.items() if e["kind"] == "mutation"))
+def test_first_group_mutations_forward_the_document_in_the_post_body(name):
+    entry = GROUP_ONE_TOOLS[name]
+    text, calls = run_addressing_tool(name, entry, document=DOCUMENT_SELECTOR, target=PROCESS_SELECTOR)
+    assert isinstance(text, str) and len(calls) == 1
+    method, route, data, options = calls[0]
+    assert method == "POST" and route == entry["route"]
+    assert data["document"] == DOCUMENT_SELECTOR
+    assert options == {"target": PROCESS_SELECTOR} and "target" not in data
+    for key, value in entry["minimal"].items():
+        assert data[key] == value
+
+
+@pytest.mark.parametrize("name", sorted(n for n, e in GROUP_ONE_TOOLS.items() if e["kind"] == "mutation"))
+@pytest.mark.parametrize("blank", ["", "   ", 7])
+def test_first_group_mutations_refuse_a_blank_document_without_sending(name, blank):
+    """A blank selector must never decay into the one-document default."""
+    entry = GROUP_ONE_TOOLS[name]
+    text, calls = run_addressing_tool(name, entry, document=blank)
+    assert calls == []
+    assert "document" in text and "list_documents" in text
+
+
+@pytest.mark.parametrize("name", sorted(n for n, e in GROUP_ONE_TOOLS.items() if e["kind"] == "read"))
+def test_first_group_reads_offer_no_way_to_name_a_document(name):
+    entry = GROUP_ONE_TOOLS[name]
+    tools, calls = register_addressing_module(entry["module"])
+    with pytest.raises(TypeError):
+        asyncio.run(tools[name](document=DOCUMENT_SELECTOR))
+    assert calls == []
+
+
+@pytest.mark.parametrize("module", ["analysis", "annotation", "building"])
+def test_first_group_modules_never_import_the_transport(module):
+    with open(os.path.join(REPO_ROOT, "tools", "{}_tools.py".format(module)), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.add(node.module.split(".")[0])
+    assert not imported & {"bridge", "httpx"}, imported

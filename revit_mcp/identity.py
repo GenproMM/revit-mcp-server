@@ -568,7 +568,7 @@ def decide_mutation_document(selector, snapshot=None, registry=None):
 
 
 def mutation_document_or_response(selector=None, snapshot=None, registry=None,
-                                  identity=None, read_snapshot=None):
+                                  identity=None, read_snapshot=None, uiapp=None):
     """Route-handler guard: call it explicitly first, in every mutating handler.
 
     Returns (document, descriptor, None) when the decision is ok, else
@@ -577,10 +577,14 @@ def mutation_document_or_response(selector=None, snapshot=None, registry=None,
     decision's status. Never raises: an unreadable Revit state is a 503 response.
     Explicit per-handler call only (G1): no wrapper or decorator is installed
     in startup.py.
+
+    A handler that pyRevit dispatches in the Revit API context passes the ``uiapp`` it
+    was injected with; the snapshot and the process identity are then read through it
+    and never through the process-global HOST_APP.
     """
     try:
         if snapshot is None:
-            snapshot = (read_snapshot or read_live_snapshot)()
+            snapshot = read_snapshot() if read_snapshot else read_live_snapshot(uiapp)
         decision = decide_mutation_document(selector, snapshot, registry)
     except Exception as exc:
         decision = {
@@ -594,7 +598,7 @@ def mutation_document_or_response(selector=None, snapshot=None, registry=None,
 
     identity_error = None
     if identity is None:
-        identity, identity_error = process_identity_or_error()
+        identity, identity_error = process_identity_or_error(uiapp)
     payload = {"error": decision["error"], "error_code": decision["code"]}
     if identity:
         payload["process_identity"] = identity
@@ -604,3 +608,56 @@ def mutation_document_or_response(selector=None, snapshot=None, registry=None,
         if key in decision:
             payload[key] = decision[key]
     return None, None, routes.make_response(data=payload, status=decision["status"])
+
+
+# ------------------------------------------------- request selector and attribution
+
+
+def request_document_selector(request):
+    """The ``document`` value of a mutating request body, or None when none was sent.
+
+    Never raises. An absent key, an empty or unreadable body, or a body that is not a
+    JSON object is None: the handler's own parse then reports its own error exactly as
+    before, and nothing has been touched. A key that is present but null is an explicit,
+    broken choice, so it is returned as "" (an invalid selector the guard refuses) and
+    never reads as "omitted", which would fall back to the one-open-document default.
+    """
+    try:
+        raw = getattr(request, "data", None)
+        if not raw:
+            return None
+        from .textutils import parse_request_data
+
+        data = parse_request_data(raw)
+    except Exception:
+        return None
+    if not isinstance(data, dict) or "document" not in data:
+        return None
+    value = data["document"]
+    return "" if value is None else value
+
+
+def attribute_response(response, descriptor, uiapp=None, identity=None):
+    """Stamp the document a mutation ran on, and the process, onto its reply (IDENT-02).
+
+    ``descriptor`` is the one the guard returned for this request, so the reply names the
+    document the handler actually worked on, at request time, whatever the outcome: a
+    success, a validation error, a rolled-back or failed reply all carry it. The reply
+    keeps its status and every other key. A reply whose data is not a dict is returned
+    untouched. Never raises.
+    """
+    try:
+        data = getattr(response, "data", None)
+        if not isinstance(data, dict):
+            return response
+        data["document"] = dict(descriptor)
+        identity_error = None
+        if identity is None:
+            identity, identity_error = process_identity_or_error(uiapp)
+        if identity:
+            data["process_identity"] = identity
+        else:
+            data["identity_error"] = identity_error
+    except Exception:
+        pass
+    return response

@@ -5,6 +5,7 @@ Handles dimensions and wall tagging
 """
 
 from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings, parse_request_data
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -17,9 +18,8 @@ MM_TO_FEET = 1.0 / 304.8
 def register_annotation_routes(api):
     """Register all annotation routes with the API"""
 
-    @api.route("/create_dimensions/", methods=["POST"])
-    def create_dimensions_handler(doc, request):
-        """Create dimension annotations in the current view."""
+    def _create_dimensions(doc, request):
+        """Create dimension annotations in the current view (runs on the guarded document)."""
         try:
             if not doc:
                 return routes.make_response(
@@ -208,9 +208,18 @@ def register_annotation_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/tag_walls/", methods=["POST"])
-    def tag_walls_handler(doc, request):
-        """Tag all untagged walls in the current view."""
+    @api.route("/create_dimensions/", methods=["POST"])
+    def create_dimensions_handler(uiapp, doc, request):
+        """Create dimension annotations in the current view."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_dimensions(document, request), descriptor, uiapp=uiapp)
+
+    def _tag_walls(doc, request):
+        """Tag all untagged walls in the current view (runs on the guarded document)."""
         try:
             if not doc:
                 return routes.make_response(
@@ -384,5 +393,14 @@ def register_annotation_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+    @api.route("/tag_walls/", methods=["POST"])
+    def tag_walls_handler(uiapp, doc, request):
+        """Tag all untagged walls in the current view."""
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_tag_walls(document, request), descriptor, uiapp=uiapp)
 
     logger.info("Annotation routes registered successfully")

@@ -6,6 +6,7 @@ elements (floors, roofs, ceilings), and levels.
 """
 
 from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 from System.Collections.Generic import List
 import traceback
@@ -17,10 +18,9 @@ logger = logging.getLogger(__name__)
 def register_building_routes(api):
     """Register all building creation routes with the API"""
 
-    @api.route("/create_line/", methods=["POST"])
-    def create_line_based(doc, request):
+    def _create_line_based(doc, request):
         """
-        Create line-based elements (walls, beams) in the Revit model.
+        Create line-based elements (walls, beams) in the Revit model (runs on the guarded document).
         Supports batch creation via elements array.
         """
         try:
@@ -272,10 +272,19 @@ def register_building_routes(api):
                 status=500,
             )
 
-    @api.route("/create_surface/", methods=["POST"])
-    def create_surface_based(doc, request):
+    @api.route("/create_line/", methods=["POST"])
+    def create_line_based(uiapp, doc, request):
+        """Create line-based elements (walls, beams) in the Revit model."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_line_based(document, request), descriptor, uiapp=uiapp)
+
+    def _create_surface_based(doc, request):
         """
-        Create surface-based elements (floors, roofs, ceilings) in the Revit model.
+        Create surface-based elements (floors, roofs, ceilings) in the Revit model (runs on the guarded document).
         Supports batch creation via elements array.
         """
         try:
@@ -576,10 +585,19 @@ def register_building_routes(api):
                 status=500,
             )
 
-    @api.route("/create_level/", methods=["POST"])
-    def create_level_handler(doc, request):
+    @api.route("/create_surface/", methods=["POST"])
+    def create_surface_based(uiapp, doc, request):
+        """Create surface-based elements (floors, roofs, ceilings) in the Revit model."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_surface_based(document, request), descriptor, uiapp=uiapp)
+
+    def _create_level(doc, request):
         """
-        Create building levels at specified elevations.
+        Create building levels at specified elevations (runs on the guarded document).
         Supports batch creation via levels array.
         """
         try:
@@ -657,5 +675,15 @@ def register_building_routes(api):
                 data={"error": str(e), "traceback": traceback.format_exc()},
                 status=500,
             )
+
+    @api.route("/create_level/", methods=["POST"])
+    def create_level_handler(uiapp, doc, request):
+        """Create building levels at specified elevations."""
+        # G1 explicit guard: first, before any document access or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_level(document, request), descriptor, uiapp=uiapp)
 
     logger.info("Building routes registered successfully")

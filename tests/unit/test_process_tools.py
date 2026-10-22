@@ -268,3 +268,160 @@ def test_status_docstring_names_the_multi_process_states():
     for word in ("process_state", "collision", "inventory", "discover_revit_targets"):
         assert word in doc
     assert "ctx" in doc
+
+
+# --- start_revit -----------------------------------------------------------------
+
+class PopenRecorder:
+    """Replaces subprocess.Popen: counts launches, never starts anything."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, args, **kwargs):
+        self.calls.append((list(args), kwargs))
+        return object()
+
+    @property
+    def count(self):
+        return len(self.calls)
+
+
+@pytest.fixture
+def popen(monkeypatch):
+    recorder = PopenRecorder()
+    monkeypatch.setattr(process_tools.subprocess, "Popen", recorder)
+    monkeypatch.setattr(process_tools, "_POLL_INTERVAL_S", 0.01)
+    return recorder
+
+
+def run_start(rig, **kwargs):
+    out = asyncio.run(rig.tool("start_revit")(**kwargs))
+    assert isinstance(out, str)
+    return out
+
+
+@pytest.mark.parametrize("name, rig", [
+    ("collision", lambda: Rig([ok([], [collision(48884, [3001, 3002])])])),
+    ("collision beside a usable process",
+     lambda: Rig([ok([usable(555, 48886)], [collision(48884, [3001, 3002])])])),
+    ("initializing listener", lambda: Rig([ok([], [hung(48884, 777)])])),
+    ("handshake mismatch", lambda: Rig([ok([], [{
+        "port": 48884, "pids": [778], "reason": "identity-mismatch",
+        "detail": "PID 778 owns port 48884 but the responder claims PID 9"}])])),
+    ("inventory failure", lambda: Rig([INVENTORY_FAILURE])),
+    ("discovery exception", lambda: Rig(raises=RuntimeError("boom"))),
+    ("missing facade", lambda: Rig(facade=False)),
+])
+def test_start_revit_never_launches_when_discovery_is_inconclusive(popen, name, rig):
+    rig = rig()
+    out = run_start(rig, wait_seconds=0.05)
+    assert popen.count == 0, name
+    assert "ERROR" in out.upper() or "not launch" in out.lower()
+    assert rig.status_calls == [] and rig.other_calls == []
+
+
+def test_start_revit_collision_refusal_names_both_pids():
+    rig = Rig([ok([], [collision(48884, [3001, 3002])])])
+    out = run_start(rig, wait_seconds=0.05)
+    assert "3001" in out and "3002" in out
+    assert "collision" in out.lower() or "same port" in out.lower()
+
+
+def test_start_revit_inventory_failure_is_not_called_no_revit():
+    out = run_start(Rig([INVENTORY_FAILURE]), wait_seconds=0.05)
+    assert "inventory" in out.lower() and "not proof" in out.lower()
+
+
+def test_start_revit_already_running_selected_process_returns_without_launch(popen):
+    rig = Rig([ok([usable(4242, 48884, document_open=False)])])
+    out = run_start(rig, wait_seconds=0.05)
+    assert popen.count == 0
+    assert "Already Running: True" in out and "Document Open: False" in out
+    assert "4242" in out and "nothing was started" in out.lower()
+    assert rig.status_calls == []
+
+
+def test_start_revit_with_several_running_processes_launches_nothing(popen):
+    rig = Rig([ok([usable(111, 48884), usable(222, 48885)])])
+    out = run_start(rig, wait_seconds=0.05)
+    assert popen.count == 0
+    assert "111" in out and "222" in out and "Already Running: True" in out
+    assert "Document Open: unknown" in out
+    assert rig.status_calls == []
+
+
+def test_start_revit_proven_absence_launches_exactly_once_and_reports_observed(popen):
+    rig = Rig([ok(), ok(), ok([usable(900, 48885, document_open=False, version="2027")])])
+    out = run_start(rig, wait_seconds=5.0)
+    assert popen.count == 1
+    args, kwargs = popen.calls[0]
+    assert args == [r"C:\fake\Autodesk\Revit 2027\Revit.exe"]
+    assert kwargs["stdin"] is process_tools.subprocess.DEVNULL
+    assert kwargs["stdout"] is process_tools.subprocess.DEVNULL
+    assert kwargs["stderr"] is process_tools.subprocess.DEVNULL
+    assert kwargs["close_fds"] is True
+    assert rig.discover_calls == 3  # one gate + re-discovery until it was observed
+    assert "Outcome: success" in out and "Already Running: False" in out
+    assert "900" in out and "48885" in out and "Document Open: False" in out
+    assert "48884" not in out  # a port nobody observed is never claimed
+    assert rig.status_calls == []
+
+
+def test_start_revit_launch_passes_model_path_and_version(popen, tmp_path, monkeypatch):
+    model = tmp_path / "m.rvt"
+    model.write_text("x")
+    monkeypatch.setattr(process_tools, "_discover", lambda: [
+        ("2027", r"C:\fake\Revit 2027\Revit.exe"), ("2024", r"C:\fake\Revit 2024\Revit.exe")])
+    rig = Rig([ok(), ok([usable(901, 48884)])])
+    out = run_start(rig, version="2024", model_path=str(model), wait_seconds=5.0)
+    assert popen.count == 1
+    assert popen.calls[0][0] == [r"C:\fake\Revit 2024\Revit.exe", str(model)]
+    assert "901" in out and "Document Open: True" in out
+
+
+def test_start_revit_timeout_reports_unknown_identity_never_a_port(popen):
+    rig = Rig([ok()])
+    out = run_start(rig, wait_seconds=0.1)
+    assert popen.count == 1
+    assert "Outcome: timeout" in out
+    assert "Observed Processes: unknown" in out
+    assert "48884" not in out and "48885" not in out
+    assert "get_revit_process_status" in out
+
+
+def test_start_revit_collision_after_launch_stops_waiting_and_launches_no_second(popen):
+    rig = Rig([ok(), ok([], [collision(48884, [41, 42])])])
+    out = run_start(rig, wait_seconds=5.0)
+    assert popen.count == 1
+    assert "Outcome: unknown" in out
+    assert "41" in out and "42" in out
+    assert "Observed Processes: unknown" in out
+
+
+def test_start_revit_keeps_polling_through_an_inventory_blip_after_launch(popen):
+    rig = Rig([ok(), INVENTORY_FAILURE, ok(), ok([usable(902, 48884)])])
+    out = run_start(rig, wait_seconds=5.0)
+    assert popen.count == 1
+    assert "Outcome: success" in out and "902" in out
+
+
+def test_start_revit_refuses_missing_model_before_launch(popen):
+    out = run_start(Rig([ok()]), model_path=r"C:\definitely\missing\x.rvt", wait_seconds=0.05)
+    assert popen.count == 0
+    assert "not found" in out.lower()
+
+
+def test_start_revit_refuses_an_uninstalled_version_before_launch(popen):
+    out = run_start(Rig([ok()]), version="1999", wait_seconds=0.05)
+    assert popen.count == 0
+    assert "1999" in out and "not installed" in out.lower()
+
+
+def test_start_revit_docstring_drops_the_one_entry_one_port_promise():
+    server = FakeServer()
+    process_tools.register_process_tools(server, Rig(facade=False).revit_get)
+    doc = server.tools["start_revit"].__doc__
+    assert "REVIT_PORT" not in doc and "first port" not in doc and "48884" not in doc
+    for word in ("collision", "discover_revit_targets", "target", "unknown", "ctx"):
+        assert word in doc

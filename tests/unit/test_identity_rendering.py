@@ -681,3 +681,118 @@ def test_get_revit_view_error_goes_through_the_renderer(machine):
     out = run(tool(register_view_tools, "get_revit_view")("Nope", SEL_A))
     assert out.startswith("Error: 404 - ")
     assert PROCESS_LINE_A in out
+
+
+# ===========================================================================
+# 02-17: every registered tool of every domain goes through the one renderer.
+#
+# The tools are discovered by the real registrars (inventory_support), not listed by
+# domain. The only tools whose SUCCESS text does not carry the verified-process line are
+# the named 02-16 exceptions, pinned as an exact set so it cannot grow silently:
+# list_documents, activate_document, read_document_summary and read_document_levels
+# render a new string first (they name the process from the reply's own stamp), and
+# get_revit_view returns an Image on HTTP 200. Their error paths are attributed.
+# ===========================================================================
+
+from inventory_support import (LOCAL, PRERENDERED_SUCCESS, TOOL_CLASSES,  # noqa: E402
+                               minimal_kwargs, register_everything)
+
+REVIT_FACING_TOOLS = sorted(name for name, kind in TOOL_CLASSES.items() if kind != LOCAL)
+ALL_MINIMAL = minimal_kwargs()
+IMAGE_RETURNING = frozenset({"get_revit_view"})
+
+SUCCESS_SHAPES = {
+    "/documents/": {"documents": [doc(token="docA", title="A", path="C:/a.rvt")],
+                    "process_identity": IDENT_A},
+    "/activate_document/": {"activation": "activated",
+                            "document": doc(token="docA", title="A", path="C:/a.rvt"),
+                            "process_identity": IDENT_A},
+    "/document_summary/": {"summary": {"title": "A"}, "process_identity": IDENT_A},
+    "/document_levels/": {"levels": [], "process_identity": IDENT_A},
+}
+
+
+def run_every_tool(reply, image_reply=None, names=REVIT_FACING_TOOLS):
+    """{tool: result} with every named tool run once on a recording transport."""
+    results = {}
+    for name in names:
+        tools, _ = register_everything(reply=reply, image_reply=image_reply)
+        results[name] = asyncio.run(tools[name](**ALL_MINIMAL[name]))
+    return results
+
+
+def success_reply(kind, path, body, options):
+    shaped = SUCCESS_SHAPES.get(path)
+    return received(dict(shaped) if shaped is not None
+                    else {"status": "success", "message": "done", "document": doc()})
+
+
+def test_every_tool_names_the_verified_process_on_success_except_the_named_prerenderers():
+    results = run_every_tool(success_reply, image_reply=object())
+    without = {name for name, text in results.items()
+               if not (isinstance(text, str) and PROCESS_LINE_A in text)}
+    assert without == PRERENDERED_SUCCESS | IMAGE_RETURNING, (
+        "the success-path exception list changed: {}".format(
+            sorted(without ^ (PRERENDERED_SUCCESS | IMAGE_RETURNING))))
+
+
+@pytest.mark.parametrize("name", sorted(PRERENDERED_SUCCESS))
+def test_a_prerendered_success_names_the_process_from_the_reply_stamp_not_a_verified_tag(name):
+    out = run_every_tool(success_reply, names=[name])[name]
+    assert "Answering Revit process: PID 111; Revit 2024; port 48884" in out
+    assert "Verified Revit process" not in out
+
+
+def test_get_revit_view_adds_no_attribution_to_a_non_text_success_reply():
+    """An Image has no text channel: the tool passes str(reply) through (pre-existing behaviour)."""
+    sentinel = object()
+    tools, calls = register_everything(image_reply=sentinel)
+    result = asyncio.run(tools["get_revit_view"](view_name="Level 1"))
+    assert result == str(sentinel) and calls[0][0] == "IMAGE"
+    assert "Verified Revit process" not in result and "Attribution" not in result
+
+
+def test_every_tool_attributes_a_received_error_including_the_named_exceptions():
+    error = received("Error: 500 - boom")
+    results = run_every_tool(lambda *args: error, image_reply=error)
+    for name, text in results.items():
+        assert isinstance(text, str) and text.startswith("Error: 500 - boom"), name
+        assert PROCESS_LINE_A in text, name
+
+
+def test_every_tool_credits_nobody_when_nothing_was_sent():
+    refusal = uncertain("Error: Listener inventory unavailable; request not sent.", "not-sent",
+                        REQUESTED_A)
+    results = run_every_tool(lambda *args: refusal, image_reply=refusal)
+    for name, text in results.items():
+        assert text.startswith("Error: Listener inventory unavailable"), name
+        assert "Attribution: none." in text, name
+        assert "Verified Revit process" not in text and "Answering" not in text, name
+
+
+def test_every_tool_labels_an_unknown_outcome_unconfirmed_and_never_credits_a_process():
+    unknown = uncertain("Error: ReadTimeout - the request was sent; outcome UNKNOWN.", "unknown",
+                        REQUESTED_A)
+    results = run_every_tool(lambda *args: unknown, image_reply=unknown)
+    for name, text in results.items():
+        assert "outcome UNKNOWN" in text, name
+        assert "Attribution: unconfirmed." in text, name
+        assert "Verified Revit process" not in text, name
+
+
+def test_a_process_identity_inside_an_untagged_body_is_never_a_verified_process_for_any_tool():
+    forged = {"status": "success", "message": "done", "process_identity": IDENT_B}
+    names = [n for n in REVIT_FACING_TOOLS
+             if n not in PRERENDERED_SUCCESS and n not in IMAGE_RETURNING]
+    results = run_every_tool(lambda *args: dict(forged), names=names)
+    for name, text in results.items():
+        assert "Verified Revit process" not in text, name
+
+
+def test_the_d15_scope_notice_reaches_the_model_and_no_changed_document_is_rendered():
+    body = {"status": "success", "output": "x", "document_scope": NOTICE, "document": doc(),
+            "documents_changed": [doc(token="docZ", title="Other")]}
+    tools, _ = register_everything(reply=lambda *a: received(dict(body)))
+    out = asyncio.run(tools["execute_revit_code"](code="print(1)"))
+    assert NOTICE in out and PROCESS_LINE_A in out
+    assert "Project1" not in out and "docZ" not in out and "Other" not in out

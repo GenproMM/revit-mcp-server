@@ -1105,6 +1105,42 @@ def test_ineligible_documents_answer_422_with_zero_api_calls(flags, file_exists,
     assert uiapp.active.Equals(docs["other"])
 
 
+def test_activation_is_reachable_only_for_the_saved_non_workshared_existing_path_class():
+    """02-17, D-12/G4, exhaustive: every flag combination x saved x file-exists is tried.
+
+    The allow branch (one OpenAndActivateDocument call, HTTP 200) exists for exactly one cell
+    of the 2**5 * 2 * 2 table; every other cell answers 422 with zero API calls and leaves the
+    other document active.
+    """
+    allowed = 0
+    for values in itertools.product([False, True], repeat=len(ACTIVATION_FLAGS)):
+        flags = dict(zip(ACTIVATION_FLAGS, values))
+        for saved in (True, False):
+            for exists in (True, False):
+                app = FlagApplication()
+                other = app.open_document("OTHER", "C:/Models/OTHER.rvt")
+                coord = app.open_document("COORD", "C:/Models/COORD.rvt" if saved else "", **flags)
+                uiapp = FakeUIApp(app, other)
+                reg = identity.DocumentRegistry()
+                tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+                if flags["IsLinked"]:
+                    # A linked document is never listed, so no token for it can exist at all.
+                    assert len(tokens) == 1 and uiapp.calls == [], (flags, saved, exists)
+                    continue
+                status, payload = activate(uiapp, reg, tokens[1],
+                                           exists_everywhere if exists else exists_nowhere)
+                cell = (flags, saved, exists)
+                if not any(values) and saved and exists:
+                    allowed += 1
+                    assert status == 200 and uiapp.calls == [("C:/Models/COORD.rvt",)], cell
+                    assert uiapp.active.Equals(coord), cell
+                else:
+                    assert status == 422 and uiapp.calls == [], cell
+                    assert payload["reason"] in documents.ACTIVATION_REFUSALS, cell
+                    assert uiapp.active.Equals(other), cell
+    assert allowed == 1
+
+
 def test_unsaved_document_answers_422_unsaved_with_zero_api_calls():
     app = FlagApplication()
     active = app.open_document("OTHER", "C:/Models/OTHER.rvt")

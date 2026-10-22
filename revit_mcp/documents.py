@@ -7,8 +7,23 @@ A thin data provider: the registry, the selector rules and the refusals all live
 in identity.py (pure logic, unit tested on the CPython side). This route reads
 Application.Documents on every request and never caches the active document.
 
-The handler takes no injected document: a process with no open document must
-still answer with an empty list rather than a 503.
+No handler here depends on the injected ``doc``: it is None when no document is
+active, and a process with no open document must still answer with an empty list
+rather than a 503.
+
+API CONTEXT (rule for every route module, found in the live 02-07 G4 bench):
+pyRevit runs a route handler in the Revit API context (UI.ExternalEvent ->
+RequestHandler.Execute(uiapp), on the Revit main thread) ONLY if the handler
+function declares an argument named ``uiapp``, ``uidoc`` or ``doc``
+(pyrevit/routes/server/handler.py wants_api_context -> modutils.has_any_arguments;
+server.py _handle_route). A handler with only ``request`` (or none) is run "here",
+directly on the HTTP server thread, OUTSIDE the API context, and a call such as
+UIApplication.OpenAndActivateDocument then raises an InternalException with no
+inner exception. So every handler here declares ``uiapp`` (plus ``request`` where it
+reads a body) and every Revit API touch uses that INJECTED object, never
+pyrevit.HOST_APP. pyRevit passes only the arguments a handler declares
+(modutils.filter_kwargs). Any route added later (plans 02-08..02-15) must declare
+one of uiapp/uidoc/doc, or it silently runs off the API thread.
 
 Activation (plan 02-05, D-12, the accepted G4 policy): /activate_document/ is a
 separate explicit action that makes one already-open, saved, non-workshared
@@ -152,8 +167,19 @@ def _observed_sentence(descriptor, error):
     return "No listed document is active in Revit now."
 
 
+def _live_reader(read_live_snapshot, uiapp):
+    """A zero-argument snapshot reader bound to the injected ``uiapp`` (None: HOST_APP)."""
+    def read():
+        return read_live_snapshot(uiapp)
+
+    return read
+
+
 def run_activation(selector, uiapp, read_snapshot=None, registry=None, file_exists=None):
     """Activate the document named by ``selector`` if, and only if, it is eligible.
+
+    ``uiapp`` is the UIApplication injected into the handler (API context): it makes
+    the one activation call and, unless ``read_snapshot`` is given, every re-read.
 
     Returns (http_status, payload). The handler adds the process identity. Order:
     resolve the token (400/404/503 on any doubt), return 200 without an API call
@@ -165,7 +191,7 @@ def run_activation(selector, uiapp, read_snapshot=None, registry=None, file_exis
     from .identity import current_document_descriptors, read_live_snapshot, resolve_document
     from .textutils import exception_diagnostics
 
-    read = read_snapshot or read_live_snapshot
+    read = read_snapshot or _live_reader(read_live_snapshot, uiapp)
     try:
         snapshot = read()
         listing = current_document_descriptors(snapshot, registry) if selector is None else None
@@ -288,6 +314,9 @@ def run_activation(selector, uiapp, read_snapshot=None, registry=None, file_exis
 #
 # Whether pyRevit's dispatch of these production routes leaves the UI focus alone
 # was measured only for the 02-20 diagnostic button; the live recheck is 02-07.
+# The routes run in the Revit API context because their handlers declare ``uiapp``
+# (see the module docstring); the registry snapshot is read through that injected
+# object, which the orchestration below only passes on and never calls.
 
 
 def _db():
@@ -402,8 +431,11 @@ def _resolve_for_read(selector, read, registry):
     return snapshot, resolved, None
 
 
-def run_document_read(selector, collect, read_snapshot=None, registry=None):
+def run_document_read(selector, collect, read_snapshot=None, registry=None, uiapp=None):
     """Resolve ``selector`` and hand the freshly resolved Document to ``collect``.
+
+    ``uiapp`` is the handler's injected UIApplication, handed only to the snapshot
+    reader (unless ``read_snapshot`` is given); None reads through HOST_APP.
 
     Returns (http_status, payload). ``collect(document)`` returns the dict of data
     to merge into the reply. The reply reports whether the target is the active
@@ -413,7 +445,7 @@ def run_document_read(selector, collect, read_snapshot=None, registry=None):
     """
     from .identity import read_live_snapshot
 
-    read = read_snapshot or read_live_snapshot
+    read = read_snapshot or _live_reader(read_live_snapshot, uiapp)
     snapshot, resolved, refusal = _resolve_for_read(selector, read, registry)
     if refusal is not None:
         return refusal
@@ -455,12 +487,12 @@ def run_document_read(selector, collect, read_snapshot=None, registry=None):
     return 200, payload
 
 
-def run_document_summary(selector, read_snapshot=None, registry=None, db=None):
+def run_document_summary(selector, read_snapshot=None, registry=None, db=None, uiapp=None):
     """Summary of the document named by ``selector``, active or not (D-11)."""
     def collect(document):
         return collect_document_summary(document, db)
 
-    return run_document_read(selector, collect, read_snapshot, registry)
+    return run_document_read(selector, collect, read_snapshot, registry, uiapp)
 
 
 _FEET_TO_MM = 304.8  # tool-facing dimensions are millimeters; Revit stores feet
@@ -513,12 +545,13 @@ def collect_document_levels(document, db=None, element_id=None):
     return {"levels": levels, "total_levels": len(levels), "skipped_levels": skipped}
 
 
-def run_document_levels(selector, read_snapshot=None, registry=None, db=None, element_id=None):
+def run_document_levels(selector, read_snapshot=None, registry=None, db=None, element_id=None,
+                        uiapp=None):
     """Levels of the document named by ``selector``, active or not (D-11)."""
     def collect(document):
         return collect_document_levels(document, db, element_id)
 
-    return run_document_read(selector, collect, read_snapshot, registry)
+    return run_document_read(selector, collect, read_snapshot, registry, uiapp)
 
 
 def _selector_from_request(request):
@@ -537,19 +570,22 @@ def _selector_from_request(request):
     return data.get("document"), None
 
 
-def _read_reply(request, runner):
-    """(status, payload) for an addressed-read route: never raises, always names the process."""
+def _read_reply(request, runner, uiapp=None):
+    """(status, payload) for an addressed-read route: never raises, always names the process.
+
+    ``uiapp`` is the handler's injected UIApplication; the runner reads through it.
+    """
     identity = None
     identity_error = None
     try:
         from .identity import process_identity_or_error
 
-        identity, identity_error = process_identity_or_error()
+        identity, identity_error = process_identity_or_error(uiapp)
         selector, problem = _selector_from_request(request)
         if problem:
             status, payload = 400, {"error": problem, "error_code": "request-body-invalid"}
         else:
-            status, payload = runner(selector)
+            status, payload = runner(selector, uiapp=uiapp)
     except Exception as e:
         logger.error("addressed read failed: {}".format(str(e)))
         status, payload = 500, {"error": str(e), "error_code": "document-read-error"}
@@ -561,13 +597,18 @@ def _read_reply(request, runner):
 
 
 def register_documents_routes(api):
-    """Register the document listing route with the API"""
+    """Register the document routes with the API. Every handler declares ``uiapp``
+    (API-context rule, module docstring)."""
     from pyrevit import routes  # inside: keeps cold start cheap and the module importable offline
 
     @api.route("/documents/", methods=["GET"])
-    def list_documents():
+    def list_documents(uiapp):
         """
         List every open (non-link) document in this Revit process.
+
+        Declares ``uiapp`` so pyRevit runs it in the Revit API context (a handler
+        without uiapp/uidoc/doc runs on the HTTP thread). It does not use ``doc``,
+        which is None when no document is active: an empty list is still an answer.
 
         Returns:
             dict: process_identity (PID, actual port, session token, Revit
@@ -579,10 +620,11 @@ def register_documents_routes(api):
         identity = None
         identity_error = None
         try:
-            from .identity import current_document_descriptors, process_identity_or_error
+            from .identity import (current_document_descriptors, process_identity_or_error,
+                                   read_live_snapshot)
 
-            identity, identity_error = process_identity_or_error()
-            result = current_document_descriptors()
+            identity, identity_error = process_identity_or_error(uiapp)
+            result = current_document_descriptors(read_live_snapshot(uiapp))
             if result.get("ok"):
                 payload = {
                     "status": "success",
@@ -610,9 +652,12 @@ def register_documents_routes(api):
             return routes.make_response(data=payload, status=500)
 
     @api.route("/activate_document/", methods=["POST"])
-    def activate_document(request):
+    def activate_document(uiapp, request):
         """
         Make one already-open saved document the active document in Revit.
+
+        Declares ``uiapp`` so pyRevit runs it in the Revit API context; the injected
+        uiapp makes the activation call (never HOST_APP.uiapp).
 
         Payload: {"document": "<selector from /documents/>"}. Only a saved,
         non-workshared document with an existing file path is activated; every
@@ -624,14 +669,13 @@ def register_documents_routes(api):
         identity_error = None
         try:
             from .identity import process_identity_or_error
-            from pyrevit import HOST_APP
 
-            identity, identity_error = process_identity_or_error()
+            identity, identity_error = process_identity_or_error(uiapp)
             selector, problem = _selector_from_request(request)
             if problem:
                 status, payload = 400, {"error": problem, "error_code": "request-body-invalid"}
             else:
-                status, payload = run_activation(selector, HOST_APP.uiapp)
+                status, payload = run_activation(selector, uiapp)
         except Exception as e:
             logger.error("activate_document failed: {}".format(str(e)))
             status, payload = 500, {"error": str(e), "error_code": "activation-error"}
@@ -642,9 +686,11 @@ def register_documents_routes(api):
         return routes.make_response(data=payload, status=status)
 
     @api.route("/document_summary/", methods=["POST"])
-    def document_summary(request):
+    def document_summary(uiapp, request):
         """
         Summary of one open document, active or not, read only through that document.
+
+        Declares ``uiapp`` so pyRevit runs it in the Revit API context.
 
         Payload: {"document": "<selector from /documents/>"}. Returns title, path,
         non-type element count, level count and project information of exactly that
@@ -653,13 +699,15 @@ def register_documents_routes(api):
         (ui_switched). Nothing is activated. A closed, stale, unknown, ambiguous or
         missing selector is refused by name. Every reply carries process_identity.
         """
-        status, payload = _read_reply(request, run_document_summary)
+        status, payload = _read_reply(request, run_document_summary, uiapp)
         return routes.make_response(data=payload, status=status)
 
     @api.route("/document_levels/", methods=["POST"])
-    def document_levels(request):
+    def document_levels(uiapp, request):
         """
         Levels of one open document, active or not, read only through that document.
+
+        Declares ``uiapp`` so pyRevit runs it in the Revit API context.
 
         Payload: {"document": "<selector from /documents/>"}. Returns each level's
         name, elevation in millimeters (and feet) and id, sorted by elevation, with
@@ -668,7 +716,7 @@ def register_documents_routes(api):
         closed, stale, unknown, ambiguous or missing selector is refused by name.
         Every reply carries process_identity.
         """
-        status, payload = _read_reply(request, run_document_levels)
+        status, payload = _read_reply(request, run_document_levels, uiapp)
         return routes.make_response(data=payload, status=status)
 
     logger.info("Documents routes registered successfully")

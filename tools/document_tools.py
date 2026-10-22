@@ -7,6 +7,25 @@ from mcp.server.fastmcp import Context
 from .utils import describe_broken_path, format_response
 
 
+def _target_options(target):
+    """Transport keyword for the per-call process selector; absent when not given."""
+    return {} if target is None else {"target": target}
+
+
+def _blank_document(document):
+    """True for a document selector that was given but is not a usable string.
+
+    A blank value must refuse, never decay into the one-open-document default.
+    """
+    return document is not None and (not isinstance(document, str) or not document.strip())
+
+
+_BLANK_DOCUMENT_REFUSAL = {
+    "error": "document must be a non-blank selector: pass the 'document' value of one document "
+             "from list_documents, or omit it. Nothing was sent to Revit."
+}
+
+
 def _render_listing(payload):
     """Readable text for a received /documents/ answer, with the answering process."""
     documents = payload.get("documents") or []
@@ -392,9 +411,11 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
         file_path: str = None,
         overwrite: bool = True,
         as_central: bool = None,
+        target: str = None,
+        document: str = None,
         ctx: Context = None,
     ) -> str:
-        """Save the active Revit document to disk so work persists.
+        """Save one Revit document to disk so work persists.
 
         If file_path is given (or the document was started from a template and
         has never been saved), performs Save As to that path. Otherwise saves
@@ -406,6 +427,15 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
         default, because Revit refuses any other Save As on it and because
         saving as central is what carries the worksets into the new file.
 
+        This writes a file. Document choice: pass document (a value from
+        list_documents) to name the document to save. Without it the call uses
+        the only open document; if several documents are open it is refused and
+        the candidates are listed, and the document active in the UI is never
+        assumed. A document that is open but not active is refused (HTTP 412) and
+        nothing is activated: use activate_document, then retry with the same
+        selector. Save and Save As act on the named document and make no
+        activation call.
+
         Args:
             file_path: Full .rvt path to save to, e.g. "C:\\Models\\ESB.rvt"
                 (required the first time a template-based model is saved)
@@ -414,8 +444,14 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
                 workshared document and False otherwise; only set it explicitly
                 to override that, and note Revit rejects False on a detached
                 workshared model.
+            target: Optional opaque process selector from discover_revit_targets;
+                omit it only when exactly one Revit process is usable
+            document: Optional document selector from list_documents; omit it only
+                when exactly one document is open (see the document choice rule above)
             ctx: MCP context for logging
         """
+        if _blank_document(document):
+            return format_response(dict(_BLANK_DOCUMENT_REFUSAL))
         # file_path is optional here: only validate one that was given.
         problem = describe_broken_path(file_path) if file_path else None
         if problem:
@@ -423,5 +459,7 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
         data = {"file_path": file_path, "overwrite": overwrite}
         if as_central is not None:
             data["as_central"] = as_central
-        response = await revit_post("/save_document/", data, ctx)
+        if document is not None:
+            data["document"] = document
+        response = await revit_post("/save_document/", data, ctx, **_target_options(target))
         return format_response(response)

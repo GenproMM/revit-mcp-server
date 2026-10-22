@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v0.1
 current_phase: 02
 current_phase_name: Live identity, ambiguity refusal, and multi-document addressing
+current_plan: 20
 status: executing
-stopped_at: 02-01 offline implementation verified (790 passed, 3 skipped); stop before 02-02 production full-restart recheck; G6 not authorized
-last_updated: "2026-10-17T06:56:32.372Z"
-last_activity: 2026-10-16
-last_activity_desc: 02-01 implemented and offline verified; next 02-02 requires full Revit restart and separate live scope; no G6 authorization
-state_head: b43eb45dbfa0a2ca65cf13da1a25bf2a19d20d00
+stopped_at: Completed 02-17-PLAN.md
+last_updated: "2026-10-22T20:08:12.400Z"
+last_activity: 2026-10-22
+last_activity_desc: 02-17 complete (exhaustive offline tool/route regression inventory; no production change); next 02-18 (live acceptance)
+state_head: f7514c5319218ffb617b7ca2757b3aad0a8cee08
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 27
-  completed_plans: 7
-  percent: 14
+  completed_plans: 26
 milestone_name: Доверенный мост
 ---
 
@@ -29,12 +29,14 @@ See: .planning/PROJECT.md (updated 2026-10-14)
 
 ## Current Position
 
-Phase: 02 (Live identity, ambiguity refusal, and multi-document addressing) — READY TO EXECUTE; PAUSED BEFORE 02-02 LIVE RECHECK
-Plan: 02-20 human checkpoint accepted; 02-01 implemented/offline verified; 02-02..02-19 reconciled with the accepted checkpoint (D-15, G1–G5) on 2026-10-17, plan-checker passed
-Status: 790 unit tests passed, 3 skipped; cold start 0.904s. Production identity/actual-port verification pending full Revit restart in 02-02; G6 unrun/not authorized; execute_code enabled (D-15)
-Last activity: 2026-10-16 — selected-status slice completed offline; no live routes called after extension edits
+Phase: 02 (Live identity, ambiguity refusal, and multi-document addressing) — EXECUTING
+Current Plan: 20
+Total Plans in Phase: 20
+Plan: 02-17 complete (exhaustive offline regression inventory: every registered tool and every route handler is derived from the real registrars/@api.route source, classified by what it does, and checked against the phase contract; an unclassified tool or route, a handler without its guard or without uiapp/uidoc/doc, a read that reaches a transaction, a wrapper in startup.py, a domain-to-domain import or a growing exception list all fail; selector, netstat, listener-ordering, stale-selector and concurrency property tables added; no production file changed, no omission found; true counts 59 tools / 56 routes / 24 route domains / 25 tool domains / 31 guarded mutations; offline, 3752 unit tests passed, 3 skipped). Done in phase 02 (19/20, counted from SUMMARY files on disk): 02-20, 02-01, 02-02, 02-03, 02-19, 02-04, 02-05, 02-06, 02-07, 02-08, 02-09, 02-10, 02-11, 02-12, 02-13, 02-14, 02-15, 02-16, 02-17; remaining 02-18 (live acceptance)
+Status: WAVE 11 COMPLETE (02-17 done, offline inventory; next 02-18, the live acceptance plan, needs separate user authorization). Still required live in 02-18: G2-production same-title pair and close-then-replacement, G5-production duplicate-listener refusal, saved-workshared activation, behavior of the two HTTP-thread routes (/model_info/ and /status/, deliberately unchanged); G6 not authorized. 02-07 live checkpoint RESOLVED observed (Revit 2024 PID 57588, g34-production-3.json, machine-local): G3 summary/levels reads observed A/B and B/A with ui_switched=false; G4 observed for the saved existing-path class only (allow 200 activated; unsaved and detached 422, no dialog); saved-workshared not-run. RULE: every route handler MUST declare uiapp, uidoc or doc (now pinned by test_phase2_inventory.py with an exact two-route allow-list); revit_mcp/ edits need a full Revit restart before live runs (never Reload). Follow-up concern: /model_info/ and /status/ handlers run on the HTTP thread (not changed). 02-12..02-15 revit_mcp/ edits (identity, annotation, building, colors, detail, document, documentation, editing, interop, placement, mep, parameters, rooms, structure, tags, transforms, view_management, worksharing, code_execution) need a full Revit close/reopen before any live run; route behavior not observed live. 02-17 changed no revit_mcp/ or production file. CLAUDE.md counts (54 tools / 51 routes / 23 domains) are stale: true values 59 / 56 / 24. execute_code enabled (D-15). workflow.use_worktrees=false in .planning/config.json (dirty tree)
+Last activity: 2026-10-22 - 02-17 complete (exhaustive tool/route inventory and edge-shape/concurrency tables; offline, no production change); SUMMARY committed f7514c5
 
-Progress: [█░░░░░░░░░] 14%
+Progress: [█████████▌] 95% of phase 02 plans (19/20)
 
 ## Performance Metrics
 
@@ -67,6 +69,23 @@ Progress: [█░░░░░░░░░] 14%
 | Phase 01 P08 | 15 min | 3 tasks | 6 files |
 | Phase 01 P06 | 4 min | 2 tasks | 2 files |
 | Phase 01 P07 | 3 min | 2 tasks | 7 files |
+| Phase 02 P02-02 | ~5d wall-clock | 2 tasks | 3 files |
+| Phase 02 P03 | 25 min | 2 tasks | 9 files |
+| Phase 02 P19 | 20 min | 2 tasks | 2 files |
+| Phase 02 P04 | 25 min | 2 tasks | 6 files |
+| Phase 02 P05 | 8 min | 2 tasks | 4 files |
+| Phase 02 P06 | 7 min | 2 tasks | 4 files |
+| Phase 02 P07 | 10h50m | 2 tasks | 7 files |
+| Phase 02 P08 | 4 min | 2 tasks | 6 files |
+| Phase 02 P09 | 4 min | 2 tasks | 6 files |
+| Phase 02 P10 | 4min | 2 tasks | 6 files |
+| Phase 02 P11 | 6min | 2 tasks | 7 files |
+| Phase 02 P12 | ~10 min | 2 tasks | 7 files |
+| Phase 02 P13 | 9min | 2 tasks | 7 files |
+| Phase 02 P14 | 11 min | 2 tasks | 6 files |
+| Phase 02 P15 | 35min | 2 tasks | 6 files |
+| Phase 02 P16 | n/a | 2 tasks | 6 files |
+| Phase 02 P17 | not timed | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -87,6 +106,10 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 01]: D-28 (d27-b narrowed): every call through pyRevit's handler takes the lock, only GET /status/ exempt; D-29 (a5-a): two-instance harness is SC5 evidence, per-call target selection and per-target lock move to Phase 2; D-30: d27-c is backlog item 999.1; D-31: plan 01-05 superseded — 01-04 bench measured cross-wired mutation and read in pyRevit's shared handler; user decisions at the 01-04 gate and the re-planning run
 - [Phase 01]: 01-06: d27-b applied - every call from this process except GET /status/ takes the lock; revit_image shares the _serialized path; /model_info/ stays locked until its overlap is measured live — 01-04 bench measured cross-wired-read and cross-wired-mutation through pyRevit's shared handler
 - [Phase 01]: 01-07: docs state the lock as process-local harm reduction (only /status/ unqueued, cross-wiring between sessions until d27-c / backlog 999.1); REVIT_PORT documented as a deployment setting only, no two-entry example in user docs; simultaneous Revit launch documented as unmeasured — SER-05 honest scope; a5-a one shared revit entry
+- [Phase 02]: 02-05: activation is a separate explicit tool; only a saved non-workshared existing-file document is activated (own PathName, one call), every other class refuses 422 before any API call; success only on an observed Equals re-read
+- [Phase 02]: 02-06: addressed summary/levels reads resolve via resolve_document (never the mutation guard), report ui_switched as an observation (null when unreadable), exactly two inactive-capable read routes; live recheck is 02-07 — G3 document-only-path measured only the diagnostic button; production routes unproven until live recheck
+- [Phase 02]: 02-14: guard MEP, parameter, room, structure and tag mutations as thin shells over unchanged bodies; set_parameter 409 rolled_back stays an error and gains document/process attribution
+- [Phase 02]: 02-17: exhaustive inventory by discovery plus hand classification; no production omission found; counts 59 tools / 56 routes / 24 route domains / 31 guarded mutations
 
 ### Roadmap Evolution
 
@@ -119,7 +142,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-16
-Stopped at: 02-01 offline verified; production live recheck pending
-Resume file: .planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-02-PLAN.md
+Last session: 2026-10-22T20:08:12.343Z
+Stopped at: Completed 02-17-PLAN.md
+Resume file: None
 Next boundary: prepare bounded 02-02 recheck and require full Revit close/reopen before any live route; no G6 or broad rollout

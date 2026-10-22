@@ -2120,3 +2120,300 @@ def test_read_document_summary_is_in_the_tool_manifest():
     manifest = os.path.join(REPO_ROOT, "tests", "unit", "tool_manifest.txt")
     with open(manifest, encoding="utf-8") as handle:
         assert "read_document_summary" in handle.read().split()
+
+
+# ===========================================================================
+# 02-06 Task 2: read the levels of the explicitly selected document (D-11, G3).
+#
+# The second and last read that may inspect an open but inactive document. Same
+# offline-only evidence and the same live recheck owner (02-07) as the summary.
+# ===========================================================================
+
+
+def read_levels(uiapp, reg, selector, db, read_snapshot=None, element_id=None):
+    return documents.run_document_levels(
+        selector, read_snapshot=read_snapshot or uiapp.read_snapshot, registry=reg, db=db,
+        element_id=element_id or (lambda level: level.Id))
+
+
+def test_levels_of_an_inactive_document_are_its_own_in_millimeters_sorted_by_elevation():
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB()
+    status, payload = read_levels(uiapp, reg, tokens["b"], db)
+    assert status == 200 and payload["status"] == "success"
+    assert payload["levels"] == [
+        {"name": "COORD L1", "elevation_mm": 0.0, "elevation_feet": 0.0, "id": 21},
+        {"name": "COORD L2", "elevation_mm": 3048.0, "elevation_feet": 10.0, "id": 22}]
+    assert payload["total_levels"] == 2 and payload["skipped_levels"] == 0
+    assert payload["document"]["document"] == tokens["b"] and payload["document"]["active"] is False
+    assert "OTHER" not in str(payload["levels"])           # never the active document's levels
+    assert only_from(db, docs["b"], docs["a"])
+    assert uiapp.calls == []
+
+
+def test_levels_report_the_active_flag_and_the_before_and_after_diagnostics():
+    app, uiapp, reg, tokens, docs = read_rig()
+    status, payload = read_levels(uiapp, reg, tokens["b"], FakeDB())
+    assert payload["target_is_active"] is False and payload["ui_switched"] is False
+    assert payload["active_before"] == tokens["a"] == payload["active_after"]
+    status, payload = read_levels(uiapp, reg, tokens["a"], FakeDB())
+    assert status == 200 and payload["target_is_active"] is True
+    assert [level["name"] for level in payload["levels"]] == ["OTHER L1"]
+    db = FakeDB(on_collect=lambda document: setattr(uiapp, "active", docs["b"]))
+    status, payload = read_levels(uiapp, reg, tokens["b"], db)
+    assert status == 200 and payload["ui_switched"] is True
+
+
+def test_elevations_are_converted_from_feet_and_rounded_like_list_levels():
+    app = ModelApplication()
+    other = app.open_model("OTHER", "C:/Models/OTHER.rvt", 0, [])
+    app.open_model("COORD", "C:/Models/COORD.rvt", 0, [FakeLevel("L", 3.28084, 5)])
+    uiapp = FakeUIApp(app, other)
+    reg = identity.DocumentRegistry()
+    tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    status, payload = read_levels(uiapp, reg, tokens[1], FakeDB())
+    assert payload["levels"] == [{"name": "L", "elevation_mm": 1000.0, "elevation_feet": 3.2808, "id": 5}]
+
+
+def test_non_ascii_level_names_are_preserved_and_a_missing_name_is_not_invented_from_elsewhere():
+    app = ModelApplication()
+    other = app.open_model("OTHER", "C:/Models/OTHER.rvt", 0, [FakeLevel("Level 1", 0.0, 1)])
+    app.open_model("COORD", "C:/Models/COORD.rvt", 0, [FakeLevel("Этаж 1", 0.0, 2), FakeLevel(None, 1.0, 3)])
+    uiapp = FakeUIApp(app, other)
+    reg = identity.DocumentRegistry()
+    tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    status, payload = read_levels(uiapp, reg, tokens[1], FakeDB())
+    assert [level["name"] for level in payload["levels"]] == ["Этаж 1", "Unnamed"]
+
+
+def test_a_level_that_cannot_be_read_is_skipped_and_counted_never_silently_dropped():
+    app = ModelApplication()
+    other = app.open_model("OTHER", "C:/Models/OTHER.rvt", 0, [])
+    app.open_model("COORD", "C:/Models/COORD.rvt", 0,
+                   [FakeLevel("Good", 0.0, 1), FakeLevel("Broken", RuntimeError("no elevation"), 2)])
+    uiapp = FakeUIApp(app, other)
+    reg = identity.DocumentRegistry()
+    tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    status, payload = read_levels(uiapp, reg, tokens[1], FakeDB())
+    assert status == 200 and [level["name"] for level in payload["levels"]] == ["Good"]
+    assert payload["total_levels"] == 1 and payload["skipped_levels"] == 1
+
+
+def test_a_document_without_levels_is_an_empty_list_not_an_error():
+    app = ModelApplication()
+    other = app.open_model("OTHER", "C:/Models/OTHER.rvt", 0, [FakeLevel("L", 0.0, 1)])
+    app.open_model("COORD", "C:/Models/COORD.rvt", 0, [])
+    uiapp = FakeUIApp(app, other)
+    reg = identity.DocumentRegistry()
+    tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    status, payload = read_levels(uiapp, reg, tokens[1], FakeDB())
+    assert status == 200 and payload["levels"] == [] and payload["total_levels"] == 0
+
+
+def test_a_closed_token_never_yields_the_levels_of_an_open_document():
+    app, uiapp, reg, tokens, docs = read_rig()
+    app.close_document(docs["b"])
+    db = FakeDB()
+    status, payload = read_levels(uiapp, reg, tokens["b"], db)
+    assert status == 404 and payload["error_code"] == "document-closed" and payload["error"]
+    assert db.collected == [] and "levels" not in payload and "document" not in payload
+
+
+def test_levels_refuse_unknown_stale_malformed_omitted_and_ambiguous_selectors_without_collecting():
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB()
+    cases = [
+        ("doc1.{}.99".format(reg.generation), 404, "document-token-unknown"),
+        ("doc1.000000000000.1", 404, "document-token-stale"),
+        ("COORD", 400, "document-selector-invalid"),
+        (None, 400, "document-selector-required"),
+    ]
+    for selector, status_code, code in cases:
+        status, payload = read_levels(uiapp, reg, selector, db)
+        assert (status, payload["error_code"]) == (status_code, code), selector
+        assert "levels" not in payload
+    single = uiapp.read_snapshot
+
+    def doubled():
+        documents_now, active = single()
+        return documents_now + documents_now[1:], active
+
+    status, payload = read_levels(uiapp, reg, tokens["b"], db, read_snapshot=doubled)
+    assert status == 400 and payload["error_code"] == "document-identity-ambiguous"
+    assert db.collected == []
+
+
+def test_a_level_collector_that_raises_is_a_named_500_with_no_levels():
+    app, uiapp, reg, tokens, docs = read_rig()
+    status, payload = read_levels(uiapp, reg, tokens["b"], FakeDB(raises=RuntimeError("Document was closed")))
+    assert status == 500 and payload["error_code"] == "document-read-failed"
+    assert "Document was closed" in payload["error"] and "levels" not in payload
+    assert payload["observed_active_document"]["document"] == tokens["a"]
+
+
+def test_the_level_collector_and_its_helpers_have_no_ui_or_active_document_dependency():
+    for name in ("collect_document_levels", "_level_details", "_element_id_value"):
+        assert code_identifiers(function_node(name)) & UI_DEPENDENT_NAMES == set(), name
+    node = function_node("run_document_levels")
+    assert "OpenAndActivateDocument" not in callee_names(node)
+    assert code_identifiers(node) & {"ActiveUIDocument", "HOST_APP", "uiapp"} == set()
+
+
+# ------------------------------------------------- exactly two inactive-capable reads
+
+
+def test_exactly_two_routes_read_an_inactive_document_and_the_mutation_guard_is_unchanged(
+        monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    captured = read_handlers(monkeypatch, fake_routes, uiapp, reg, FakeDB())
+    assert sorted(path for path, methods in captured) == [
+        "/activate_document/", "/document_levels/", "/document_summary/", "/documents/"]
+    db = FakeDB()
+    assert read_summary(uiapp, reg, tokens["b"], db)[0] == 200
+    assert read_levels(uiapp, reg, tokens["b"], db)[0] == 200
+    decision = identity.decide_mutation_document(tokens["b"], uiapp.read_snapshot(), reg)
+    assert decision["ok"] is False and decision["status"] == 412 and decision["code"] == "document-not-active"
+    assert uiapp.calls == []
+
+
+# ----------------------------------------------------------------- the route
+
+
+def levels_handlers(monkeypatch, fake_routes, uiapp, registry, db, identity_value=None):
+    captured = read_handlers(monkeypatch, fake_routes, uiapp, registry, db, identity_value)
+    monkeypatch.setattr(documents, "_element_id_value", lambda level: level.Id)
+    return captured
+
+
+def test_the_levels_route_is_a_post_handler_taking_only_the_request(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    captured = levels_handlers(monkeypatch, fake_routes, uiapp, reg, FakeDB())
+    handler = captured[("/document_levels/", ("POST",))]
+    assert list(inspect.signature(handler).parameters) == ["request"]
+
+
+def test_the_levels_route_reads_a_text_plain_bytes_body_and_names_the_process(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB()
+    handler = levels_handlers(monkeypatch, fake_routes, uiapp, reg, db)[("/document_levels/", ("POST",))]
+    handler(FakeRequest(('{"document": "%s"}' % tokens["b"]).encode("utf-8")))
+    payload, status = fake_routes[-1]
+    assert status == 200 and [level["name"] for level in payload["levels"]] == ["COORD L1", "COORD L2"]
+    assert payload["process_identity"] == IDENT and payload["ui_switched"] is False
+    assert only_from(db, docs["b"], docs["a"]) and uiapp.calls == []
+
+
+def test_the_levels_route_refusals_keep_status_and_process_and_it_never_raises(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB()
+    handler = levels_handlers(monkeypatch, fake_routes, uiapp, reg, db)[("/document_levels/", ("POST",))]
+    for body in (None, b"", b"{}", b"not json", b"[1, 2]"):
+        handler(FakeRequest(body))
+        payload, status = fake_routes[-1]
+        assert status == 400 and payload["error"] and payload["process_identity"] == IDENT, body
+    app.close_document(docs["b"])
+    handler(FakeRequest({"document": tokens["b"]}))
+    payload, status = fake_routes[-1]
+    assert status == 404 and payload["error_code"] == "document-closed" and "levels" not in payload
+    assert payload["process_identity"] == IDENT and db.collected == []
+
+    def no_db():
+        raise RuntimeError("DB namespace unavailable")
+
+    app2, uiapp2, reg2, tokens2, docs2 = read_rig()
+    handler2 = levels_handlers(monkeypatch, fake_routes, uiapp2, reg2, FakeDB())[("/document_levels/", ("POST",))]
+    monkeypatch.setattr(documents, "_db", no_db)
+    handler2(FakeRequest({"document": tokens2["b"]}))
+    payload, status = fake_routes[-1]
+    assert status == 500 and payload["error_code"] == "document-read-failed"
+    assert "DB namespace unavailable" in payload["error"] and payload["process_identity"] == IDENT
+
+
+def test_the_levels_route_without_process_identity_says_so(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = read_rig()
+    handler = levels_handlers(monkeypatch, fake_routes, uiapp, reg, FakeDB(), identity_value="none")[
+        ("/document_levels/", ("POST",))]
+    handler(FakeRequest({"document": tokens["b"]}))
+    payload, status = fake_routes[-1]
+    assert status == 200 and "process_identity" not in payload
+    assert payload["identity_error"] == "no retained RoutesServer"
+
+
+# ------------------------------------------------------------------ the tool
+
+
+def levels_reply(**override):
+    reply = {
+        "status": "success", "process_identity": dict(IDENT), "document": dict(B_DESCRIPTOR),
+        "target_is_active": False, "ui_switched": False,
+        "active_before": "doc1.aaaaaaaaaaaa.1", "active_after": "doc1.aaaaaaaaaaaa.1",
+        "levels": [{"name": "Этаж 1", "elevation_mm": 0.0, "elevation_feet": 0.0, "id": 21},
+                   {"name": "Level 2", "elevation_mm": 3048.0, "elevation_feet": 10.0, "id": 22}],
+        "total_levels": 2, "skipped_levels": 0,
+    }
+    reply.update(override)
+    return reply
+
+
+def test_read_document_levels_tool_posts_the_token_and_target_and_renders_the_levels():
+    text, calls = run_read_tool("read_document_levels", levels_reply(),
+                                document="doc1.aaaaaaaaaaaa.2", target="revit1:xyz")
+    assert calls == [("/document_levels/", {"document": "doc1.aaaaaaaaaaaa.2"}, {"target": "revit1:xyz"})]
+    for needle in ("Этаж 1", "Level 2", "3048", "21", "22", "Levels: 2", "COORD", "doc1.aaaaaaaaaaaa.2",
+                   "PID 4242", "48885", "tok-abc"):
+        assert needle in text, needle
+    lowered = text.lower()
+    assert "no activation" in lowered and "observation" in lowered and "unchanged" in lowered
+
+
+def test_read_document_levels_tool_reports_skipped_levels_a_switch_and_an_empty_list():
+    text, _ = run_read_tool("read_document_levels", levels_reply(skipped_levels=1), document="doc1.aaaaaaaaaaaa.2")
+    assert "unreadable" in text.lower() and "1" in text
+    text, _ = run_read_tool("read_document_levels", levels_reply(ui_switched=True), document="doc1.aaaaaaaaaaaa.2")
+    assert "changed" in text.lower() and "unchanged" not in text.lower()
+    text, _ = run_read_tool("read_document_levels", levels_reply(levels=[], total_levels=0),
+                            document="doc1.aaaaaaaaaaaa.2")
+    assert "Levels: 0" in text and "ERROR" not in text.upper()
+
+
+def test_read_document_levels_tool_never_renders_a_refusal_as_data():
+    refusal = 'Error: 404 - {"error": "closed", "error_code": "document-closed"}'
+    text, calls = run_read_tool("read_document_levels", refusal, document="doc1.aaaaaaaaaaaa.2")
+    assert "document-closed" in text and "Levels:" not in text and len(calls) == 1
+    text, _ = run_read_tool("read_document_levels", {"error": "boom", "error_code": "document-read-failed"},
+                            document="doc1.aaaaaaaaaaaa.2")
+    assert "boom" in text and "Levels:" not in text
+
+
+def test_read_document_levels_tool_refuses_a_missing_document_without_posting():
+    for bad in ("", "   ", None):
+        text, calls = run_read_tool("read_document_levels", levels_reply(), document=bad)
+        assert calls == [] and "document" in text.lower() and "list_documents" in text
+
+
+def test_read_document_levels_signature_and_docstring_are_the_api_contract():
+    from tools.document_tools import register_document_tools
+
+    mcp = FakeMCP()
+    register_document_tools(mcp, None, None)
+    function = mcp.tools["read_document_levels"]
+    names = list(inspect.signature(function).parameters)
+    assert names == ["document", "target", "ctx"]
+    assert inspect.signature(function).parameters["document"].default is inspect.Parameter.empty
+    doc = function.__doc__
+    for name in names:
+        assert name + ":" in doc, "docstring Args must name {}".format(name)
+    for field in ("name", "elevation_mm", "elevation_feet", "id", "total_levels", "skipped_levels",
+                  "ui_switched"):
+        assert field in doc, "docstring must list returned field {}".format(field)
+    lowered = doc.lower()
+    assert "exactly two" in lowered and "02-07" in doc and "list_documents" in doc
+    assert "does not activate" in lowered or "never activate" in lowered
+    assert "millimeter" in lowered and "closed" in lowered and "refused" in lowered
+    assert "OpenAndActivateDocument" not in doc
+
+
+def test_read_document_levels_is_in_the_tool_manifest():
+    manifest = os.path.join(REPO_ROOT, "tests", "unit", "tool_manifest.txt")
+    with open(manifest, encoding="utf-8") as handle:
+        assert "read_document_levels" in handle.read().split()

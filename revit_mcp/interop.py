@@ -5,6 +5,7 @@ Handles IFC export and external file linking/importing
 """
 
 from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import clr
 import os
@@ -19,8 +20,7 @@ MM_TO_FEET = 1.0 / 304.8
 def register_interop_routes(api):
     """Register all interop routes with the API"""
 
-    @api.route("/export_ifc/", methods=["POST"])
-    def export_ifc_handler(doc, request):
+    def _export_ifc(doc, request):
         """Export the model to IFC format."""
         try:
             if not doc:
@@ -124,8 +124,17 @@ def register_interop_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/link_file/", methods=["POST"])
-    def link_file_handler(doc, request):
+    @api.route("/export_ifc/", methods=["POST"])
+    def export_ifc_handler(uiapp, doc, request):
+        """Export the model to IFC format."""
+        # G1 explicit guard: first, before any document access, file output or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_export_ifc(document, request), descriptor, uiapp=uiapp)
+
+    def _link_file(doc, request):
         """Link or import an external file."""
         try:
             if not doc:
@@ -239,5 +248,15 @@ def register_interop_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+    @api.route("/link_file/", methods=["POST"])
+    def link_file_handler(uiapp, doc, request):
+        """Link or import an external file."""
+        # G1 explicit guard: first, before any document access, file output or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_link_file(document, request), descriptor, uiapp=uiapp)
 
     logger.info("Interop routes registered successfully")

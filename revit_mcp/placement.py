@@ -12,6 +12,12 @@ from .utils import (
     suppress_warnings,
     parse_request_data,
 )
+from .identity import (
+    mutation_document_or_response,
+    request_document_selector,
+    attribute_response,
+    family_document_info,
+)
 from pyrevit import routes, revit, DB
 import os
 import traceback
@@ -84,11 +90,43 @@ def _family_param_value(family_parameter, raw_value):
     return raw_value
 
 
+def _documents_changed(descriptor, touched):
+    """Every document one edit_family call worked on, each with what actually changed.
+
+    The project is the guard's document: it changes only through the reload. The family
+    document is the nested one EditFamily opened (title and path read when it was opened);
+    its edit is closed without saving, so it is never reported as saved, and it appears
+    only if the call really opened one.
+    """
+    project = dict(descriptor)
+    project["role"] = "project"
+    project["changed"] = bool(touched.get("project_changed"))
+    entries = [project]
+    info = touched.get("family")
+    if info is not None:
+        family = dict(info)
+        family["role"] = "family"
+        family["changed"] = bool(touched.get("family_edited"))
+        family["saved"] = False
+        entries.append(family)
+    return entries
+
+
+def _attach_documents_changed(response, descriptor, touched):
+    """Add ``documents_changed`` to a dict reply, whatever its outcome. Never raises."""
+    try:
+        data = getattr(response, "data", None)
+        if isinstance(data, dict):
+            data["documents_changed"] = _documents_changed(descriptor, touched)
+    except Exception:
+        logger.warning("Could not attach documents_changed to the edit_family reply")
+    return response
+
+
 def register_placement_routes(api):
     """Register all placement-related routes with the API"""
 
-    @api.route("/place_family/", methods=["POST"])
-    def place_family(doc, request):
+    def _place_family(doc, request):
         """
         Place a family instance at a specified location in the model.
 
@@ -451,8 +489,17 @@ def register_placement_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/load_family/", methods=["POST"])
-    def load_family(doc, request):
+    @api.route("/place_family/", methods=["POST"])
+    def place_family(uiapp, doc, request):
+        """Place a family instance at a specified location in the model."""
+        # G1 explicit guard: first, before any document access, file output or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_place_family(document, request), descriptor, uiapp=uiapp)
+
+    def _load_family(doc, request):
         """
         Load a Revit family (.rfa) from disk into the active document, so its
         types become available to place_family. Must run outside a transaction
@@ -505,6 +552,16 @@ def register_placement_routes(api):
         except Exception as e:
             logger.error("load_family failed: {}".format(str(e)))
             return routes.make_response(data={"error": str(e)}, status=500)
+
+    @api.route("/load_family/", methods=["POST"])
+    def load_family(uiapp, doc, request):
+        """Load a Revit family (.rfa) from disk into the selected document."""
+        # G1 explicit guard: first, before any document access, file output or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_load_family(document, request), descriptor, uiapp=uiapp)
 
     @api.route("/list_families/", methods=["GET"])
     def list_families(doc, request):
@@ -675,8 +732,7 @@ def register_placement_routes(api):
                 data={"error": "Failed to list levels: {}".format(str(e))}, status=500
             )
 
-    @api.route("/edit_family/", methods=["POST"])
-    def edit_family(doc, request):
+    def _edit_family(doc, request, touched):
         """
         Open a family already loaded in the project, change its type
         parameters, and load it back so placed instances update.
@@ -743,6 +799,10 @@ def register_placement_routes(api):
                 )
 
             family_doc = doc.EditFamily(target)
+            if family_doc is not None:
+                # The nested family document is a second document this call works on:
+                # identify it now, at the point of the operation, before it is closed.
+                touched["family"] = family_document_info(family_doc)
             if family_doc is None or not family_doc.IsFamilyDocument:
                 return routes.make_response(
                     data={"error": "Revit did not return a family document for "
@@ -855,7 +915,11 @@ def register_placement_routes(api):
                             except Exception as e:
                                 failed_shared[param_name] = str(e)
 
-                ft.Commit()
+                # The family document is closed without saving below, so this edit only
+                # reaches the project through the reload; the status is recorded so the
+                # reply never claims a change a rolled-back commit did not make.
+                touched["family_edited"] = (
+                    ft.Commit() == DB.TransactionStatus.Committed)
             except Exception as tx_error:
                 if ft.HasStarted() and not ft.HasEnded():
                     ft.RollBack()
@@ -877,6 +941,7 @@ def register_placement_routes(api):
                 try:
                     family_doc.LoadFamily(doc, _FamilyReloadOptions())
                     reloaded = True
+                    touched["project_changed"] = True
                 except Exception as le:
                     family_doc.Close(False)
                     return routes.make_response(
@@ -916,5 +981,18 @@ def register_placement_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": traceback.format_exc()}, status=500
             )
+
+    @api.route("/edit_family/", methods=["POST"])
+    def edit_family(uiapp, doc, request):
+        """Open a family loaded in the selected project, edit it, and load it back."""
+        # G1 explicit guard: first, before EditFamily opens any nested document.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        touched = {}
+        response = _edit_family(document, request, touched)
+        response = attribute_response(response, descriptor, uiapp=uiapp)
+        return _attach_documents_changed(response, descriptor, touched)
 
     logger.info("Placement routes registered successfully")

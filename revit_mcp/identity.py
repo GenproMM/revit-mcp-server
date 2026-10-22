@@ -661,3 +661,46 @@ def attribute_response(response, descriptor, uiapp=None, identity=None):
     except Exception:
         pass
     return response
+
+
+def _read_title_and_path(document, title, path):
+    """(title, path) read from ``document`` now; a value that cannot be read keeps its default."""
+    from .textutils import sanitize_string, sanitize_value
+
+    try:
+        title = sanitize_string(document.Title)
+    except Exception:
+        pass
+    try:
+        path = sanitize_value(document.PathName)
+    except Exception:
+        pass
+    return title, path
+
+
+def current_descriptor(descriptor, document):
+    """The guard's descriptor with title and path re-read from the resolved Document now.
+
+    A save changes what a document is called on disk (SaveAs moves its path), so the reply
+    of a save names the document as it stands after the operation, read from the Document
+    that was actually saved and never from the request. The token, the active flag and the
+    shape are the guard's; a title or path that cannot be read keeps the guard's value.
+    Never raises, never mutates ``descriptor``.
+    """
+    result = dict(descriptor)
+    title, path = _read_title_and_path(document, result.get("title"), result.get("path"))
+    result["title"] = title
+    result["path"] = path
+    result["saved"] = bool(path)
+    return result
+
+
+def family_document_info(document):
+    """Title and path of a nested family document an operation opened itself.
+
+    Such a document is not an open project: it has no selector and is not in the registry,
+    so it is described by what it is, read at the point of the operation (before it is
+    closed). Never raises.
+    """
+    title, path = _read_title_and_path(document, "Unnamed", "")
+    return {"title": title, "path": path, "is_family_document": True}

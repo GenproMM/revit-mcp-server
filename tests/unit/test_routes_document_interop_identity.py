@@ -475,6 +475,7 @@ def world(monkeypatch, tmp_path):
     collections_mod.Generic = generic
     system = types.ModuleType("System")
     system.Collections = collections_mod
+    system.Int64 = int  # make_element_id builds DB.ElementId(System.Int64(n))
     monkeypatch.setitem(sys.modules, "System", system)
     monkeypatch.setitem(sys.modules, "System.Collections", collections_mod)
     monkeypatch.setitem(sys.modules, "System.Collections.Generic", generic)

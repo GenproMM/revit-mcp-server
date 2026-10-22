@@ -5,6 +5,7 @@ Handles sheet creation, schedule creation, and document export
 """
 
 from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
+from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -16,8 +17,7 @@ logger = logging.getLogger(__name__)
 def register_documentation_routes(api):
     """Register all documentation routes with the API"""
 
-    @api.route("/create_sheet/", methods=["POST"])
-    def create_sheet_handler(doc, request):
+    def _create_sheet(doc, request):
         """Create a drawing sheet in Revit."""
         try:
             if not doc:
@@ -126,8 +126,17 @@ def register_documentation_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/create_schedule/", methods=["POST"])
-    def create_schedule_handler(doc, request):
+    @api.route("/create_sheet/", methods=["POST"])
+    def create_sheet_handler(uiapp, doc, request):
+        """Create a drawing sheet in Revit."""
+        # G1 explicit guard: first, before any document access, file output or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_sheet(document, request), descriptor, uiapp=uiapp)
+
+    def _create_schedule(doc, request):
         """Create a schedule view in Revit."""
         try:
             if not doc:
@@ -271,8 +280,17 @@ def register_documentation_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/export_document/", methods=["POST"])
-    def export_document_handler(doc, request):
+    @api.route("/create_schedule/", methods=["POST"])
+    def create_schedule_handler(uiapp, doc, request):
+        """Create a schedule view in Revit."""
+        # G1 explicit guard: first, before any document access, file output or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_create_schedule(document, request), descriptor, uiapp=uiapp)
+
+    def _export_document(doc, request):
         """Export a view or sheet to file."""
         try:
             if not doc:
@@ -465,5 +483,15 @@ def register_documentation_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+    @api.route("/export_document/", methods=["POST"])
+    def export_document_handler(uiapp, doc, request):
+        """Export a view or sheet to file."""
+        # G1 explicit guard: first, before any document access, file output or transaction.
+        document, descriptor, refusal = mutation_document_or_response(
+            request_document_selector(request), uiapp=uiapp)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_export_document(document, request), descriptor, uiapp=uiapp)
 
     logger.info("Documentation routes registered successfully")

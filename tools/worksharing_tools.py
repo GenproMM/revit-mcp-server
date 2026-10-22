@@ -127,6 +127,11 @@ def _resolve_path_or_error(file_path: str) -> tuple[str, str | None]:
         return file_path, str(exc)
 
 
+def _target_options(target):
+    """Transport keyword for the per-call process selector; absent when not given."""
+    return {} if target is None else {"target": target}
+
+
 def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
     """Register worksharing / model-open tools with the MCP server."""
     _ = revit_image  # Acknowledge unused parameter
@@ -135,6 +140,7 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
     async def list_model_worksets(
         file_path: str,
         close_worksets_matching: list[str] = None,
+        target: str = None,
         ctx: Context = None,
     ) -> str:
         """Inspect a Revit model's worksets without opening it.
@@ -154,6 +160,12 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
         A model already open in Revit is still read from disk, so unsaved
         workset changes are not reflected.
 
+        This is a process-level file inspection, not a document read: it reads
+        the file from disk through the selected Revit process, does not read or
+        change any open document, never activates a document and has no
+        document argument. To see which documents are open, and their
+        selectors, use list_documents.
+
         Args:
             file_path: Full path to the .rvt file, or an RSN:// Revit Server
                 URI. Escape backslashes ("G:\\\\Models\\\\Tower.rvt") or use forward
@@ -166,6 +178,8 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
                 ["__ALL_USER_WORKSETS__"] closes every user workset. Pass an
                 explicit list such as ["#_RVT_LINK"] to close only matching
                 worksets, or [] to preview with every workset open.
+            target: Optional opaque process selector from discover_revit_targets;
+                omit it only when exactly one Revit process is usable
             ctx: MCP context for logging
         """
         # Check for a mangled path first: it is a client-side mistake and the
@@ -184,7 +198,7 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
                 else close_worksets_matching
             ),
         }
-        response = await revit_post("/model_worksets/", data, ctx)
+        response = await revit_post("/model_worksets/", data, ctx, **_target_options(target))
         return format_response(response)
 
     @mcp.tool()
@@ -196,6 +210,7 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
         audit: bool = False,
         local_path: str = None,
         overwrite_local: bool = True,
+        target: str = None,
         ctx: Context = None,
     ) -> str:
         """Open a Revit model from disk, detaching from central and choosing worksets.
@@ -233,6 +248,16 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
         get_revit_status rather than retrying blindly. Detaching leaves an unsaved
         document; use save_document with a file_path to persist it.
 
+        Process-level, not document-level: this tool opens a file in the
+        selected Revit process, so it has no document argument and no document
+        selector exists yet for what it opens. It does not select, activate or
+        change a document that is already open; to make an already open
+        document the active one use activate_document with its selector from
+        list_documents. Read the newly opened document from this reply
+        (document_title and activated), never assume it is the file you asked
+        for or that it became the active document, and call list_documents to
+        get its selector before editing it.
+
         Args:
             file_path: Full path to the .rvt file, or an RSN:// Revit Server
                 URI. Escape backslashes
@@ -257,6 +282,9 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
             activate: Make the opened model the active document, which the other
                 tools operate on (defaults to True)
             audit: Run Revit's audit while opening — slow, for suspect files
+            target: Optional opaque process selector from discover_revit_targets;
+                omit it only when exactly one Revit process is usable. It names
+                the process that opens the file.
             ctx: MCP context for logging
         """
         # Check for a mangled path first: it is a client-side mistake and the
@@ -281,5 +309,5 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
             if close_worksets_matching is None
             else close_worksets_matching
         )
-        response = await revit_post("/open_model/", data, ctx)
+        response = await revit_post("/open_model/", data, ctx, **_target_options(target))
         return format_response(response)

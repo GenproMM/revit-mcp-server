@@ -143,6 +143,15 @@ def _with_observed(payload, descriptor, error):
     return payload
 
 
+def _observed_sentence(descriptor, error):
+    if descriptor is not None:
+        return "The document active in Revit now is {} ({}).".format(
+            descriptor["document"], descriptor["title"])
+    if error:
+        return "Which document is active now could not be read ({}).".format(error)
+    return "No listed document is active in Revit now."
+
+
 def run_activation(selector, uiapp, read_snapshot=None, registry=None, file_exists=None):
     """Activate the document named by ``selector`` if, and only if, it is eligible.
 
@@ -156,10 +165,19 @@ def run_activation(selector, uiapp, read_snapshot=None, registry=None, file_exis
     from .identity import current_document_descriptors, read_live_snapshot, resolve_document
 
     read = read_snapshot or read_live_snapshot
-    snapshot = read()
+    try:
+        snapshot = read()
+        listing = current_document_descriptors(snapshot, registry) if selector is None else None
+        resolved = None if selector is None else resolve_document(selector, snapshot, registry)
+    except Exception as exc:
+        detail = str(exc) or exc.__class__.__name__
+        return 503, _with_observed({
+            "error": "The open documents could not be read ({}). Nothing was selected, "
+                     "activated or changed.".format(detail),
+            "error_code": "document-registry-unavailable",
+        }, None, detail)
 
     if selector is None:
-        listing = current_document_descriptors(snapshot, registry)
         payload = {
             "error": "No document was named. Activation never chooses a default: pass the "
                      "'document' value of exactly one document from list_documents.",
@@ -170,7 +188,6 @@ def run_activation(selector, uiapp, read_snapshot=None, registry=None, file_exis
         observed, observed_error = _active_of(listing)
         return 400, _with_observed(payload, observed, observed_error)
 
-    resolved = resolve_document(selector, snapshot, registry)
     if not resolved["ok"]:
         payload = {"error": resolved["error"], "error_code": resolved["code"]}
         if "candidates" in resolved:
@@ -200,10 +217,40 @@ def run_activation(selector, uiapp, read_snapshot=None, registry=None, file_exis
         observed, observed_error = _observed_active(lambda: snapshot, registry)
         return 422, _with_observed(payload, observed, observed_error)
 
-    path = document.PathName
-    uiapp.OpenAndActivateDocument(path)
+    try:
+        path = document.PathName
+        uiapp.OpenAndActivateDocument(path)
+    except Exception as exc:
+        # Never success, never a retry with another path, a save, a reopen or a
+        # worksharing option: report the failure and what is actually active now.
+        observed, observed_error = _observed_active(read, registry)
+        payload = {
+            "error": "Activating document {} ({}) failed: {}. It was not retried; no other "
+                     "path was tried and nothing was saved or reopened. {}".format(
+                         descriptor["document"], descriptor["title"],
+                         str(exc) or exc.__class__.__name__,
+                         _observed_sentence(observed, observed_error)),
+            "error_code": "activation-failed",
+            "reason": "activation-failed",
+            "document": descriptor,
+        }
+        return 500, _with_observed(payload, observed, observed_error)
 
-    verified = resolve_document(selector, read(), registry)
+    try:
+        verified = resolve_document(selector, read(), registry)
+    except Exception as exc:
+        observed, observed_error = _observed_active(read, registry)
+        payload = {
+            "error": "Activation of document {} ({}) was requested but the active document "
+                     "could not be re-read ({}); it is not known to be activated. {}".format(
+                         descriptor["document"], descriptor["title"],
+                         str(exc) or exc.__class__.__name__,
+                         _observed_sentence(observed, observed_error)),
+            "error_code": "activation-unverified",
+            "reason": "activation-unverified",
+            "document": descriptor,
+        }
+        return 500, _with_observed(payload, observed, observed_error)
     if verified["ok"] and verified["descriptor"]["active"]:
         payload = {
             "status": "success",

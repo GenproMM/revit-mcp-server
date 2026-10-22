@@ -66,29 +66,6 @@ async def _say(ctx, message: str) -> None:
         pass
 
 
-async def _bridge_state(revit_get, ctx) -> str:
-    """One of "ready", "no_document", "down".
-
-    The distinction matters: `/status/` answers 503 when Revit is running but
-    has no document open (revit_mcp/status.py), and `_revit_call` collapses
-    every non-200 into an "Error: <code> - <body>" string. Treating that as
-    "down" would make start_revit wait out its whole timeout against a Revit
-    that is already up and sitting on the Home screen.
-
-    A transport failure has no status code in it ("Error: All connection
-    attempts failed"), which is what separates the two cases.
-    """
-    response = await revit_get("/status/", ctx, timeout=5.0)
-    if isinstance(response, dict):
-        return "ready"
-    text = str(response)
-    if text.startswith("Error: "):
-        head = text[len("Error: "):].split(" ", 1)[0]
-        if head.isdigit():
-            return "no_document"  # the server answered, just not with 200
-    return "down"
-
-
 _NO_FACADE = (
     "Revit process discovery is not available on this transport, so no process list "
     "was produced. That does not mean no Revit runs."
@@ -155,6 +132,38 @@ def _process_rows(usable) -> list:
 def _listener_rows(unusable) -> list:
     return [{"port": e.get("port"), "pids": list(e.get("pids", [])),
              "reason": e.get("reason")} for e in unusable]
+
+
+def _describe_processes(usable) -> str:
+    return "; ".join("PID %s (Revit %s, port %s)" % (
+        e.get("pid"), e.get("revit_version"), e.get("port")) for e in usable)
+
+
+def _launch_refusal(survey) -> str:
+    """Why start_revit refuses to launch on an inconclusive discovery."""
+    kind, unusable = survey["kind"], survey["unusable"]
+    if kind == "collision":
+        collisions = [u for u in unusable if u.get("reason") == "listener-collision"]
+        where = "; ".join("port %s has PIDs %s" % (u.get("port"), _pids([u]))
+                          for u in collisions)
+        return (
+            "Not launching Revit: a listener collision (two processes LISTENING on "
+            "one port: %s). A collision is not a stopped Revit, and a new process "
+            "would only add to the confusion. Close the extra Revit, then run "
+            "discover_revit_targets." % where
+        )
+    if kind == "unresolved_listeners":
+        return (
+            "Not launching Revit: a process is listening on a Revit port (PIDs %s) "
+            "but did not answer as Revit. It may still be starting or hung, which "
+            "is not proof that Revit is closed. Wait, then run get_revit_process_status "
+            "or discover_revit_targets." % _pids(unusable)
+        )
+    return (
+        "Not launching Revit: %s This is not proof that Revit is closed, so no new "
+        "process was started. Run discover_revit_targets once the listener listing "
+        "works." % survey["detail"]
+    )
 
 
 def register_process_tools(mcp, revit_get, revit_post=None, revit_image=None):
@@ -312,25 +321,29 @@ def register_process_tools(mcp, revit_get, revit_post=None, revit_image=None):
     ) -> str:
         """Launch Revit on this machine and wait until the MCP bridge responds.
 
-        Call this when get_revit_process_status reports ready=false, or when any
-        other tool fails with a connection error. If the bridge already answers,
-        this returns immediately without starting a second Revit.
+        Call this when get_revit_process_status reports process_state "none"
+        (proven absence). If any Revit process already answers, this returns
+        immediately without starting another one.
 
         Revit is slow to start: a cold launch plus pyRevit loading commonly takes
         60-180 seconds, and opening a large central model takes longer still. The
-        call blocks until the bridge answers or wait_seconds elapses. A timeout is
+        call blocks until a Revit answers or wait_seconds elapses. A timeout is
         not proof of failure - Revit may still be loading - so on timeout, poll
         get_revit_process_status rather than calling this again.
 
         Returns lines of "Field: value" with:
-          outcome        "success" when the bridge answered, "timeout" otherwise
-          already_running  bool  - true if Revit was reachable before this call
-          document_open  bool  - false when Revit is up but on its Home screen
+          outcome        "success" when a Revit answered after launch, "timeout"
+                         when none did, "unknown" when a collision appeared
+          already_running  bool  - true if a Revit was reachable before this call
+          document_open  bool or "unknown" - false when Revit is up but on its Home
+                         screen; "unknown" when several processes answer or none did
+          processes / observed_processes  the Revit process(es) actually observed
+                         after launch (PID, port, version) or "unknown"
           version        str   - the Revit version launched
           exe            str   - the executable used
           waited_seconds float - how long the wait actually took
           next_step      str   - what to do next in plain words
-        On failure it returns an "=== ERROR DETAILS ===" block instead.
+        On refusal or failure it returns an "=== ERROR DETAILS ===" block instead.
 
         Success means Revit is up and the bridge answers. It does NOT mean a
         model is loaded: launched without model_path, Revit stops on its Home
@@ -341,15 +354,21 @@ def register_process_tools(mcp, revit_get, revit_post=None, revit_image=None):
         it cannot dismiss a startup dialog - if Revit stops on one, the wait times
         out.
 
-        Which Revit this means: the call probes and waits on this MCP entry's
-        own Routes port (REVIT_PORT, default 48884). On an entry configured for
-        another port it therefore launches a new Revit even while one is
-        already running on 48884. pyRevit gives each new Revit the first port
-        not already registered by a running Revit, counting up from 48884, so
-        start instances one at a time, each after the previous one answers, or
-        two can end up sharing 48884. If no Revit holds 48884, a Revit launched
-        from an entry configured for 48885 takes 48884 and this call waits
-        until its timeout.
+        When it launches: this server is one shared entry that can see several
+        Revit processes (see discover_revit_targets). It launches only when the
+        operating system's listener table was read and no Revit process is
+        listening. If one or several Revits already answer, nothing is started.
+        A listener collision (two processes LISTENING on one port), a listener
+        that did not answer as Revit, a failed discovery or an unavailable
+        listing is NOT "Revit is closed": the call refuses, names the PIDs where
+        it has them, and starts nothing.
+
+        Which process is observed: after launching, the call re-discovers and
+        reports only the process(es) it actually observed (PID, port, version),
+        never a predicted port. If none answers within wait_seconds, or a
+        collision appears, the observed identity is "unknown". Which process a
+        later call addresses is chosen per call with its target argument, not
+        by this tool.
 
         Args:
             version: Revit release to launch, e.g. "2027". Defaults to the newest
@@ -359,20 +378,35 @@ def register_process_tools(mcp, revit_get, revit_post=None, revit_image=None):
             wait_seconds: How long to wait for the bridge, in seconds. Default 240.
             ctx: MCP context, used for progress logging. Optional.
         """
-        state = await _bridge_state(revit_get, ctx)
-        if state != "down":
+        survey = await _survey(revit_get)
+        if survey["usable"]:
+            # A proven, identity-checked Revit is already up (one or several):
+            # never start another, whatever else the listing shows.
+            usable = survey["usable"]
+            if len(usable) == 1:
+                document_open = bool(usable[0].get("document_open"))
+                tail = ("" if document_open
+                        else " No document is open - open a model in Revit before "
+                             "using the other tools.")
+            else:
+                document_open = "unknown"
+                tail = (" Several Revit processes are running; call "
+                        "discover_revit_targets and pass a target to choose one.")
             return format_response(
                 {
                     "outcome": "success",
                     "already_running": True,
-                    "document_open": state == "ready",
+                    "document_open": document_open,
+                    "processes": _process_rows(usable),
                     "waited_seconds": 0.0,
-                    "next_step": "Revit was already running; nothing was started."
-                    + ("" if state == "ready"
-                       else " No document is open - open a model in Revit before "
-                            "using the other tools."),
+                    "next_step": "Revit was already running (%s); nothing was started."
+                    % _describe_processes(usable) + tail,
                 }
             )
+        if survey["kind"] != "none":
+            # Collision, unanswered listener, failed discovery or unavailable
+            # inventory: none of these is proof that Revit is closed.
+            return format_response({"error": _launch_refusal(survey)})
 
         installed = _discover()
         if not installed:
@@ -439,13 +473,15 @@ def register_process_tools(mcp, revit_get, revit_post=None, revit_image=None):
                     {
                         "outcome": "timeout",
                         "already_running": False,
-                        "document_open": False,
+                        "document_open": "unknown",
+                        "observed_processes": "unknown",
                         "version": chosen_version,
                         "exe": exe,
                         "waited_seconds": round(waited, 1),
-                        "next_step": "Revit was launched but the bridge did not answer "
-                        "within %.0fs. It may still be loading, waiting on a startup "
-                        "dialog, or have the pyRevit Routes server disabled. Poll "
+                        "next_step": "Revit was launched but no Revit process answered "
+                        "discovery within %.0fs, so which process it became is unknown. "
+                        "It may still be loading, waiting on a startup dialog, or have "
+                        "the pyRevit Routes server disabled. Poll "
                         "get_revit_process_status rather than calling start_revit "
                         "again." % wait_seconds,
                     }
@@ -453,24 +489,54 @@ def register_process_tools(mcp, revit_get, revit_post=None, revit_image=None):
 
             await asyncio.sleep(_POLL_INTERVAL_S)
 
-            # "no_document" counts as started: Revit is up and the bridge is
-            # answering. Waiting for a document would mean waiting for a human.
-            state = await _bridge_state(revit_get, ctx)
-            if state != "down":
+            # Re-discover; a no-document Revit (HTTP 503) is usable and counts as
+            # started: waiting for a document would mean waiting for a human. An
+            # inventory blip or an unanswered listener is inconclusive, so keep
+            # waiting rather than launching again.
+            survey = await _survey(revit_get)
+            if survey["usable"]:
+                usable = survey["usable"]
                 waited = time.time() - started
+                if len(usable) == 1:
+                    document_open = bool(usable[0].get("document_open"))
+                    tail = ("" if document_open
+                            else " No document is open - open a model in Revit "
+                                 "before using the other tools.")
+                else:
+                    document_open = "unknown"
+                    tail = (" More than one process answers, so which one this "
+                            "call launched is unknown; call discover_revit_targets "
+                            "and pass a target.")
                 return format_response(
                     {
                         "outcome": "success",
                         "already_running": False,
-                        "document_open": state == "ready",
+                        "document_open": document_open,
+                        "processes": _process_rows(usable),
                         "version": chosen_version,
                         "exe": exe,
                         "waited_seconds": round(waited, 1),
-                        "next_step": "Revit %s is up and the bridge is responding."
-                        % chosen_version
-                        + ("" if state == "ready"
-                           else " No document is open - open a model in Revit before "
-                                "using the other tools."),
+                        "next_step": "Observed after launch: %s." % _describe_processes(
+                            usable) + tail,
+                    }
+                )
+            if survey["kind"] == "collision":
+                return format_response(
+                    {
+                        "outcome": "unknown",
+                        "already_running": False,
+                        "document_open": "unknown",
+                        "observed_processes": "unknown",
+                        "ambiguous_listeners": _listener_rows(survey["unusable"]),
+                        "version": chosen_version,
+                        "exe": exe,
+                        "waited_seconds": round(time.time() - started, 1),
+                        "next_step": "Revit was launched, but two processes now listen "
+                        "on one port (PIDs %s), so no process is selected and which "
+                        "one this call launched is unknown. Do not call start_revit "
+                        "again; close the extra Revit and run discover_revit_targets."
+                        % _pids([u for u in survey["unusable"]
+                                 if u.get("reason") == "listener-collision"]),
                     }
                 )
 

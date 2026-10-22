@@ -303,8 +303,6 @@ def run_start(rig, **kwargs):
 
 @pytest.mark.parametrize("name, rig", [
     ("collision", lambda: Rig([ok([], [collision(48884, [3001, 3002])])])),
-    ("collision beside a usable process",
-     lambda: Rig([ok([usable(555, 48886)], [collision(48884, [3001, 3002])])])),
     ("initializing listener", lambda: Rig([ok([], [hung(48884, 777)])])),
     ("handshake mismatch", lambda: Rig([ok([], [{
         "port": 48884, "pids": [778], "reason": "identity-mismatch",
@@ -319,6 +317,14 @@ def test_start_revit_never_launches_when_discovery_is_inconclusive(popen, name, 
     assert popen.count == 0, name
     assert "ERROR" in out.upper() or "not launch" in out.lower()
     assert rig.status_calls == [] and rig.other_calls == []
+
+
+def test_start_revit_collision_beside_a_running_process_still_launches_nothing(popen):
+    rig = Rig([ok([usable(555, 48886)], [collision(48884, [3001, 3002])])])
+    out = run_start(rig, wait_seconds=0.05)
+    assert popen.count == 0
+    assert "Already Running: True" in out and "555" in out
+    assert rig.status_calls == []
 
 
 def test_start_revit_collision_refusal_names_both_pids():

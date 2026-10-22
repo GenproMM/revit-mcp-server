@@ -619,3 +619,211 @@ def test_documents_route_module_shape():
     assert '"/documents/"' in source or "'/documents/'" in source
     assert "from .identity import" in source
     assert "revit.doc" not in source, "the active document is read only through the registry glue"
+
+
+# ===========================================================================
+# 02-04 Task 2: the mutation decision contract (D-08, D-09, D-10).
+#
+# A pure decision plus a thin response builder that handlers call explicitly
+# (G1: explicit-route-only, no wrapper in startup.py). 412 is locked to the
+# open-but-inactive case.
+# ===========================================================================
+
+
+def two_open(registry, app, active_index):
+    """Open two same-title documents; return (first, second, tokens)."""
+    first = app.open_document("Project1", "")
+    second = app.open_document("Project1", "")
+    docs = [first, second]
+    tokens = tokens_of(identity.current_document_descriptors(snap(app, docs[active_index]), registry))
+    return first, second, tokens
+
+
+def test_explicit_active_token_succeeds_and_returns_the_document(registry, app):
+    first, second, tokens = two_open(registry, app, 1)
+    decision = identity.decide_mutation_document(tokens[1], snap(app, second), registry)
+    assert decision["ok"] is True
+    assert decision["document"].Equals(second)
+    assert decision["descriptor"]["document"] == tokens[1]
+    assert decision["descriptor"]["active"] is True
+
+
+def test_explicit_inactive_token_is_412_and_never_returns_a_document(registry, app):
+    first, second, tokens = two_open(registry, app, 1)
+    decision = identity.decide_mutation_document(tokens[0], snap(app, second), registry)
+    assert decision["ok"] is False and "document" not in decision
+    assert decision["status"] == 412 and decision["code"] == "document-not-active"
+    assert decision["active_document"] == tokens[1]
+    assert [c["document"] for c in decision["candidates"]] == tokens
+    assert "does not activate" in decision["error"]
+
+
+def test_closed_selector_never_falls_back_to_the_surviving_active_document(registry, app):
+    first, second, tokens = two_open(registry, app, 0)
+    app.close_document(first)
+    # The survivor is now the only open document, but the caller named the closed one.
+    decision = identity.decide_mutation_document(tokens[0], snap(app, second), registry)
+    assert decision["ok"] is False and "document" not in decision
+    assert decision["status"] == 404 and decision["code"] == "document-closed"
+    assert [c["document"] for c in decision["candidates"]] == [tokens[1]]
+
+
+def test_replacement_with_a_recycled_handle_never_revalidates_a_stale_token(registry, app):
+    first, second, tokens = two_open(registry, app, 1)
+    app.close_document(first)
+    replacement = app.open_document("Project1", "")
+    # The replacement is active and carries identical title and path.
+    decision = identity.decide_mutation_document(tokens[0], snap(app, replacement), registry)
+    assert decision["ok"] is False and decision["code"] == "document-closed"
+    fresh = identity.current_document_descriptors(snap(app, replacement), registry)
+    assert tokens[0] not in tokens_of(fresh)
+    ok = identity.decide_mutation_document(tokens_of(fresh)[1], snap(app, replacement), registry)
+    assert ok["ok"] is True and ok["document"].Equals(replacement)
+
+
+def test_omitted_selector_with_one_active_document_succeeds(registry, app):
+    only = app.open_document("Only", "C:/Only.rvt")
+    decision = identity.decide_mutation_document(None, snap(app, only), registry)
+    assert decision["ok"] is True and decision["descriptor"]["title"] == "Only"
+
+
+def test_omitted_selector_with_one_inactive_document_is_412(registry, app):
+    app.open_document("Only", "C:/Only.rvt")
+    for active in (None, FakeApplication().open_document("Elsewhere", "")):
+        decision = identity.decide_mutation_document(None, snap(app, active), registry)
+        assert decision["ok"] is False
+        assert decision["status"] == 412 and decision["code"] == "document-not-active"
+        assert "document" not in decision
+
+
+def test_omitted_selector_with_no_document_is_refused_503(registry, app):
+    decision = identity.decide_mutation_document(None, snap(app), registry)
+    assert decision["ok"] is False
+    assert decision["status"] == 503 and decision["code"] == "no-open-document"
+    assert decision["candidates"] == []
+
+
+def test_omitted_selector_with_several_documents_refuses_and_lists_them(registry, app):
+    first, second, tokens = two_open(registry, app, 1)
+    decision = identity.decide_mutation_document(None, snap(app, second), registry)
+    assert decision["ok"] is False and "document" not in decision
+    assert decision["status"] == 400 and decision["code"] == "document-selector-required"
+    # Even though one of them is active in the UI: the UI selection is not inferred.
+    assert [c["document"] for c in decision["candidates"]] == tokens
+    assert [c["active"] for c in decision["candidates"]] == [False, True]
+
+
+def test_invalid_title_selector_is_400_and_never_matched_by_name(registry, app):
+    first, second, tokens = two_open(registry, app, 0)
+    decision = identity.decide_mutation_document("Project1", snap(app, first), registry)
+    assert decision["ok"] is False
+    assert decision["status"] == 400 and decision["code"] == "document-selector-invalid"
+
+
+def test_unreadable_identity_refuses_the_default_too(registry, app, monkeypatch):
+    first, second, tokens = two_open(registry, app, 0)
+
+    def unreadable(self):
+        raise InvalidObjectError("wrapper not accessible")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(FakeDocument, "IsValidObject", property(unreadable))
+        for selector in (None, tokens[0]):
+            decision = identity.decide_mutation_document(selector, snap(app, first), registry)
+            assert decision["ok"] is False and "document" not in decision
+            assert decision["status"] == 503 and decision["code"] == "document-identity-unavailable"
+    assert identity.decide_mutation_document(tokens[0], snap(app, first), registry)["ok"] is True
+
+
+def test_active_state_that_cannot_be_compared_refuses_503(registry, app, monkeypatch):
+    first, second, tokens = two_open(registry, app, 0)
+    active = app.Documents[0]
+    original = FakeDocument.Equals
+
+    def selective(self, other):
+        if other is active:
+            raise InvalidObjectError("cannot compare")
+        return original(self, other)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(FakeDocument, "Equals", selective)
+        decision = identity.decide_mutation_document(tokens[0], (app.Documents, active), registry)
+        assert decision["ok"] is False
+        assert decision["status"] == 503 and decision["code"] == "document-active-unknown"
+
+
+def test_status_412_is_locked_to_the_inactive_case(registry, app):
+    first, second, tokens = two_open(registry, app, 1)
+    app.close_document(first)
+    lone = snap(app, second)
+    cases = [
+        identity.decide_mutation_document("Project1", lone, registry),                 # invalid
+        identity.decide_mutation_document(tokens[0], lone, registry),                   # closed
+        identity.decide_mutation_document("doc1.{}.99".format(registry.generation), lone, registry),
+        identity.decide_mutation_document("doc1.000000000000.1", lone, registry),       # stale
+        identity.decide_mutation_document(tokens[1], snap(app, None), registry),        # inactive
+        identity.decide_mutation_document(None, snap(app, None), registry),             # sole, inactive
+        identity.decide_mutation_document(None, snap(FakeApplication()),
+                                          identity.DocumentRegistry()),                 # none open
+    ]
+    assert all(case["ok"] is False for case in cases)
+    for case in cases:
+        assert (case["status"] == 412) == (case["code"] == "document-not-active"), case["code"]
+    assert [case["code"] for case in cases].count("document-not-active") == 2
+
+
+# --------------------------------------------------------- response builder
+
+
+@pytest.fixture
+def fake_routes(monkeypatch):
+    made = []
+
+    def make_response(data=None, status=200):
+        made.append((data, status))
+        return ("response", data, status)
+
+    monkeypatch.setitem(sys.modules, "pyrevit",
+                        types.SimpleNamespace(routes=types.SimpleNamespace(make_response=make_response)))
+    return made
+
+
+def test_guard_returns_document_and_descriptor_on_success(registry, app, fake_routes):
+    only = app.open_document("Only", "C:/Only.rvt")
+    document, descriptor, response = identity.mutation_document_or_response(
+        None, snap(app, only), registry, identity=IDENT)
+    assert response is None and document.Equals(only)
+    assert descriptor["title"] == "Only" and fake_routes == []
+
+
+def test_guard_rejection_is_a_response_naming_the_process_and_candidates(registry, app, fake_routes):
+    first, second, tokens = two_open(registry, app, 1)
+    document, descriptor, response = identity.mutation_document_or_response(
+        tokens[0], snap(app, second), registry, identity=IDENT)
+    assert document is None and descriptor is None
+    assert response == ("response", fake_routes[0][0], 412)
+    payload, status = fake_routes[0]
+    assert status == 412
+    assert payload["error_code"] == "document-not-active" and payload["error"]
+    assert payload["process_identity"] == IDENT
+    assert [c["document"] for c in payload["candidates"]] == tokens
+    assert payload["active_document"] == tokens[1]
+
+
+def test_guard_never_raises_when_revit_cannot_be_read(registry, fake_routes):
+    def broken():
+        raise RuntimeError("Application.Documents unavailable")
+
+    document, descriptor, response = identity.mutation_document_or_response(
+        None, None, registry, identity=IDENT, read_snapshot=broken)
+    assert document is None and descriptor is None
+    payload, status = fake_routes[0]
+    assert status == 503 and payload["error_code"] == "document-registry-unavailable"
+    assert "Application.Documents unavailable" in payload["error"]
+
+
+def test_no_route_wrapper_or_decorator_is_installed_in_startup():
+    with open(os.path.join(REPO_ROOT, "startup.py"), encoding="utf-8") as handle:
+        source = handle.read()
+    assert "mutation_document_or_response" not in source
+    assert "decide_mutation_document" not in source

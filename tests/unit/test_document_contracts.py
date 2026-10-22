@@ -877,3 +877,510 @@ def test_no_route_wrapper_or_decorator_is_installed_in_startup():
         source = handle.read()
     assert "mutation_document_or_response" not in source
     assert "decide_mutation_document" not in source
+
+
+# ===========================================================================
+# 02-05 Task 1: explicit activation of one already-open saved document (D-12,
+# the accepted G4 policy). Offline evidence only: a fake UIApplication records
+# the one OpenAndActivateDocument(path) call; whether the production Routes
+# handler behaves like the 02-20 ExternalEvent diagnostic is rechecked live in
+# 02-07 after a full Revit restart (never pyRevit Reload).
+# ===========================================================================
+
+import ast
+
+from revit_mcp import documents
+
+ACTIVATION_FLAGS = ("IsDetached", "IsLinked", "IsFamilyDocument", "IsModelInCloud", "IsWorkshared")
+
+
+class FlagDocument(FakeDocument):
+    """A FakeDocument that also answers the Document flags the G4 gate reads.
+
+    A flag value that is an Exception instance is raised, to model an unreadable flag.
+    """
+
+    def _flag(self, name):
+        value = getattr(self._lifetime, "flags", {}).get(name, False)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    IsDetached = property(lambda self: self._flag("IsDetached"))
+    IsLinked = property(lambda self: self._flag("IsLinked"))
+    IsFamilyDocument = property(lambda self: self._flag("IsFamilyDocument"))
+    IsModelInCloud = property(lambda self: self._flag("IsModelInCloud"))
+    IsWorkshared = property(lambda self: self._flag("IsWorkshared"))
+
+
+class FlagApplication(FakeApplication):
+    def open_document(self, title, path="", **flags):
+        lifetime = FakeApplication.open_document(self, title, path)._lifetime
+        lifetime.flags = flags
+        return FlagDocument(lifetime, self._raises)
+
+    @property
+    def Documents(self):
+        return [FlagDocument(lifetime, self._raises) for lifetime in self._open]
+
+
+class FakeUIApp(object):
+    """UIApplication double: records every activation call and moves the active
+    document only in mode "activate"."""
+
+    def __init__(self, app, active=None, mode="activate"):
+        self.app = app
+        self.active = active
+        self.mode = mode
+        self.calls = []
+
+    @property
+    def ActiveUIDocument(self):
+        return None if self.active is None else types.SimpleNamespace(Document=self.active)
+
+    def read_snapshot(self):
+        active = self.ActiveUIDocument
+        return self.app.Documents, (active.Document if active is not None else None)
+
+    def OpenAndActivateDocument(self, *args):
+        self.calls.append(args)
+        if self.mode == "raise":
+            raise RuntimeError("Revit refused the activation")
+        matches = [d for d in self.app.Documents if d.PathName == args[0]]
+        if self.mode == "noop":
+            # Returns a UIDocument for the target without ever making it active.
+            return types.SimpleNamespace(Document=matches[0]) if matches else None
+        self.active = matches[0]
+        return types.SimpleNamespace(Document=matches[0])
+
+
+def exists_everywhere(path):
+    return True
+
+
+def exists_nowhere(path):
+    return False
+
+
+def rig(mode="activate", **options):
+    """Two saved projects, OTHER active, COORD not: (app, uiapp, registry, tokens, docs)."""
+    app = FlagApplication()
+    other = app.open_document("OTHER", "C:/Models/OTHER.rvt")
+    coord = app.open_document("COORD", "C:/Models/COORD.rvt", **options)
+    uiapp = FakeUIApp(app, other, mode)
+    reg = identity.DocumentRegistry()
+    tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    return app, uiapp, reg, {"other": tokens[0], "coord": tokens[1]}, {"other": other, "coord": coord}
+
+
+def activate(uiapp, reg, selector, file_exists=exists_everywhere):
+    return documents.run_activation(selector, uiapp, read_snapshot=uiapp.read_snapshot,
+                                    registry=reg, file_exists=file_exists)
+
+
+# ---------------------------------------------------------------- allow branch
+
+
+def test_saved_project_with_an_existing_path_is_activated_with_its_own_path_once():
+    app, uiapp, reg, tokens, docs = rig()
+    decoy = app.open_document("COORD", "C:/Models/Elsewhere/COORD.rvt")   # same title, other file
+    status, payload = activate(uiapp, reg, tokens["coord"])
+    assert status == 200
+    assert uiapp.calls == [("C:/Models/COORD.rvt",)]
+    assert payload["activation"] == "activated"
+    assert payload["observed_active_document"]["document"] == tokens["coord"]
+    assert payload["observed_active_document"]["active"] is True
+    assert uiapp.active.Equals(docs["coord"]) and not uiapp.active.Equals(decoy)
+
+
+def test_already_active_document_is_a_success_without_any_api_call():
+    app, uiapp, reg, tokens, docs = rig()
+    status, payload = activate(uiapp, reg, tokens["other"])
+    assert status == 200 and uiapp.calls == []
+    assert payload["activation"] == "already-active"
+    assert payload["observed_active_document"]["document"] == tokens["other"]
+
+
+def test_activation_is_idempotent():
+    app, uiapp, reg, tokens, docs = rig()
+    first = activate(uiapp, reg, tokens["coord"])
+    second = activate(uiapp, reg, tokens["coord"])
+    assert first[0] == 200 and second[0] == 200
+    assert len(uiapp.calls) == 1
+    assert second[1]["activation"] == "already-active"
+
+
+# ------------------------------------------------------------ the G4 gate order
+
+
+def reason_of(**flags):
+    app = FlagApplication()
+    path = flags.pop("path", "C:/Models/M.rvt")
+    exists = flags.pop("exists", True)
+    document = app.open_document("M", path, **flags)
+    return documents.activation_refusal_reason(
+        document, file_exists=exists_everywhere if exists else exists_nowhere)
+
+
+def test_a_saved_non_workshared_project_with_an_existing_file_has_no_refusal():
+    assert reason_of() is None
+
+
+@pytest.mark.parametrize("flags,expected", [
+    (dict(path=""), "unsaved"),
+    (dict(IsDetached=True), "detached"),
+    (dict(path="BIM360://Acme/Project.rvt", exists=False), "no-usable-file-path"),
+    (dict(IsLinked=True), "linked-unsupported"),
+    (dict(IsFamilyDocument=True), "family-unmeasured"),
+    (dict(IsModelInCloud=True), "cloud-unmeasured"),
+    (dict(IsWorkshared=True), "workshared-unmeasured"),
+])
+def test_each_unsupported_class_has_its_own_named_reason(flags, expected):
+    assert reason_of(**flags) == expected
+
+
+def test_refusal_order_is_fixed_when_several_things_are_true():
+    everything = dict(IsDetached=True, IsLinked=True, IsFamilyDocument=True,
+                      IsModelInCloud=True, IsWorkshared=True)
+    assert reason_of(path="", exists=False, **everything) == "unsaved"
+    assert reason_of(exists=False, **everything) == "detached"
+    remaining = dict(everything)
+    del remaining["IsDetached"]
+    assert reason_of(exists=False, **remaining) == "no-usable-file-path"
+    for expected, flag in (("linked-unsupported", "IsLinked"),
+                           ("family-unmeasured", "IsFamilyDocument"),
+                           ("cloud-unmeasured", "IsModelInCloud"),
+                           ("workshared-unmeasured", "IsWorkshared")):
+        assert reason_of(**remaining) == expected
+        del remaining[flag]
+    assert reason_of(**remaining) is None
+
+
+def test_saved_workshared_model_with_an_existing_path_is_still_refused():
+    assert reason_of(IsWorkshared=True, path="C:/Models/Central.rvt", exists=True) == "workshared-unmeasured"
+
+
+@pytest.mark.parametrize("flag", ACTIVATION_FLAGS)
+def test_an_unreadable_flag_fails_closed(flag):
+    assert reason_of(**{flag: RuntimeError("cannot read")}) == "eligibility-unreadable"
+
+
+def test_a_file_existence_check_that_raises_is_not_a_usable_path():
+    app = FlagApplication()
+    document = app.open_document("M", "C:/Models/M.rvt")
+
+    def broken(path):
+        raise OSError("bad path")
+
+    assert documents.activation_refusal_reason(document, file_exists=broken) == "no-usable-file-path"
+
+
+@pytest.mark.parametrize("flags,file_exists,reason", [
+    (dict(), exists_everywhere, None),    # control: the same rig activates
+    (dict(IsDetached=True), exists_everywhere, "detached"),
+    (dict(IsFamilyDocument=True), exists_everywhere, "family-unmeasured"),
+    (dict(IsModelInCloud=True), exists_everywhere, "cloud-unmeasured"),
+    (dict(IsWorkshared=True), exists_everywhere, "workshared-unmeasured"),
+    (dict(), exists_nowhere, "no-usable-file-path"),
+])
+def test_ineligible_documents_answer_422_with_zero_api_calls(flags, file_exists, reason):
+    app, uiapp, reg, tokens, docs = rig(**flags)
+    status, payload = activate(uiapp, reg, tokens["coord"], file_exists)
+    if reason is None:
+        assert status == 200 and len(uiapp.calls) == 1
+        return
+    assert status == 422 and uiapp.calls == []
+    assert payload["error"] and payload["reason"] == reason and payload["error_code"] == reason
+    assert payload["observed_active_document"]["document"] == tokens["other"]
+    assert uiapp.active.Equals(docs["other"])
+
+
+def test_unsaved_document_answers_422_unsaved_with_zero_api_calls():
+    app = FlagApplication()
+    active = app.open_document("OTHER", "C:/Models/OTHER.rvt")
+    app.open_document("Project1", "")
+    uiapp = FakeUIApp(app, active)
+    reg = identity.DocumentRegistry()
+    tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    status, payload = activate(uiapp, reg, tokens[1])
+    assert status == 422 and payload["reason"] == "unsaved" and uiapp.calls == []
+
+
+def test_every_refusal_reason_has_a_message():
+    for code in documents.ACTIVATION_REFUSALS:
+        assert documents.ACTIVATION_REFUSALS[code].strip()
+    assert set(documents.ACTIVATION_REFUSALS) == {
+        "unsaved", "detached", "no-usable-file-path", "linked-unsupported", "family-unmeasured",
+        "cloud-unmeasured", "workshared-unmeasured", "eligibility-unreadable"}
+
+
+# ---------------------------------------------------------- token refusals
+
+
+def test_closed_token_never_activates_another_document():
+    app, uiapp, reg, tokens, docs = rig()
+    app.close_document(docs["coord"])
+    status, payload = activate(uiapp, reg, tokens["coord"])
+    assert status == 404 and payload["error_code"] == "document-closed" and payload["error"]
+    assert uiapp.calls == [] and uiapp.active.Equals(docs["other"])
+
+
+def test_unknown_stale_and_malformed_tokens_refuse_with_zero_calls():
+    app, uiapp, reg, tokens, docs = rig()
+    cases = [
+        ("doc1.{}.99".format(reg.generation), 404, "document-token-unknown"),
+        ("doc1.000000000000.1", 404, "document-token-stale"),
+        ("COORD", 400, "document-selector-invalid"),
+        ("C:/Models/COORD.rvt", 400, "document-selector-invalid"),
+        (7, 400, "document-selector-invalid"),
+    ]
+    for selector, status_code, code in cases:
+        status, payload = activate(uiapp, reg, selector)
+        assert (status, payload["error_code"]) == (status_code, code), selector
+    assert uiapp.calls == []
+
+
+def test_replacement_with_identical_title_and_path_does_not_inherit_the_old_token():
+    app, uiapp, reg, tokens, docs = rig()
+    app.close_document(docs["coord"])
+    app.open_document("COORD", "C:/Models/COORD.rvt")
+    status, payload = activate(uiapp, reg, tokens["coord"])
+    assert status == 404 and payload["error_code"] == "document-closed"
+    assert uiapp.calls == []
+
+
+def test_ambiguous_lifetime_refuses_and_never_activates():
+    app, uiapp, reg, tokens, docs = rig()
+    single = uiapp.read_snapshot
+
+    def doubled():
+        documents_now, active = single()
+        return documents_now + documents_now[1:], active
+
+    status, payload = documents.run_activation(
+        tokens["coord"], uiapp, read_snapshot=doubled, registry=reg, file_exists=exists_everywhere)
+    assert status == 400 and payload["error_code"] == "document-identity-ambiguous"
+    assert uiapp.calls == []
+
+
+def test_omitted_document_refuses_and_never_picks_a_default():
+    app, uiapp, reg, tokens, docs = rig()
+    status, payload = activate(uiapp, reg, None)
+    assert status == 400 and payload["error_code"] == "document-selector-required"
+    assert [c["document"] for c in payload["candidates"]] == [tokens["other"], tokens["coord"]]
+    assert uiapp.calls == []
+    # Even with a single, inactive document open: no default is chosen.
+    solo = FlagApplication()
+    solo.open_document("ONLY", "C:/Models/ONLY.rvt")
+    solo_ui = FakeUIApp(solo, None)
+    status, payload = documents.run_activation(
+        None, solo_ui, read_snapshot=solo_ui.read_snapshot, registry=identity.DocumentRegistry(),
+        file_exists=exists_everywhere)
+    assert status == 400 and solo_ui.calls == []
+
+
+def test_a_call_that_does_not_make_the_target_active_is_not_reported_as_activated():
+    app, uiapp, reg, tokens, docs = rig(mode="noop")
+    status, payload = activate(uiapp, reg, tokens["coord"])
+    assert status == 409 and len(uiapp.calls) == 1
+    assert payload["error"] and payload["error_code"] == "document-not-activated"
+    assert payload.get("activation") != "activated"
+    assert payload["observed_active_document"]["document"] == tokens["other"]
+
+
+# ----------------------------------------------------------------- the route
+
+
+def activate_handlers(monkeypatch, fake_routes, uiapp, registry, identity_value=None):
+    """Register revit_mcp/documents.py against a fake pyrevit; return its handlers by (path, methods)."""
+    monkeypatch.setitem(sys.modules, "pyrevit", types.SimpleNamespace(
+        routes=sys.modules["pyrevit"].routes,
+        HOST_APP=types.SimpleNamespace(uiapp=uiapp, app=uiapp.app)))
+    monkeypatch.setattr(identity, "get_document_registry", lambda store=None: registry)
+    if identity_value == "none":
+        monkeypatch.setattr(identity, "process_identity_or_error",
+                            lambda: (None, "no retained RoutesServer"))
+    else:
+        monkeypatch.setattr(identity, "process_identity_or_error",
+                            lambda: (dict(identity_value or IDENT), None))
+    monkeypatch.setattr(documents, "_file_exists", exists_everywhere)
+    captured = {}
+
+    class FakeApi(object):
+        def route(self, path, methods=None):
+            def register(fn):
+                captured[(path, tuple(methods or ()))] = fn
+                return fn
+            return register
+
+    documents.register_documents_routes(FakeApi())
+    return captured
+
+
+class FakeRequest(object):
+    def __init__(self, body):
+        self.data = body
+
+
+def test_the_route_is_registered_as_a_post_handler_taking_only_the_request(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig()
+    captured = activate_handlers(monkeypatch, fake_routes, uiapp, reg)
+    handler = captured[("/activate_document/", ("POST",))]
+    assert list(inspect.signature(handler).parameters) == ["request"]
+    assert ("/documents/", ("GET",)) in captured
+
+
+def test_route_activates_from_a_text_plain_bytes_body_and_names_the_process(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig()
+    handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
+    body = ('{"document": "%s"}' % tokens["coord"]).encode("utf-8")
+    handler(FakeRequest(body))
+    payload, status = fake_routes[-1]
+    assert status == 200 and payload["activation"] == "activated"
+    assert payload["process_identity"] == IDENT
+    assert payload["observed_active_document"]["document"] == tokens["coord"]
+    assert uiapp.calls == [("C:/Models/COORD.rvt",)]
+
+
+def test_route_refusal_keeps_process_and_observed_active_identity(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig(IsWorkshared=True)
+    handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
+    handler(FakeRequest({"document": tokens["coord"]}))     # a dict body is accepted too
+    payload, status = fake_routes[-1]
+    assert status == 422 and payload["reason"] == "workshared-unmeasured" and payload["error"]
+    assert payload["process_identity"] == IDENT
+    assert payload["observed_active_document"]["document"] == tokens["other"]
+    assert uiapp.calls == []
+
+
+def test_route_without_a_document_or_with_a_bad_body_is_a_400_not_an_exception(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig()
+    handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
+    for body in (None, b"", b"{}", b"not json", b"[1, 2]"):
+        handler(FakeRequest(body))
+        payload, status = fake_routes[-1]
+        assert status == 400 and payload["error"], body
+        assert payload["process_identity"] == IDENT
+    assert uiapp.calls == []
+
+
+def test_route_without_process_identity_says_so_instead_of_inventing_one(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig()
+    handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg, identity_value="none")[
+        ("/activate_document/", ("POST",))]
+    handler(FakeRequest({"document": tokens["other"]}))
+    payload, status = fake_routes[-1]
+    assert status == 200 and "process_identity" not in payload
+    assert payload["identity_error"] == "no retained RoutesServer"
+
+
+# ------------------------------------------------------------------ the tool
+
+
+def run_activate_tool(response, **kwargs):
+    from tools.document_tools import register_document_tools
+
+    calls = []
+
+    async def revit_get(*args, **options):  # pragma: no cover - never called
+        raise AssertionError("activate_document must not GET")
+
+    async def revit_post(path, data, ctx=None, **options):
+        calls.append((path, data, options))
+        return response
+
+    mcp = FakeMCP()
+    register_document_tools(mcp, revit_get, revit_post)
+    return asyncio.run(mcp.tools["activate_document"](**kwargs)), calls
+
+
+def activation_reply(kind="activated"):
+    descriptor = {"document": "doc1.aaaaaaaaaaaa.2", "title": "COORD", "path": "C:/M/COORD.rvt",
+                  "active": True, "saved": True}
+    return {"status": "success", "activation": kind, "process_identity": dict(IDENT),
+            "document": descriptor, "observed_active_document": descriptor,
+            "message": "ignored by the tool"}
+
+
+def test_activate_document_tool_posts_the_token_and_target_and_renders_the_observed_state():
+    text, calls = run_activate_tool(activation_reply(), document="doc1.aaaaaaaaaaaa.2", target="revit1:xyz")
+    assert calls == [("/activate_document/", {"document": "doc1.aaaaaaaaaaaa.2"}, {"target": "revit1:xyz"})]
+    assert "activated" in text.lower() and "COORD" in text and "doc1.aaaaaaaaaaaa.2" in text
+    assert "PID 4242" in text and "48885" in text and "tok-abc" in text
+
+
+def test_activate_document_tool_says_when_nothing_was_activated():
+    text, _ = run_activate_tool(activation_reply("already-active"), document="doc1.aaaaaaaaaaaa.2")
+    assert "already" in text.lower() and "no activation call" in text.lower()
+
+
+def test_activate_document_tool_passes_refusals_through():
+    refusal = 'Error: 422 - {"error": "no", "reason": "workshared-unmeasured"}'
+    text, calls = run_activate_tool(refusal, document="doc1.aaaaaaaaaaaa.2")
+    assert "workshared-unmeasured" in text and "Activated" not in text
+    assert len(calls) == 1
+
+
+def test_activate_document_tool_refuses_a_missing_document_without_posting():
+    for bad in ("", "   ", None):
+        text, calls = run_activate_tool({"status": "success"}, document=bad)
+        assert calls == [] and "document" in text.lower() and "list_documents" in text
+
+
+def test_activate_document_signature_and_docstring_are_the_api_contract():
+    from tools.document_tools import register_document_tools
+
+    mcp = FakeMCP()
+    register_document_tools(mcp, None, None)
+    function = mcp.tools["activate_document"]
+    names = list(inspect.signature(function).parameters)
+    assert names == ["document", "target", "ctx"]
+    assert inspect.signature(function).parameters["document"].default is inspect.Parameter.empty
+    doc = function.__doc__
+    for name in names:
+        assert name + ":" in doc, "docstring Args must name {}".format(name)
+    for code in documents.ACTIVATION_REFUSALS:
+        assert code in doc, "docstring must state refusal {}".format(code)
+    lowered = doc.lower()
+    assert "OpenAndActivateDocument" not in doc    # the model needs the contract, not the API
+    assert "never activate" in lowered or "does not activate" in lowered
+    assert "refused" in lowered and "list_documents" in doc
+
+
+def test_activate_document_is_in_the_tool_manifest():
+    manifest = os.path.join(REPO_ROOT, "tests", "unit", "tool_manifest.txt")
+    with open(manifest, encoding="utf-8") as handle:
+        assert "activate_document" in handle.read().split()
+
+
+# ------------------------------------------------------------- AST call scan
+
+FORBIDDEN_CALLS = re.compile(r"^(Save|SaveAs|SaveAndClose|Close|Open\w*|Synchronize\w*|Reload\w*|Detach\w*)$")
+
+
+def callee_names(tree):
+    names = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute):
+                names.append(func.attr)
+            elif isinstance(func, ast.Name):
+                names.append(func.id)
+    return names
+
+
+def function_node(name):
+    with open(os.path.join(REPO_ROOT, "revit_mcp", "documents.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError("no function " + name)
+
+
+def test_run_activation_has_exactly_one_activation_call_and_no_save_or_open_call():
+    names = callee_names(function_node("run_activation"))
+    assert names.count("OpenAndActivateDocument") == 1
+    others = [n for n in names if n != "OpenAndActivateDocument" and FORBIDDEN_CALLS.match(n)]
+    assert others == [], others

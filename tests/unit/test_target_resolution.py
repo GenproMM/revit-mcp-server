@@ -422,8 +422,12 @@ def test_discovery_probe_window_covers_default_and_configured_port(monkeypatch):
     assert probed == sorted(set(probed))
 
 
+# The unit-suite guard replaces bridge._selected_client per test; keep the real factory.
+REAL_SELECTED_CLIENT = bridge._selected_client
+
+
 def test_probe_client_never_uses_environment_proxies_and_never_redirects():
-    client = bridge._selected_client({"host": "127.0.0.1", "port": 48884})
+    client = REAL_SELECTED_CLIENT({"host": "127.0.0.1", "port": 48884})
     assert client._trust_env is False
     assert client.follow_redirects is False
     assert str(client.base_url) == "http://127.0.0.1:48884/genpro_revit_mcp/"

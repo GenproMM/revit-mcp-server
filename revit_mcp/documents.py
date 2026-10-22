@@ -458,6 +458,64 @@ def run_document_summary(selector, read_snapshot=None, registry=None, db=None):
     return run_document_read(selector, collect, read_snapshot, registry)
 
 
+_FEET_TO_MM = 304.8  # tool-facing dimensions are millimeters; Revit stores feet
+
+
+def _element_id_value(element):
+    """The integer value of an element's id, across the Revit 2024-2027 API differences."""
+    from .utils import get_element_id_value
+
+    return get_element_id_value(element)
+
+
+def _level_details(level, element_id):
+    """One level as the reply shows it; raises when any part cannot be read."""
+    from .textutils import sanitize_string
+
+    name = sanitize_string(level.Name)
+    elevation = level.Elevation
+    return {
+        "name": name,
+        "elevation_mm": round(elevation * _FEET_TO_MM, 0),
+        "elevation_feet": round(elevation, 4),
+        "id": element_id(level),
+    }
+
+
+def collect_document_levels(document, db=None, element_id=None):
+    """The levels of ``document``, sorted by elevation, read from this Document only.
+
+    A level that cannot be read is skipped, logged and counted in skipped_levels
+    (the existing list_levels behavior), never silently dropped from the count.
+    """
+    if db is None:
+        db = _db()
+    if element_id is None:
+        element_id = _element_id_value
+    elements = (db.FilteredElementCollector(document)
+                .OfCategory(db.BuiltInCategory.OST_Levels)
+                .WhereElementIsNotElementType()
+                .ToElements())
+    levels = []
+    skipped = 0
+    for level in elements:
+        try:
+            levels.append(_level_details(level, element_id))
+        except Exception as exc:
+            skipped += 1
+            logger.warning("could not process level: {}".format(str(exc) or exc.__class__.__name__))
+    levels.sort(key=lambda item: item["elevation_feet"])
+    return {"levels": levels, "total_levels": len(levels), "skipped_levels": skipped}
+
+
+def run_document_levels(selector, read_snapshot=None, registry=None, db=None, element_id=None):
+    """Levels of the document named by ``selector``, active or not (D-11)."""
+    def collect(document):
+        return collect_document_levels(document, db, element_id)
+
+    return run_document_read(selector, collect, read_snapshot, registry)
+
+
 def _selector_from_request(request):
     """(selector, problem): the 'document' value of a text/plain JSON body, or why not."""
     from .textutils import parse_request_data
@@ -591,6 +649,21 @@ def register_documents_routes(api):
         missing selector is refused by name. Every reply carries process_identity.
         """
         status, payload = _read_reply(request, run_document_summary)
+        return routes.make_response(data=payload, status=status)
+
+    @api.route("/document_levels/", methods=["POST"])
+    def document_levels(request):
+        """
+        Levels of one open document, active or not, read only through that document.
+
+        Payload: {"document": "<selector from /documents/>"}. Returns each level's
+        name, elevation in millimeters (and feet) and id, sorted by elevation, with
+        total_levels, skipped_levels, target_is_active and the active document
+        before and after as an observation (ui_switched). Nothing is activated. A
+        closed, stale, unknown, ambiguous or missing selector is refused by name.
+        Every reply carries process_identity.
+        """
+        status, payload = _read_reply(request, run_document_levels)
         return routes.make_response(data=payload, status=status)
 
     logger.info("Documents routes registered successfully")

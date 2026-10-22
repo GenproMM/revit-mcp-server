@@ -48,6 +48,7 @@ load_family
 modify_element
 open_model
 place_family
+read_document_levels
 read_document_summary
 save_document
 set_active_view

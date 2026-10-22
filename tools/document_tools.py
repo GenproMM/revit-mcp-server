@@ -107,6 +107,29 @@ def _render_summary(payload):
     return "\n".join(lines)
 
 
+def _render_levels(payload):
+    """Readable text for a received /document_levels/ success."""
+    document = payload.get("document") or {}
+    levels = payload.get("levels") or []
+    lines = ["Levels of document {}: {}".format(document.get("document", ""), document.get("title", "")),
+             "Read through that document only; this tool made no activation call and the "
+             "document was not activated for the read.",
+             "Levels: {}".format(payload.get("total_levels", len(levels)))]
+    for index, level in enumerate(levels, 1):
+        lines.append("{}. {}: elevation {} mm ({} ft), id {}".format(
+            index, level.get("name", ""), level.get("elevation_mm"),
+            level.get("elevation_feet"), level.get("id")))
+    skipped = payload.get("skipped_levels") or 0
+    if skipped:
+        lines.append("Skipped {} unreadable level(s); they are not in the list above.".format(skipped))
+    lines.append("Target is the active document: {}".format("yes" if payload.get("target_is_active") else "no"))
+    lines.append(_diagnostic_line(payload))
+    identity_line = _identity_line(payload)
+    if identity_line:
+        lines.append(identity_line)
+    return "\n".join(lines)
+
+
 def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
     """Register document persistence tools with the MCP server."""
     _ = revit_image  # Acknowledge unused parameter
@@ -254,6 +277,57 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
         if (isinstance(response, dict) and not response.get("error")
                 and isinstance(response.get("summary"), dict)):
             return format_response(_render_summary(response))
+        return format_response(response)
+
+    @mcp.tool()
+    async def read_document_levels(document: str, target: str = None, ctx: Context = None) -> str:
+        """Read the levels of one open Revit document, even if it is not the active one.
+
+        This is one of exactly two reads that may inspect a document that is open
+        but not active (the other is read_document_summary). Every other tool still
+        acts on the active document only, and a mutation addressed to an inactive
+        document is refused. The levels come only from the document you name; this
+        tool does not activate it, so you can compare the levels of two models
+        without switching the Revit window. list_levels, by contrast, always reads
+        the active document. Get the "document" value from list_documents.
+
+        Returns one entry per level, sorted by elevation: name, elevation_mm
+        (millimeters, rounded to a whole millimeter), elevation_feet (Revit's
+        internal unit, 4 decimals) and id, plus total_levels. A level that cannot
+        be read is skipped and counted in skipped_levels; it is never dropped
+        silently. A document with no levels returns an empty list. The reply
+        also says whether the document is the active one (target_is_active) and
+        the active document before and after the read (active_before,
+        active_after, ui_switched); that is an observation of this call, not a
+        guarantee.
+
+        A selector that is closed, stale, unknown, ambiguous or missing is
+        refused by name; a closed document is never answered with levels from an
+        open one, and no default document is chosen. The final line names the
+        Revit process that answered. Limitation: this route has been measured
+        only by a diagnostic and offline tests; its live recheck (plan 02-07)
+        has not been run, so treat "the window did not change" as what
+        ui_switched reports for that call, not as proven behavior.
+
+        Args:
+            document: The opaque "document" selector from list_documents (required)
+            target: Optional opaque process selector from discover_revit_targets;
+                omit it only when exactly one Revit process is usable
+            ctx: MCP context for logging
+        """
+        if not isinstance(document, str) or not document.strip():
+            return format_response({
+                "error": "document is required: pass the 'document' value of one document "
+                         "from list_documents. A read never chooses a default."})
+        if ctx:
+            await ctx.info("Reading levels of document {}".format(document))
+        options = {}
+        if target is not None:
+            options["target"] = target
+        response = await revit_post("/document_levels/", {"document": document}, ctx, **options)
+        if (isinstance(response, dict) and not response.get("error")
+                and isinstance(response.get("levels"), list)):
+            return format_response(_render_levels(response))
         return format_response(response)
 
     @mcp.tool()

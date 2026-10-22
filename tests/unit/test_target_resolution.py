@@ -516,3 +516,345 @@ def test_discovery_tool_without_facade_fails_visibly_and_never_reports_none():
         raise AssertionError("an unselected route must not be requested")
     out = asyncio.run(_registered_discovery_tool(plain_get)())
     assert out.startswith("Error:") and "discovery" in out.lower()
+
+
+# =============================================================================
+# 02-17: selector and listener-inventory edge shapes (D-02, D-03, D-04, D-08).
+#
+# Property tables, not samples. The contract is explicit about these observable
+# semantics, so they are asserted exactly; nothing here invents acceptance for an
+# unclassified requirement. A bad shape must end in a NAMED refusal that sent
+# nothing, never in an exception and never in "no listener".
+# =============================================================================
+
+REAL_LISTENER_SNAPSHOT = bridge.listener_snapshot
+HEX_TOKEN = "abcdefab-abcd-4bcd-8bcd-abcdefabcdef"     # has letters, so upper() really differs
+
+
+def encode_selector(payload, padded=False):
+    """revit1:<urlsafe base64 of payload>; payload is JSON text or raw bytes."""
+    raw = payload if isinstance(payload, bytes) else payload.encode("utf-8")
+    text = base64.urlsafe_b64encode(raw).decode("ascii")
+    return "revit1:" + (text if padded else text.rstrip("="))
+
+
+def selector_json(**overrides):
+    fields = dict(host="127.0.0.1", port=48885, pid=1234, session_token=TOKEN)
+    fields.update(overrides)
+    return json.dumps(fields, separators=(",", ":"))
+
+
+def without(*names):
+    fields = dict(host="127.0.0.1", port=48885, pid=1234, session_token=TOKEN)
+    for name in names:
+        del fields[name]
+    return json.dumps(fields, separators=(",", ":"))
+
+
+MALFORMED_SELECTORS = {
+    "empty": "",
+    "blank": "   ",
+    "newline": "\n",
+    "prefix-only": "revit1:",
+    "prefix-upper": "REVIT1:" + encode_selector(selector_json())[7:],
+    "prefix-version": "revit2:" + encode_selector(selector_json())[7:],
+    "leading-space": " " + encode_selector(selector_json()),
+    "trailing-space": encode_selector(selector_json()) + " ",
+    "trailing-newline": encode_selector(selector_json()) + "\n",
+    "non-ascii-body": "revit1:" + u"таргет",
+    "fullwidth-body": "revit1:" + u"ＡＢＣＤ",
+    "bad-alphabet": "revit1:" + encode_selector(selector_json())[7:] + "+/",
+    "over-length": "revit1:" + "A" * 1100,
+    "not-base64-json": encode_selector("this is not json"),
+    "json-array": encode_selector("[1,2,3]"),
+    "json-null": encode_selector("null"),
+    "json-number": encode_selector("7"),
+    "json-string": encode_selector('"revit1"'),
+    "invalid-utf8": encode_selector(b"\xff\xfe\xfa"),
+    "duplicate-pid": encode_selector(
+        '{"host":"127.0.0.1","port":48885,"pid":1234,"pid":5678,"session_token":"%s"}' % TOKEN),
+    "duplicate-host": encode_selector(
+        '{"host":"127.0.0.1","host":"::1","port":48885,"pid":1234,"session_token":"%s"}' % TOKEN),
+    "extra-field": encode_selector(selector_json(document="doc1.aaaaaaaaaaaa.1")),
+    "missing-host": encode_selector(without("host")),
+    "missing-port": encode_selector(without("port")),
+    "missing-pid": encode_selector(without("pid")),
+    "missing-token": encode_selector(without("session_token")),
+    "port-bool": encode_selector(selector_json(port=True)),
+    "port-string": encode_selector(selector_json(port="48885")),
+    "port-float": encode_selector(selector_json(port=48885.0)),
+    "port-zero": encode_selector(selector_json(port=0)),
+    "port-negative": encode_selector(selector_json(port=-1)),
+    "port-too-large": encode_selector(selector_json(port=65536)),
+    "pid-bool": encode_selector(selector_json(pid=True)),
+    "pid-string": encode_selector(selector_json(pid="1234")),
+    "pid-zero": encode_selector(selector_json(pid=0)),
+    "pid-negative": encode_selector(selector_json(pid=-5)),
+    "host-wildcard": encode_selector(selector_json(host="0.0.0.0")),
+    "host-remote": encode_selector(selector_json(host="revit.example.com")),
+    "host-padded": encode_selector(selector_json(host="127.0.0.1 ")),
+    "host-empty": encode_selector(selector_json(host="")),
+    "host-unicode": encode_selector(selector_json(host=u"хост")),
+    "host-null": encode_selector(selector_json(host=None)),
+    "token-uppercase": encode_selector(selector_json(session_token=HEX_TOKEN.upper())),
+    "token-no-hyphens": encode_selector(selector_json(session_token=TOKEN.replace("-", ""))),
+    "token-braced": encode_selector(selector_json(session_token="{" + TOKEN + "}")),
+    "token-urn": encode_selector(selector_json(session_token="urn:uuid:" + TOKEN)),
+    "token-empty": encode_selector(selector_json(session_token="")),
+    "token-number": encode_selector(selector_json(session_token=11111111)),
+    "token-padded": encode_selector(selector_json(session_token=TOKEN + " ")),
+}
+
+NON_STRING_SELECTORS = {
+    "zero": 0, "false": False, "true": True, "float": 1.5, "bytes": selector().encode(),
+    "list": [selector()], "empty-list": [], "dict": {"target": selector()}, "tuple": (selector(),),
+}
+
+
+def forbid_any_client(monkeypatch):
+    """A bad selector must be refused before any client or listener inventory is used."""
+    def forbidden(*args, **kwargs):
+        pytest.fail("a malformed selector reached a client or the listener inventory")
+    monkeypatch.setattr(bridge, "_selected_client", forbidden)
+    monkeypatch.setattr(bridge, "listener_snapshot", forbidden)
+    monkeypatch.setattr(bridge, "_get_client", forbidden)
+
+
+def every_transport(target):
+    return [
+        ("get", lambda: bridge.revit_get("/list_levels/", target=target)),
+        ("status", lambda: bridge.revit_get("/status/", target=target)),
+        ("post", lambda: bridge.revit_post("/delete_elements/", {"element_ids": [1]}, target=target)),
+        ("image", lambda: bridge.revit_image("/get_view/x", target=target)),
+    ]
+
+
+@pytest.mark.parametrize("name", sorted(MALFORMED_SELECTORS))
+def test_a_malformed_selector_is_a_value_error_never_a_target(name):
+    with pytest.raises(ValueError):
+        bridge.parse_target(MALFORMED_SELECTORS[name])
+
+
+@pytest.mark.parametrize("name", sorted(NON_STRING_SELECTORS))
+def test_a_non_string_selector_is_a_value_error_never_a_target(name):
+    with pytest.raises(ValueError):
+        bridge.parse_target(NON_STRING_SELECTORS[name])
+
+
+@pytest.mark.parametrize("name", sorted(MALFORMED_SELECTORS))
+def test_a_malformed_selector_sends_nothing_through_every_transport(monkeypatch, name):
+    forbid_any_client(monkeypatch)
+    for transport, call in every_transport(MALFORMED_SELECTORS[name]):
+        out = asyncio.run(call())
+        assert isinstance(out, str) and out.startswith("Error:"), (transport, out)
+        assert "rediscover" in out.lower() or "invalid" in out.lower(), (transport, out)
+        assert "Verified Revit process" not in out
+
+
+@pytest.mark.parametrize("name", sorted(NON_STRING_SELECTORS))
+def test_a_non_string_selector_never_decays_to_the_default_target(monkeypatch, name):
+    """0, False, [] and {} are falsy but are still an explicit, broken choice."""
+    forbid_any_client(monkeypatch)
+    for transport, call in every_transport(NON_STRING_SELECTORS[name]):
+        out = asyncio.run(call())
+        assert isinstance(out, str) and out.startswith("Error:"), (transport, out)
+
+
+@pytest.mark.parametrize("payload", [
+    selector_json(),
+    selector_json(host="localhost"),
+    selector_json(host="::1"),
+    selector_json(port=1),
+    selector_json(port=65535),
+    selector_json(pid=1),
+    '{"session_token":"%s","pid":1234,"port":48885,"host":"127.0.0.1"}' % TOKEN,   # key order
+    ' { "host" : "127.0.0.1" , "port" : 48885 , "pid" : 1234 , "session_token" : "%s" } ' % TOKEN,
+])
+def test_the_one_accepted_shape_resolves_deterministically(payload):
+    target = bridge.parse_target(encode_selector(payload))
+    assert set(target) == {"host", "port", "pid", "session_token"}
+    assert target["session_token"] == TOKEN
+
+
+def test_a_selector_is_unpadded_by_construction_and_padding_is_refused_when_it_is_needed():
+    for payload in (selector_json(), selector_json(port=1), selector_json(pid=1)):
+        unpadded, padded = encode_selector(payload), encode_selector(payload, padded=True)
+        assert bridge.parse_target(unpadded)["session_token"] == TOKEN
+        if padded != unpadded:
+            with pytest.raises(ValueError):
+                bridge.parse_target(padded)
+
+
+def test_the_same_incarnation_has_one_state_key_however_the_selector_was_spelled():
+    spelled = [encode_selector(selector_json(), False), encode_selector(selector_json(), True),
+               encode_selector('{"session_token":"%s","pid":1234,"port":48885,"host":"127.0.0.1"}'
+                               % TOKEN)]
+    keys = {bridge._target_key(bridge.parse_target(s)) for s in spelled}
+    assert len(keys) == 1
+
+
+# --- netstat text: malformed or partial text refuses, it is never "no listener" ----
+
+
+def recording_clients(monkeypatch, requests):
+    """Hand out real-looking clients whose transport records every request that is SENT."""
+    original = httpx.AsyncClient
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={"status": "active"})
+
+    monkeypatch.setattr(bridge, "_selected_client", lambda target: original(
+        base_url="http://127.0.0.1:{}/genpro_revit_mcp/".format(target["port"]),
+        transport=httpx.MockTransport(respond), trust_env=False))
+    monkeypatch.setattr(bridge, "_get_client", lambda *a, **k: original(
+        base_url="http://127.0.0.1:1/genpro_revit_mcp/",
+        transport=httpx.MockTransport(respond), trust_env=False))
+
+
+def netstat_run(text, returncode=0):
+    def run(command, **kwargs):
+        return type("Done", (), {"returncode": returncode, "stdout": text})()
+    return run
+
+
+GOOD_ROW = "TCP    127.0.0.1:48885        0.0.0.0:0              LISTENING       1234"
+
+MALFORMED_NETSTAT = {
+    "empty": "",
+    "whitespace": "  \r\n \n\t\n",
+    "heading-only": "Active Connections\r\n\r\n  Proto  Local Address  Foreign Address  State  PID\r\n",
+    "truncated-last-row": GOOD_ROW + "\nTCP    127.0.0.1:488",
+    "four-fields": "TCP 127.0.0.1:48885 0.0.0.0:0 LISTENING",
+    "six-fields": GOOD_ROW + " extra",
+    "unknown-state": "TCP 127.0.0.1:48885 0.0.0.0:0 LISTENING2 1234",
+    "lowercase-state": "TCP 127.0.0.1:48885 0.0.0.0:0 listening 1234",
+    "non-numeric-pid": "TCP 127.0.0.1:48885 0.0.0.0:0 LISTENING abc",
+    "negative-pid": "TCP 127.0.0.1:48885 0.0.0.0:0 LISTENING -4",
+    "zero-pid-listening": "TCP 127.0.0.1:48885 0.0.0.0:0 LISTENING 0",
+    "arabic-indic-pid": u"TCP 127.0.0.1:48885 0.0.0.0:0 LISTENING ١٢٣",
+    "arabic-indic-port": u"TCP 127.0.0.1:٤٨٨٨٥ 0.0.0.0:0 LISTENING 1234",
+    "port-zero": "TCP 127.0.0.1:0 0.0.0.0:0 LISTENING 1234",
+    "port-too-large": "TCP 127.0.0.1:65536 0.0.0.0:0 LISTENING 1234",
+    "port-missing": "TCP 127.0.0.1 0.0.0.0:0 LISTENING 1234",
+    "host-garbage": "TCP not.an.ip:48885 0.0.0.0:0 LISTENING 1234",
+    "ipv6-unbracketed": "TCP ::1:48885 [::]:0 LISTENING 1234",
+    "udp-row": "UDP 127.0.0.1:48885 *:* 1234",
+    "garbled-data-row-after-heading": "heading\nTCP-ish 127.0.0.1:48885 0.0.0.0:0 LISTENING 1234\n",
+    "text-between-rows": GOOD_ROW + "\nsomething unexpected\n" + GOOD_ROW,
+    "remote-endpoint-garbage": "TCP 127.0.0.1:48885 nonsense LISTENING 1234",
+}
+
+
+# A bad row must also poison a snapshot that already holds a good row: skipping it would
+# report a complete-looking inventory that silently lacks a listener.
+for _name in list(MALFORMED_NETSTAT):
+    if _name not in ("empty", "whitespace", "heading-only", "text-between-rows",
+                     "truncated-last-row", "garbled-data-row-after-heading"):
+        MALFORMED_NETSTAT["good-row-then-" + _name] = GOOD_ROW + "\n" + MALFORMED_NETSTAT[_name]
+
+
+@pytest.mark.parametrize("name", sorted(MALFORMED_NETSTAT))
+def test_malformed_or_partial_netstat_text_is_unavailable_not_an_empty_inventory(name):
+    assert bridge.parse_netstat_listener_rows(MALFORMED_NETSTAT[name], [48885]) is None
+
+
+@pytest.mark.parametrize("name", sorted(MALFORMED_NETSTAT))
+def test_the_adapter_turns_malformed_text_into_unavailable_never_into_no_listener(name):
+    snapshot = REAL_LISTENER_SNAPSHOT([48885], run=netstat_run(MALFORMED_NETSTAT[name]),
+                                      platform="win32")
+    assert snapshot is None
+
+
+@pytest.mark.parametrize("how", ["exit-code", "os-error", "timeout", "unicode", "wrong-platform"])
+def test_the_adapter_fails_closed_when_netstat_cannot_run_or_answer(how):
+    import subprocess
+
+    def run(command, **kwargs):
+        if how == "os-error":
+            raise OSError("netstat.exe missing")
+        if how == "timeout":
+            raise subprocess.TimeoutExpired(command, 10)
+        if how == "unicode":
+            raise UnicodeError("undecodable")
+        return type("Done", (), {"returncode": 1 if how == "exit-code" else 0,
+                                 "stdout": GOOD_ROW})()
+
+    platform = "linux" if how == "wrong-platform" else "win32"
+    assert REAL_LISTENER_SNAPSHOT([48885], run=run, platform=platform) is None
+
+
+def test_a_good_snapshot_still_reports_a_port_with_no_listener_as_empty_not_unavailable():
+    """The distinction the refusal above protects: empty is a proven answer."""
+    text = "TCP 127.0.0.1:50000 0.0.0.0:0 LISTENING 77\n"
+    assert bridge.parse_netstat_listener_rows(text, [48885]) == {48885: []}
+
+
+LISTENER_ORDERINGS = {
+    "listener-first": [GOOD_ROW,
+                       "TCP 127.0.0.1:48885 127.0.0.1:51000 ESTABLISHED 1234",
+                       "TCP 127.0.0.1:50000 0.0.0.0:0 LISTENING 77"],
+    "listener-last": ["TCP 127.0.0.1:50000 0.0.0.0:0 LISTENING 77",
+                      "TCP 127.0.0.1:48885 127.0.0.1:51000 ESTABLISHED 1234",
+                      GOOD_ROW],
+    "other-port-between": ["TCP 127.0.0.1:50000 0.0.0.0:0 LISTENING 77", GOOD_ROW,
+                           "TCP 127.0.0.1:50001 0.0.0.0:0 LISTENING 78"],
+    "time-wait-noise-before": ["TCP 127.0.0.1:48885 127.0.0.1:51000 TIME_WAIT 0",
+                               "TCP 127.0.0.1:48885 127.0.0.1:51001 CLOSE_WAIT 4242", GOOD_ROW],
+    "dual-stack-same-pid": [GOOD_ROW, "TCP [::1]:48885 [::]:0 LISTENING 1234"],
+    "same-pid-twice": [GOOD_ROW, GOOD_ROW],
+}
+
+
+@pytest.mark.parametrize("name", sorted(LISTENER_ORDERINGS))
+def test_row_ordering_and_noise_never_change_who_owns_the_port(name):
+    snapshot = bridge.parse_netstat_listener_rows("\n".join(LISTENER_ORDERINGS[name]), [48885])
+    assert snapshot == {48885: [1234]}
+
+
+@pytest.mark.parametrize("rows, expected", [
+    ([GOOD_ROW, "TCP 127.0.0.1:48885 0.0.0.0:0 LISTENING 999"], [1234, 999]),
+    (["TCP 127.0.0.1:48885 0.0.0.0:0 LISTENING 999", GOOD_ROW], [999, 1234]),
+    ([GOOD_ROW, "TCP [::1]:48885 [::]:0 LISTENING 999", GOOD_ROW], [1234, 999]),
+])
+def test_two_distinct_owners_are_both_kept_in_listing_order(rows, expected):
+    assert bridge.parse_netstat_listener_rows("\n".join(rows), [48885]) == {48885: expected}
+
+
+@pytest.mark.parametrize("rows", [
+    [GOOD_ROW, "TCP 127.0.0.1:48885 0.0.0.0:0 LISTENING 999"],
+    ["TCP 127.0.0.1:48885 0.0.0.0:0 LISTENING 999", GOOD_ROW],
+])
+def test_a_shared_port_is_refused_with_every_pid_whichever_owner_is_listed_first(monkeypatch, rows):
+    """The selected PID being first or last in the pair never lets the call through."""
+    monkeypatch.setattr(bridge, "listener_snapshot", lambda ports, **kw: bridge.parse_netstat_listener_rows(
+        "\n".join(rows), ports))
+    requests = []
+    recording_clients(monkeypatch, requests)
+    out = asyncio.run(bridge.revit_post("/delete_elements/", {}, target=selector()))
+    assert out.startswith("Error:") and "1234" in out and "999" in out
+    assert "Verified Revit process" not in out
+    assert requests == []
+
+
+def test_an_inventory_that_disagrees_with_the_selected_pid_refuses_before_any_client(monkeypatch):
+    monkeypatch.setattr(bridge, "listener_snapshot", lambda ports, **kw: {48885: [4321]})
+    requests = []
+    recording_clients(monkeypatch, requests)
+    out = asyncio.run(bridge.revit_post("/delete_elements/", {}, target=selector()))
+    assert out.startswith("Error:") and "Verified Revit process" not in out
+    assert requests == []
+
+
+@pytest.mark.parametrize("name", sorted(MALFORMED_NETSTAT))
+def test_malformed_netstat_text_refuses_a_selected_call_and_the_default_call(monkeypatch, name):
+    sent = []
+    monkeypatch.setattr(bridge, "listener_snapshot", lambda ports, **kw: REAL_LISTENER_SNAPSHOT(
+        ports, run=netstat_run(MALFORMED_NETSTAT[name]), platform="win32"))
+    recording_clients(monkeypatch, sent)
+    selected = asyncio.run(bridge.revit_post("/delete_elements/", {}, target=selector()))
+    default = asyncio.run(bridge.revit_post("/delete_elements/", {}))
+    for out in (selected, default):
+        assert out.startswith("Error:") and "inventory" in out.lower(), out
+        assert "no usable revit process" not in out.lower(), out
+    assert sent == []

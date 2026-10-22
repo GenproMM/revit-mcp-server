@@ -402,3 +402,184 @@ async def test_no_selector_status_keeps_the_legacy_result_shapes(machine):
     payload = await bridge.revit_get("/status/")
     assert isinstance(payload, dict) and payload["status"] == "active"
     assert "_verified_process" not in payload
+
+
+# =============================================================================
+# 02-17: concurrent interleavings (D-03, D-04, D-08).
+#
+# The same real dispatch path as above, driven by many simultaneous calls. What is
+# asserted is observable: no route reaches a process for a stale or restarted
+# incarnation, one process never has two requests in flight, and two processes do
+# overlap. No live success is claimed.
+# =============================================================================
+
+
+class CountingMachine(Machine):
+    """A Machine that measures how many routed requests are in flight, per process."""
+
+    def __init__(self):
+        Machine.__init__(self)
+        self.inflight = {}
+        self.peak = {}
+        self.total_peak = 0
+
+    async def respond(self, request):
+        if request.url.path == PREFIX + "/status/":
+            return await Machine.respond(self, request)
+        port = request.url.port
+        self.inflight[port] = self.inflight.get(port, 0) + 1
+        self.peak[port] = max(self.peak.get(port, 0), self.inflight[port])
+        self.total_peak = max(self.total_peak, sum(self.inflight.values()))
+        try:
+            await asyncio.sleep(0.01)         # long enough for every other call to arrive
+            return await Machine.respond(self, request)
+        finally:
+            self.inflight[port] -= 1
+
+
+@pytest.fixture
+def counting_machine(monkeypatch):
+    fake = CountingMachine()
+    monkeypatch.setattr(bridge, "listener_snapshot", fake.snapshot)
+    monkeypatch.setattr(bridge, "_selected_client", fake.client)
+    states = getattr(bridge, "_states", None)
+    if isinstance(states, dict):
+        states.clear()
+    yield fake
+    states = getattr(bridge, "_states", None)
+    if isinstance(states, dict):
+        states.clear()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("calls_a, calls_b", [(1, 0), (4, 0), (1, 1), (3, 1), (2, 3), (4, 4)])
+async def test_one_process_never_has_two_requests_in_flight_and_two_processes_overlap(
+        counting_machine, calls_a, calls_b):
+    jobs = []
+    for index in range(calls_a):
+        jobs.append(bridge.revit_post("/a{}/".format(index), {"document": "d{}".format(index)},
+                                      target=SEL_A))
+    for index in range(calls_b):
+        jobs.append(bridge.revit_post("/b{}/".format(index), {}, target=SEL_B))
+    results = await asyncio.wait_for(asyncio.gather(*jobs), 5.0)
+    assert all(isinstance(r, dict) and "path" in r for r in results)
+    assert counting_machine.peak.get(PORT_A, 0) == (1 if calls_a else 0)
+    assert counting_machine.peak.get(PORT_B, 0) == (1 if calls_b else 0)
+    assert counting_machine.total_peak == (2 if calls_a and calls_b else 1)
+    # Each process saw its own calls, in the order they were queued.
+    seen_a = [s[2] for s in counting_machine.routes(PORT_A)]
+    assert seen_a == [PREFIX + "/a{}/".format(i) for i in range(calls_a)]
+
+
+@pytest.mark.anyio
+async def test_reads_posts_and_images_to_one_process_are_all_serialized_together(counting_machine):
+    jobs = [bridge.revit_get("/list_levels/", target=SEL_A),
+            bridge.revit_post("/delete_elements/", {"document": "x"}, target=SEL_A),
+            bridge.revit_image("/get_view/Level 1", target=SEL_A),
+            bridge.revit_get("/model_info/", target=SEL_A)]
+    await asyncio.wait_for(asyncio.gather(*jobs), 5.0)
+    assert counting_machine.peak[PORT_A] == 1
+    assert len(counting_machine.routes(PORT_A)) == 4
+
+
+@pytest.mark.anyio
+async def test_simultaneous_calls_with_a_stale_selector_all_refuse_after_a_restart(machine):
+    """The process restarted (same PID, same port, new startup token) before the calls."""
+    machine.identity[PORT_A] = (PID_A, TOKEN_A2)
+    jobs = [bridge.revit_post("/delete_elements/", {"element_ids": [1]}, target=SEL_A),
+            bridge.revit_post("/modify_element/", {"element_id": 1}, target=SEL_A),
+            bridge.revit_get("/list_levels/", target=SEL_A),
+            bridge.revit_image("/get_view/x", target=SEL_A),
+            bridge.revit_get("/status/", target=SEL_A)]
+    results = await asyncio.wait_for(asyncio.gather(*jobs), 5.0)
+    for result in results:
+        assert isinstance(result, (str, dict))
+        text = result if isinstance(result, str) else str(result)
+        assert "Error" in text or "error" in text
+        assert "Verified Revit process" not in text
+    assert machine.routes() == []                      # nothing was ever routed to the new process
+    assert bridge._states == {}                        # and the stale selector left no state
+
+
+@pytest.mark.anyio
+async def test_stale_and_current_selectors_interleaved_never_swap_incarnations(machine):
+    """Old and new selector for the same port and PID race: only the current one is served."""
+    machine.identity[PORT_A] = (PID_A, TOKEN_A2)
+    fresh = selector(PORT_A, PID_A, TOKEN_A2)
+    jobs = [bridge.revit_post("/old1/", {}, target=SEL_A),
+            bridge.revit_post("/new1/", {}, target=fresh),
+            bridge.revit_post("/old2/", {}, target=SEL_A),
+            bridge.revit_post("/new2/", {}, target=fresh),
+            bridge.revit_get("/old3/", target=SEL_A)]
+    results = await asyncio.wait_for(asyncio.gather(*jobs), 5.0)
+    assert isinstance(results[1], dict) and results[1]["path"] == PREFIX + "/new1/"
+    assert isinstance(results[3], dict) and results[3]["path"] == PREFIX + "/new2/"
+    for stale in (results[0], results[2], results[4]):
+        assert isinstance(stale, str) and stale.startswith("Error:")
+        assert "rediscover" in stale.lower() and "Verified Revit process" not in stale
+    routed = [s[2] for s in machine.routes()]
+    assert routed == [PREFIX + "/new1/", PREFIX + "/new2/"]
+    assert not any("old" in path for path in routed)
+    assert list(bridge._states) == [bridge._target_key(target_of(fresh))]
+
+
+@pytest.mark.anyio
+async def test_a_restart_between_two_queued_calls_refuses_the_second_without_routing_it(machine):
+    """The incarnation is proven again with the lock held, right before each send."""
+    gate = machine.gate(PORT_A, "/p1/")
+    first = asyncio.ensure_future(bridge.revit_post("/p1/", {}, target=SEL_A))
+    await started(gate)
+    second = asyncio.ensure_future(bridge.revit_post("/p2/", {}, target=SEL_A))
+    await asyncio.sleep(0.05)
+    machine.identity[PORT_A] = (PID_A, TOKEN_A2)      # restarts while the second call is queued
+    gate.release.set()
+    done_first = await asyncio.wait_for(first, 2.0)
+    done_second = await asyncio.wait_for(second, 2.0)
+    assert done_first["path"] == PREFIX + "/p1/"
+    assert isinstance(done_second, str) and done_second.startswith("Error:")
+    assert "rediscover" in done_second.lower()
+    assert [s[2] for s in machine.routes()] == [PREFIX + "/p1/"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("owners", [[PID_A, 999], [999, PID_A], [999, PID_A, 1000], [999, 1000]])
+async def test_every_listener_ordering_of_a_shared_port_refuses_all_simultaneous_calls(
+        machine, owners):
+    machine.listeners[PORT_A] = list(owners)
+    jobs = [bridge.revit_post("/p{}/".format(i), {}, target=SEL_A) for i in range(3)]
+    results = await asyncio.wait_for(asyncio.gather(*jobs), 5.0)
+    for result in results:
+        assert isinstance(result, str) and result.startswith("Error:")
+        for pid in owners:
+            assert str(pid) in result
+    assert machine.seen == []                          # not even a status handshake
+    assert bridge._states == {}
+
+
+@pytest.mark.anyio
+async def test_a_listener_appearing_after_selection_refuses_the_next_call_not_the_inflight_one(
+        machine):
+    gate = machine.gate(PORT_A, "/p1/")
+    inflight = asyncio.ensure_future(bridge.revit_post("/p1/", {}, target=SEL_A))
+    await started(gate)
+    machine.listeners[PORT_A] = [PID_A, 999]           # a second binder shows up
+    queued = asyncio.ensure_future(bridge.revit_post("/p2/", {}, target=SEL_A))
+    await asyncio.sleep(0.05)
+    gate.release.set()
+    assert (await asyncio.wait_for(inflight, 2.0))["path"] == PREFIX + "/p1/"
+    refused = await asyncio.wait_for(queued, 2.0)
+    assert isinstance(refused, str) and refused.startswith("Error:")
+    assert "999" in refused and str(PID_A) in refused
+    assert [s[2] for s in machine.routes()] == [PREFIX + "/p1/"]
+
+
+@pytest.mark.anyio
+async def test_a_cancelled_call_among_simultaneous_ones_never_blocks_the_others(counting_machine):
+    jobs = [asyncio.ensure_future(bridge.revit_post("/c{}/".format(i), {}, target=SEL_A))
+            for i in range(4)]
+    await asyncio.sleep(0.005)
+    jobs[1].cancel()
+    results = await asyncio.wait_for(asyncio.gather(*jobs, return_exceptions=True), 5.0)
+    assert isinstance(results[1], asyncio.CancelledError)
+    assert all(isinstance(r, dict) for i, r in enumerate(results) if i != 1)
+    assert counting_machine.peak[PORT_A] == 1

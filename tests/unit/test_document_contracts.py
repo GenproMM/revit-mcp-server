@@ -3212,3 +3212,184 @@ def test_none_of_the_five_modules_fetches_an_image_so_no_image_path_loses_a_targ
     called = {node.func.id for node in ast.walk(tree)
               if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
     assert "revit_image" not in called
+
+
+# ===========================================================================
+# 02-17 Task 2: document selector edge shapes and close/replace interleavings
+# (D-02, D-08, D-10). Property tables over the Wave-0 retained-reference doubles.
+# A bad or stale selector must end in a NAMED refusal that returns no document
+# and never falls back to the surviving, active or only open document.
+# ===========================================================================
+
+import unicodedata
+
+from revit_mcp.textutils import parse_request_data
+
+REFUSAL_CODES = {"document-selector-invalid", "document-token-unknown", "document-token-stale",
+                 "document-closed"}
+
+
+def malformed_document_selectors(token, generation):
+    """Every shape that is not exactly one live token string."""
+    other_generation = "{:012x}".format(int(generation, 16) ^ 1)
+    return [
+        "", "   ", "\t", "\n", "\r\n", "\x00",
+        token + "\n", token + "\r\n", token + " ", " " + token, token + "\x00",
+        token + u"\u200b", u"\u200b" + token,
+        token.upper(), token.title(),
+        "doc2." + token.split(".", 1)[1], "doc1", "doc1.", "doc1..1", "doc1." + generation,
+        "doc1." + generation + ".", "doc1." + generation + ".0", "doc1." + generation + ".01",
+        "doc1." + generation + ".-1", "doc1." + generation + ".1.1",
+        "doc1." + generation + u".\u0661",                       # Arabic-Indic digit one
+        "doc1." + generation[:-1] + "g.1", "doc1." + generation[:-1] + ".1",
+        "doc1." + generation + "0.1",
+        "doc1." + other_generation + ".1",                        # a token of another registry
+        "doc1." + generation + "." + "9" * 40,                    # no such lifetime
+        u"\u041f\u0440\u043e\u0435\u043a\u0442",                  # a title
+        u"C:/\u041c\u043e\u0434\u0435\u043b\u0438/\u041f\u0440\u043e\u0435\u043a\u0442.rvt",   # a path
+        0, False, True, 1, 1.5, [], [token], (token,), {}, {"document": token}, b"doc1", token.encode(),
+    ]
+
+
+def test_malformed_document_selectors_refuse_by_name_and_never_decay_to_the_one_document(
+        registry, app):
+    only = app.open_document(u"\u041f\u0440\u043e\u0435\u043a\u0442",
+                             u"C:/\u041c\u043e\u0434\u0435\u043b\u0438/\u041f\u0440\u043e\u0435\u043a\u0442.rvt")
+    state = snap(app, only)
+    token = tokens_of(identity.current_document_descriptors(state, registry))[0]
+    assert identity.decide_mutation_document(None, state, registry)["ok"] is True      # control
+    assert identity.decide_mutation_document(token, state, registry)["ok"] is True     # control
+    for selector in malformed_document_selectors(token, registry.generation):
+        decision = identity.decide_mutation_document(selector, state, registry)
+        assert decision["ok"] is False and "document" not in decision, repr(selector)
+        assert decision["status"] in (400, 404), (selector, decision["status"])
+        assert decision["code"] in REFUSAL_CODES, (selector, decision["code"])
+        resolved = identity.resolve_document(selector, state, registry)
+        assert resolved["ok"] is False and "document" not in resolved, repr(selector)
+
+
+def test_a_malformed_selector_never_selects_when_several_documents_are_open(registry, app):
+    first = app.open_document("Project1", "")
+    second = app.open_document("Project1", "")
+    state = snap(app, second)
+    tokens = tokens_of(identity.current_document_descriptors(state, registry))
+    for token in tokens:
+        for selector in malformed_document_selectors(token, registry.generation):
+            decision = identity.decide_mutation_document(selector, state, registry)
+            assert decision["ok"] is False and "document" not in decision, repr(selector)
+    assert identity.decide_mutation_document(None, state, registry)["code"] == \
+        "document-selector-required"
+
+
+@pytest.mark.parametrize("body, expected", [
+    (b"", None),
+    (b"{}", None),
+    (b"[1]", None),
+    (b"not json", None),
+    (b'{"other": 1}', None),
+    (b'{"document": null}', ""),
+    (b'{"document": ""}', ""),
+    (b'{"document": "   "}', "   "),
+    (b'{"document": 5}', 5),
+    (b'{"document": []}', []),
+    (u'{"document": "\u041f\u0440\u043e\u0435\u043a\u0442"}'.encode("utf-8"),
+     u"\u041f\u0440\u043e\u0435\u043a\u0442"),
+    (b'{"document": "first", "document": "last"}', "last"),
+])
+def test_the_request_selector_reads_the_body_deterministically(body, expected):
+    class Request(object):
+        data = body
+
+    assert identity.request_document_selector(Request()) == expected
+
+
+def test_a_present_but_broken_document_key_is_never_read_as_omitted(registry, app):
+    """null, "" and 0 are explicit choices: refused, never the one-open-document default."""
+    only = app.open_document("Only", "C:/Only.rvt")
+    state = snap(app, only)
+    for body in (b'{"document": null}', b'{"document": ""}', b'{"document": 0}',
+                 b'{"document": false}', b'{"document": []}'):
+        class Request(object):
+            data = body
+        selector = identity.request_document_selector(Request())
+        assert selector is not None, body
+        decision = identity.decide_mutation_document(selector, state, registry)
+        assert decision["ok"] is False and "document" not in decision, body
+
+
+def test_non_ascii_titles_that_differ_only_by_normalization_or_case_are_distinct_lifetimes(
+        registry, app):
+    composed = unicodedata.normalize("NFC", u"\u00c9tage")
+    decomposed = unicodedata.normalize("NFD", u"\u00c9tage")
+    assert composed != decomposed
+    docs = [app.open_document(composed, ""), app.open_document(decomposed, ""),
+            app.open_document(composed.lower(), ""), app.open_document(composed, "")]
+    state = snap(app, docs[-1])
+    listing = identity.current_document_descriptors(state, registry)
+    tokens = tokens_of(listing)
+    assert len(set(tokens)) == 4
+    titles = [entry["title"] for entry in listing["documents"]]
+    assert titles == [composed, decomposed, composed.lower(), composed]       # preserved verbatim
+    for token, document in zip(tokens, docs):
+        resolved = identity.resolve_document(token, state, registry)
+        assert resolved["ok"] is True and resolved["document"].Equals(document)
+
+
+def test_enumeration_order_between_list_and_call_never_changes_what_a_token_means(registry, app):
+    class ReversedApplication(FakeApplication):
+        @property
+        def Documents(self):
+            return list(reversed(FakeApplication.Documents.fget(self)))
+
+    reversing = ReversedApplication()
+    docs = [reversing.open_document("Project1", ""), reversing.open_document("Project1", ""),
+            reversing.open_document("Project1", "")]
+    forward_listing = identity.current_document_descriptors(
+        (list(reversed(reversing.Documents)), docs[0]), registry)
+    tokens = tokens_of(forward_listing)
+    for index, token in enumerate(tokens):
+        resolved = identity.resolve_document(token, (reversing.Documents, docs[1]), registry)
+        assert resolved["ok"] is True and resolved["document"].Equals(docs[index]), index
+
+
+def test_a_document_closed_between_list_and_call_is_refused_by_every_verb(registry, app):
+    """list, close, open a look-alike, then call: resolve, mutate and activate all refuse."""
+    app = FlagApplication()
+    keep = app.open_document("KEEP", "C:/Models/KEEP.rvt")
+    target = app.open_document("COORD", "C:/Models/COORD.rvt")
+    uiapp = FakeUIApp(app, keep)
+    reg = identity.DocumentRegistry()
+    tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    stale = tokens[1]
+    app.close_document(target)
+    lookalikes = [app.open_document("COORD", "C:/Models/COORD.rvt")]
+    state = uiapp.read_snapshot()
+    resolved = identity.resolve_document(stale, state, reg)
+    assert resolved["ok"] is False and resolved["code"] == "document-closed"
+    decision = identity.decide_mutation_document(stale, state, reg)
+    assert decision["ok"] is False and decision["code"] == "document-closed"
+    status, payload = activate(uiapp, reg, stale)
+    assert status == 404 and payload["error_code"] == "document-closed"
+    assert uiapp.calls == [] and uiapp.active.Equals(keep)
+    # The look-alike is a new lifetime with its own token, selectable only by that token.
+    fresh = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    assert stale not in fresh and len(fresh) == 2
+    again = identity.resolve_document(fresh[1], uiapp.read_snapshot(), reg)
+    assert again["ok"] is True and again["document"].Equals(lookalikes[0])
+
+
+def test_repeated_close_and_reopen_never_recycles_any_token(registry, app):
+    seen = []
+    survivor = app.open_document("Survivor", "")
+    for _ in range(6):
+        document = app.open_document("Project1", "")
+        state = snap(app, survivor)
+        token = tokens_of(identity.current_document_descriptors(state, registry))[-1]
+        seen.append(token)
+        app.close_document(document)
+        closed = identity.resolve_document(token, snap(app, survivor), registry)
+        assert closed["ok"] is False and closed["code"] == "document-closed"
+    assert len(set(seen)) == len(seen)
+    for token in seen:                    # still refused after every later reopen
+        assert identity.decide_mutation_document(
+            token, snap(app, survivor), registry)["code"] == "document-closed"

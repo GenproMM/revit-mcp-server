@@ -1384,3 +1384,191 @@ def test_run_activation_has_exactly_one_activation_call_and_no_save_or_open_call
     assert names.count("OpenAndActivateDocument") == 1
     others = [n for n in names if n != "OpenAndActivateDocument" and FORBIDDEN_CALLS.match(n)]
     assert others == [], others
+
+
+# ===========================================================================
+# 02-05 Task 2: activation failure paths and the route return contract.
+#
+# An exception from OpenAndActivateDocument, a call that returns without the
+# target becoming active, and an unreadable re-read are all non-200 and name the
+# attempted document and the OBSERVED active document. Only an observed Equals
+# match is ever described as activated. Nothing is retried with another path,
+# a save, a reopen or a worksharing option.
+# ===========================================================================
+
+
+class ActivateThenRaiseUIApp(FakeUIApp):
+    """Activates, then raises: the exception must still never be reported as success."""
+
+    def OpenAndActivateDocument(self, *args):
+        FakeUIApp.OpenAndActivateDocument(self, *args)
+        raise RuntimeError("exception after the switch")
+
+
+def failing_read_after(uiapp, allowed):
+    """A snapshot reader that works for ``allowed`` reads and then raises."""
+    state = {"reads": 0}
+
+    def read():
+        state["reads"] += 1
+        if state["reads"] > allowed:
+            raise RuntimeError("Application.Documents unavailable")
+        return uiapp.read_snapshot()
+
+    return read
+
+
+def test_api_exception_is_a_named_500_that_names_both_documents_and_is_never_retried():
+    app, uiapp, reg, tokens, docs = rig(mode="raise")
+    status, payload = activate(uiapp, reg, tokens["coord"])
+    assert status == 500 and len(uiapp.calls) == 1
+    assert payload["error_code"] == "activation-failed" and payload["reason"] == "activation-failed"
+    assert "Revit refused the activation" in payload["error"]
+    assert tokens["coord"] in payload["error"] and "COORD" in payload["error"]
+    assert payload["document"]["document"] == tokens["coord"]
+    assert payload["observed_active_document"]["document"] == tokens["other"]
+    assert payload.get("activation") != "activated"
+    assert uiapp.calls == [("C:/Models/COORD.rvt",)]       # the one call, with the target's own path
+
+
+def test_an_exception_after_the_switch_is_still_a_failure_never_success():
+    app = FlagApplication()
+    other = app.open_document("OTHER", "C:/Models/OTHER.rvt")
+    coord = app.open_document("COORD", "C:/Models/COORD.rvt")
+    uiapp = ActivateThenRaiseUIApp(app, other)
+    reg = identity.DocumentRegistry()
+    tokens = tokens_of(identity.current_document_descriptors(uiapp.read_snapshot(), reg))
+    status, payload = activate(uiapp, reg, tokens[1])
+    assert status == 500 and payload["error_code"] == "activation-failed"
+    assert payload["observed_active_document"]["document"] == tokens[1]    # reported as observed, not as success
+    assert payload.get("activation") != "activated" and len(uiapp.calls) == 1
+    assert uiapp.active.Equals(coord)
+
+
+def test_an_unreadable_re_read_after_the_call_is_unverified_not_activated():
+    app, uiapp, reg, tokens, docs = rig()
+    status, payload = documents.run_activation(
+        tokens["coord"], uiapp, read_snapshot=failing_read_after(uiapp, 1), registry=reg,
+        file_exists=exists_everywhere)
+    assert status == 500 and len(uiapp.calls) == 1
+    assert payload["error_code"] == "activation-unverified" and payload["error"]
+    assert payload.get("activation") != "activated"
+    assert payload["observed_active_document"] is None
+    assert "Application.Documents unavailable" in payload["observed_active_error"]
+
+
+def test_run_activation_never_raises_when_revit_cannot_be_read():
+    app, uiapp, reg, tokens, docs = rig()
+    status, payload = documents.run_activation(
+        tokens["coord"], uiapp, read_snapshot=failing_read_after(uiapp, 0), registry=reg,
+        file_exists=exists_everywhere)
+    assert status == 503 and payload["error_code"] == "document-registry-unavailable"
+    assert "Application.Documents unavailable" in payload["error"] and uiapp.calls == []
+
+
+def test_run_activation_never_raises_when_the_uiapplication_is_missing():
+    app, uiapp, reg, tokens, docs = rig()
+    status, payload = documents.run_activation(
+        tokens["coord"], None, read_snapshot=uiapp.read_snapshot, registry=reg,
+        file_exists=exists_everywhere)
+    assert status == 500 and payload["error_code"] == "activation-failed"
+    assert payload["observed_active_document"]["document"] == tokens["other"]
+
+
+def test_route_exception_reply_keeps_process_and_observed_active_identity(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig(mode="raise")
+    handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
+    handler(FakeRequest({"document": tokens["coord"]}))
+    payload, status = fake_routes[-1]
+    assert status == 500 and payload["error"] and payload["error_code"] == "activation-failed"
+    assert payload["process_identity"] == IDENT
+    assert payload["observed_active_document"]["document"] == tokens["other"]
+    assert len(uiapp.calls) == 1
+
+
+def test_route_no_change_reply_keeps_process_and_observed_active_identity(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig(mode="noop")
+    handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
+    handler(FakeRequest({"document": tokens["coord"]}))
+    payload, status = fake_routes[-1]
+    assert status == 409 and payload["error"] and payload["error_code"] == "document-not-activated"
+    assert payload["process_identity"] == IDENT
+    assert payload["observed_active_document"]["document"] == tokens["other"]
+
+
+def test_route_never_raises_and_always_names_the_process(monkeypatch, fake_routes):
+    app, uiapp, reg, tokens, docs = rig()
+    handlers = activate_handlers(monkeypatch, fake_routes, uiapp, reg)
+    handler = handlers[("/activate_document/", ("POST",))]
+
+    class BrokenUIApp(object):
+        app = uiapp.app
+
+        @property
+        def ActiveUIDocument(self):
+            raise RuntimeError("UI unavailable")
+
+    monkeypatch.setattr(sys.modules["pyrevit"], "HOST_APP",
+                        types.SimpleNamespace(uiapp=BrokenUIApp(), app=uiapp.app))
+    handler(FakeRequest({"document": tokens["coord"]}))
+    payload, status = fake_routes[-1]
+    assert status >= 500 and payload["error"] and payload["process_identity"] == IDENT
+
+    class NoUIApp(object):
+        @property
+        def uiapp(self):
+            raise RuntimeError("no UIApplication")
+
+    monkeypatch.setattr(sys.modules["pyrevit"], "HOST_APP", NoUIApp())
+    handler(FakeRequest({"document": tokens["coord"]}))
+    payload, status = fake_routes[-1]
+    assert status == 500 and payload["error_code"] == "activation-error"
+    assert payload["process_identity"] == IDENT
+    assert uiapp.calls == []
+
+
+# --------------------------------------------------- AST scan of the whole file
+
+
+def documents_tree():
+    with open(os.path.join(REPO_ROOT, "revit_mcp", "documents.py"), encoding="utf-8") as handle:
+        return ast.parse(handle.read())
+
+
+FORBIDDEN_IDENTIFIERS = {
+    "Transaction", "TransactionGroup", "SubTransaction", "ExternalEvent", "IExternalEventHandler",
+    "Idling", "Thread", "Timer", "SaveAs", "SaveAsOptions", "OpenOptions", "OpenDocumentFile",
+    "WorksetConfiguration", "ModelPathUtils", "ModelPath", "SynchronizeWithCentral",
+}
+
+
+def test_documents_py_has_exactly_one_activation_call_site_and_no_save_open_or_event_machinery():
+    tree = documents_tree()
+    names = callee_names(tree)
+    assert names.count("OpenAndActivateDocument") == 1
+    assert [n for n in names if n != "OpenAndActivateDocument" and FORBIDDEN_CALLS.match(n)] == []
+    identifiers = set()
+    for node in ast.walk(tree):          # code only: comments and docstrings are not nodes here
+        if isinstance(node, ast.Attribute):
+            identifiers.add(node.attr)
+        elif isinstance(node, ast.Name):
+            identifiers.add(node.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            identifiers.update(alias.name.split(".")[-1] for alias in node.names)
+    assert identifiers & FORBIDDEN_IDENTIFIERS == set()
+
+
+def test_the_activation_call_takes_one_positional_path_read_from_the_target_own_pathname():
+    function = function_node("run_activation")
+    calls = [n for n in ast.walk(function) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute) and n.func.attr == "OpenAndActivateDocument"]
+    assert len(calls) == 1
+    call = calls[0]
+    assert call.keywords == [] and len(call.args) == 1
+    assert isinstance(call.args[0], ast.Name) and call.args[0].id == "path"
+    assigned = [n for n in ast.walk(function) if isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "path" for t in n.targets)]
+    assert len(assigned) == 1
+    value = assigned[0].value
+    assert isinstance(value, ast.Attribute) and value.attr == "PathName"
+    assert isinstance(value.value, ast.Name) and value.value.id == "document"

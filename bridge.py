@@ -1087,3 +1087,63 @@ def with_envelope(data: Optional[Dict[str, Any]], secret: Optional[str]) -> Dict
     if secret is not None:
         body[ENVELOPE_KEY] = {SECRET_KEY: secret}
     return body
+
+
+# The secret file's name and the shortest value accepted as a secret. Both mirror
+# revit_mcp/trust.py; a test pins them equal.
+SECRET_FILE_NAME = "_bridge_secret"
+MIN_SECRET_LENGTH = 16
+
+
+def _secret_from_bytes(raw: bytes) -> Optional[str]:
+    """The secret text held by the bytes of a secret file, or None; never raises.
+
+    Strips a UTF-8 BOM, then surrounding space, tab, CR and LF. Returns None for
+    anything that is not bytes, for undecodable input (UTF-16 included), for text
+    holding a NUL, and for a value shorter than MIN_SECRET_LENGTH. This duplicates
+    revit_mcp/trust.py's secret_from_bytes on purpose: the payload ships no
+    revit_mcp/ package (build-payload.cmd copies only the root modules), so this
+    half cannot import it. tests/unit/test_bridge_secret_client.py pins the parity;
+    change the two together.
+    """
+    if not isinstance(raw, bytes):
+        return None
+    try:
+        text = raw.decode("utf-8-sig")
+    except ValueError:
+        return None
+    text = text.strip(" \t\r\n")
+    if "\x00" in text or len(text) < MIN_SECRET_LENGTH:
+        return None
+    return text
+
+
+def load_secret(search_dirs: Optional[list] = None) -> Optional[str]:
+    """The shared secret from the first existing _bridge_secret file, or None.
+
+    Layouts: the payload keeps it beside bridge.py (app/_bridge_secret, D-08); the
+    repo keeps it in revit_mcp/_bridge_secret (D-09). The default search order is
+    the directory holding bridge.py, then its revit_mcp/ subdirectory, computed at
+    call time. The first existing file decides: an invalid first file gives None
+    and the search does not fall through to the second. A directory, an unreadable
+    file or an unusable search entry gives None. Never raises and never logs, so a
+    secret cannot reach a log through this function.
+
+    Not called anywhere in Phase 3: sending the secret starts in Phase 5 (D-10).
+    """
+    if search_dirs is None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        search_dirs = [here, os.path.join(here, "revit_mcp")]
+    for directory in search_dirs:
+        try:
+            path = os.path.join(directory, SECRET_FILE_NAME)
+            if not os.path.lexists(path):
+                continue
+        except (TypeError, ValueError):
+            continue
+        try:
+            with open(path, "rb") as handle:
+                return _secret_from_bytes(handle.read())
+        except (OSError, ValueError):
+            return None
+    return None

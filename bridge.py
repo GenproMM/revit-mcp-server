@@ -1055,3 +1055,35 @@ async def _verified_exchange(method: str, exchange: Any, state: "_TargetState", 
                 "unknown", requested)
         return _uncertain(_error_text(e), "no-reply", requested)
     return _received_reply(result, identity, requested, method)
+
+
+# ---------------------------------------------------------------- shared-secret envelope
+#
+# The client half of the shared-secret gate. It is built and unit-tested in Phase 3
+# and is NOT sent yet: nothing calls with_envelope(), and _send posts exactly the
+# bytes it always did. Phase 5 wires it. ENVELOPE_KEY is the reserved body key the
+# Revit half (revit_mcp/trust.py) reads; a test pins the two constants equal.
+ENVELOPE_KEY = "_mcp"
+SECRET_KEY = "secret"
+
+
+def with_envelope(data: Optional[Dict[str, Any]], secret: Optional[str]) -> Dict[str, Any]:
+    """Return a copy of a request body that carries the shared secret under ENVELOPE_KEY.
+
+    None data becomes {}. A body that is not a dict, or that already holds the
+    reserved key, is refused with a fixed text (never the body, never the secret):
+    a model-built argument must not pre-seed the envelope. A None secret adds no
+    envelope at all, so the Revit half answers "missing". The argument is never
+    mutated.
+    """
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ValueError("request body must be a JSON object to carry the shared-secret envelope")
+    if ENVELOPE_KEY in data:
+        raise ValueError("request body already carries the reserved _mcp key; "
+                         "refusing to merge it into the shared-secret envelope")
+    body = dict(data)
+    if secret is not None:
+        body[ENVELOPE_KEY] = {SECRET_KEY: secret}
+    return body

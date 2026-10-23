@@ -7,7 +7,15 @@ Provides tools for color splashing elements based on parameter values
 # One flat import, matching every other route module. The relative form
 # (`from .utils import ...`) that used to sit below loaded revit_mcp/utils.py a
 # second time under a different module identity.
-from .utils import get_element_id_value, suppress_warnings, normalize_string, parse_request_data
+from .utils import (
+    get_element_id_value,
+    suppress_warnings,
+    normalize_string,
+    parse_request_data,
+    commit_and_report,
+    finalize_outcome,
+    exception_outcome,
+)
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, DB
 import logging
@@ -610,8 +618,14 @@ def color_elements_by_parameter(
         custom_colors (list): Optional list of custom hex colors
 
     Returns:
-        dict: Results of the coloring operation
+        tuple: (payload, http_status). A validation failure or an exception is the
+        historic HTTP 200 body with status "error"; a finished transaction is answered
+        through finalize_outcome with its own status and HTTP code.
     """
+    t = None
+    requested = None
+    succeeded = []
+    failed = []
     try:
         # Find the category
         categories = doc.Settings.Categories
@@ -626,7 +640,7 @@ def color_elements_by_parameter(
             return {
                 "status": "error",
                 "message": "Category '{}' not found".format(category_name),
-            }
+            }, 200
 
         # Get elements from the category
         collector = (
@@ -640,7 +654,7 @@ def color_elements_by_parameter(
             return {
                 "status": "error",
                 "message": "No elements found in category '{}'".format(category_name),
-            }
+            }, 200
 
         # Group elements by parameter value using improved method
         parameter_groups = defaultdict(list)
@@ -778,9 +792,12 @@ def color_elements_by_parameter(
         elements_colored = 0
         solid_fill_id = solid_fill_pattern_id(doc)
 
+        # Every element of every group is attempted by the override loop below.
+        requested = sum(len(group) for group in parameter_groups.values())
+
         with DB.Transaction(doc, "Color Elements by Parameter") as t:
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             # Ensure we have enough colors
             if len(colors) < value_count:
@@ -827,11 +844,14 @@ def color_elements_by_parameter(
                     override_settings.SetCutForegroundPatternId(solid_fill_id)
 
                 for element in group_elements:
+                    element_id = None
                     try:
+                        element_id = get_element_id_value(element)
                         # Apply to active view first (CRITICAL FIX!)
                         active_view = doc.ActiveView
                         active_view.SetElementOverrides(element.Id, override_settings)
                         elements_colored += 1
+                        succeeded.append(element_id)
 
                         # Optionally apply to other views of same type
                         try:
@@ -858,14 +878,14 @@ def color_elements_by_parameter(
                     except Exception as e:
                         logger.warning(
                             "Failed to color element %s: %s",
-                            get_element_id_value(element),
+                            element_id,
                             e,
                         )
+                        failed.append({"item": element_id, "reason": str(e)})
 
-            t.Commit()
+            commit_result = commit_and_report(t, swallower)
 
         result = {
-            "status": "success",
             "message": "Successfully colored {} elements in {} color groups".format(
                 elements_colored, value_count
             ),
@@ -886,14 +906,15 @@ def color_elements_by_parameter(
         if view_check.get("warning"):
             result["view_warning"] = view_check
 
-        return result
+        return finalize_outcome(commit_result, result, requested, succeeded, failed)
 
     except Exception as e:
         logger.error("Error in color_elements_by_parameter: %s", e)
         return {
             "status": "error",
             "message": "Failed to color elements: {}".format(str(e)),
-        }
+            "outcome": exception_outcome(t, requested, succeeded, failed),
+        }, 200
 
 
 def clear_element_colors(doc, category_name):
@@ -905,8 +926,14 @@ def clear_element_colors(doc, category_name):
         category_name (str): Name of the category to clear colors from
 
     Returns:
-        dict: Results of the clear operation
+        tuple: (payload, http_status). A validation failure, an empty category or an
+        exception is the historic HTTP 200 body; a finished transaction is answered
+        through finalize_outcome with its own status and HTTP code.
     """
+    t = None
+    requested = None
+    succeeded = []
+    failed = []
     try:
         # Find the category
         categories = doc.Settings.Categories
@@ -921,7 +948,7 @@ def clear_element_colors(doc, category_name):
             return {
                 "status": "error",
                 "message": "Category '{}' not found".format(category_name),
-            }
+            }, 200
 
         # Get elements from the category
         collector = (
@@ -935,8 +962,9 @@ def clear_element_colors(doc, category_name):
             return {
                 "status": "warning",
                 "message": "No elements found in category '{}'".format(category_name),
-            }
+            }, 200
 
+        requested = len(elements)
         elements_cleared = 0
 
         # Get active view for clearing overrides
@@ -944,14 +972,17 @@ def clear_element_colors(doc, category_name):
 
         with DB.Transaction(doc, "Clear Element Colors") as t:
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             # Clear overrides for each element in active view
             for element in elements:
+                element_id = None
                 try:
+                    element_id = get_element_id_value(element)
                     empty_override = DB.OverrideGraphicSettings()
                     active_view.SetElementOverrides(element.Id, empty_override)
                     elements_cleared += 1
+                    succeeded.append(element_id)
 
                     # Optionally clear from other views of same type
                     try:
@@ -976,27 +1007,29 @@ def clear_element_colors(doc, category_name):
                 except Exception as e:
                     logger.warning(
                         "Failed to clear colors for element %s: %s",
-                        get_element_id_value(element),
+                        element_id,
                         e,
                     )
+                    failed.append({"item": element_id, "reason": str(e)})
 
-            t.Commit()
+            commit_result = commit_and_report(t, swallower)
 
-        return {
-            "status": "success",
+        result = {
             "message": "Successfully cleared color overrides for {} elements".format(
                 elements_cleared
             ),
             "category": category_name,
             "elements_processed": elements_cleared,
         }
+        return finalize_outcome(commit_result, result, requested, succeeded, failed)
 
     except Exception as e:
         logger.error("Error in clear_element_colors: %s", e)
         return {
             "status": "error",
             "message": "Failed to clear colors: {}".format(str(e)),
-        }
+            "outcome": exception_outcome(t, requested, succeeded, failed),
+        }, 200
 
 
 def list_category_parameters(doc, category_name):
@@ -1118,11 +1151,11 @@ def register_color_routes(api):
                     status=400,
                 )
 
-            result = color_elements_by_parameter(
+            result, http_status = color_elements_by_parameter(
                 doc, category_name, parameter_name, use_gradient, custom_colors
             )
 
-            return routes.make_response(data=result)
+            return routes.make_response(data=result, status=http_status)
 
         except Exception as e:
             logger.error("Error in color_splash route: %s", e)
@@ -1157,9 +1190,9 @@ def register_color_routes(api):
                     data={"error": "category_name is required"}, status=400
                 )
 
-            result = clear_element_colors(doc, category_name)
+            result, http_status = clear_element_colors(doc, category_name)
 
-            return routes.make_response(data=result)
+            return routes.make_response(data=result, status=http_status)
 
         except Exception as e:
             logger.error("Error in clear_colors route: %s", e)

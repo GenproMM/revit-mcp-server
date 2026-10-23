@@ -208,6 +208,10 @@ class World(object):
         self.refless = set()
         self.commit_status = "Committed"
         self.break_start = set()
+        # element id -> exception the active view raises from SetElementOverrides; ids it
+        # accepted are appended to overridden (the colour routes).
+        self.override_failures = {}
+        self.overridden = []
         self.db = None
         self.app = RouteApplication(self)
         self.uiapp = RouteUIApp(self, self.app)
@@ -592,6 +596,16 @@ class FakeView(object):
     IsTemplate = False
     ViewType = "FloorPlan"
 
+    def __init__(self, world=None):
+        self._world = world
+
+    def SetElementOverrides(self, element_id, settings):
+        failure = self._world.override_failures.get(element_id.Value) if self._world else None
+        if failure is not None:
+            raise failure
+        if self._world is not None:
+            self._world.overridden.append(element_id.Value)
+
 
 class _RefArray(object):
     def __init__(self):
@@ -639,15 +653,45 @@ class _SubCategory(object):
         return types.SimpleNamespace(Id=types.SimpleNamespace(Value=7001))
 
 
+class _Categories(object):
+    """doc.Settings.Categories: get_Item answers the Lines category; iterating yields the
+    model categories the colour routes look up by name."""
+
+    def __init__(self, line_category):
+        self._line_category = line_category
+        self._walls = types.SimpleNamespace(Name="Walls", Id=types.SimpleNamespace(Value=-2000011))
+
+    def get_Item(self, category):
+        return self._line_category
+
+    def __iter__(self):
+        return iter([self._walls])
+
+
 def line_styles(world, *names):
     """doc.Settings.Categories answers an Lines category with the given sub-categories."""
     line_category = types.SimpleNamespace(SubCategories=[_SubCategory(n) for n in names])
     world.attr_overrides["Settings"] = types.SimpleNamespace(
-        Categories=types.SimpleNamespace(get_Item=lambda category: line_category))
+        Categories=_Categories(line_category))
+
+
+class ColourElement(object):
+    """A wall the colour routes can group by its Mark parameter."""
+
+    def __init__(self, ident, mark):
+        self.Id = types.SimpleNamespace(Value=ident)
+        param = types.SimpleNamespace(
+            Definition=types.SimpleNamespace(Name="Mark"), HasValue=True,
+            StorageType="String", AsString=lambda: mark)
+        self.Parameters = [param]
+
+
+def _coloured(ident, mark):
+    return lambda world: ColourElement(ident, mark)
 
 
 # Routes that open a transaction on the document and reach a real HTTP 200:
-# (collector items the route finds, body). Plan 04-07 adds the colour routes.
+# (collector items the route finds, body). The colour rows come last (plan 04-07).
 TRANSACTING = {
     ("building", "/create_line/"): ([_named("L1")], {"elements": [dict(_WALL)]}),
     ("building", "/create_surface/"): ([_named("L1")], {"elements": [dict(_FLOOR)]}),
@@ -660,6 +704,12 @@ TRANSACTING = {
         {}),
     ("detail", "/create_detail_line/"): (
         [], {"start_point": {"x": 0, "y": 0, "z": 0}, "end_point": {"x": 1000, "y": 0, "z": 0}}),
+    ("colors", "/color_splash/"): (
+        [_coloured(101, "A"), _coloured(102, "B"), _coloured(103, "A")],
+        {"category_name": "Walls", "parameter_name": "Mark"}),
+    ("colors", "/clear_colors/"): (
+        [_coloured(101, "A"), _coloured(102, "B"), _coloured(103, "A")],
+        {"category_name": "Walls"}),
 }
 TRANSACTING_IDS = ["{}:{}".format(module, route) for module, route in TRANSACTING]
 
@@ -688,7 +738,9 @@ def arm(world, items=()):
                     NewDetailCurve=lambda *args: DetailCurve(91))
     # Annotation routes: a plan view to work in, ids that carry their value, elements that
     # can be dimensioned, a tag-capable factory and line styles.
-    world.attr_overrides["ActiveView"] = FakeView()
+    world.attr_overrides["ActiveView"] = FakeView(world)
+    world.db.StorageType = types.SimpleNamespace(
+        Double="Double", Integer="Integer", String="String", ElementId="ElementId")
     world.db.ViewType = types.SimpleNamespace(
         FloorPlan="FloorPlan", CeilingPlan="CeilingPlan", Section="Section",
         Elevation="Elevation", Detail="Detail", EngineeringPlan="EngineeringPlan",
@@ -1037,7 +1089,12 @@ def test_every_transacting_500_carries_the_real_transaction_status(world, key):
     body = reach(world, key)
     world.break_start.add("Only")
     reply = call(world, handler_of(world, *key), body)
-    assert reply.status == 500, reply.data
+    if key[0] == "colors":
+        # The colour routes keep their historic contract: an exception is HTTP 200 with
+        # status "error" and a message (D-04, D-14); the outcome rides beside it.
+        assert reply.status == 200 and reply.data["status"] == "error", reply.data
+    else:
+        assert reply.status == 500, reply.data
     assert world.transactions, "the route never built a transaction"
     assert reply.data["outcome"]["transaction_status"] == world.transactions[-1].status
     assert reply.data["outcome"]["succeeded"] == []
@@ -1356,3 +1413,158 @@ def test_a_rolled_back_annotation_route_never_claims_what_it_created(world, key)
     assert reply.data["outcome"]["succeeded"] == []
     for legacy in ("created", "count", "tags_placed", "line_id", "walls_total"):
         assert legacy not in reply.data
+
+
+# ------------------------------------------------- honest outcomes (plan 04-07)
+
+COLOR_SPLASH = ("colors", "/color_splash/")
+CLEAR_COLORS = ("colors", "/clear_colors/")
+_SPLASH_BODY = {"category_name": "Walls", "parameter_name": "Mark"}
+
+
+def colour_call(world, key, failures=None):
+    """Reach the route's real success state, make some element overrides raise, call it."""
+    body = reach(world, key)
+    world.override_failures.update(failures or {})
+    return call(world, handler_of(world, *key), body)
+
+
+def test_color_splash_with_one_override_that_raises_is_a_partial_naming_the_element(world):
+    reply = colour_call(world, COLOR_SPLASH, {102: RuntimeError("view is locked")})
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed",
+        "requested": 3,
+        "succeeded": [101, 103],
+        "failed": [{"item": 102, "reason": "view is locked"}],
+        "revit_failures": [],
+    }
+    assert reply.data["statistics"]["elements_colored"] == 2
+    assert reply.data["statistics"]["total_elements"] == 3
+    assert reply.data["category"] == "Walls" and reply.data["color_assignments"]
+    text = format_response(without_attribution(reply.data))
+    assert "=== PARTIAL SUCCESS ===" in text and "view is locked" in text
+
+
+def test_color_splash_where_every_override_raises_is_a_422_failed(world):
+    failures = dict((ident, RuntimeError("view is locked")) for ident in (101, 102, 103))
+    reply = colour_call(world, COLOR_SPLASH, failures)
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert [entry["item"] for entry in reply.data["outcome"]["failed"]] == [101, 103, 102]
+    assert reply.data["statistics"]["elements_colored"] == 0
+
+
+def test_color_splash_success_names_every_colored_element_and_keeps_its_legacy_keys(world):
+    reply = run(world, COLOR_SPLASH)
+    assert reply.status == 200 and reply.data["status"] == "success", reply.data
+    assert reply.data["outcome"]["requested"] == 3
+    assert reply.data["outcome"]["succeeded"] == [101, 103, 102]
+    assert reply.data["outcome"]["failed"] == []
+    assert reply.data["statistics"]["elements_colored"] == 3
+    assert "Successfully colored 3 elements" in reply.data["message"]
+    assert world.overridden == [101, 103, 102]
+
+
+def test_a_rolled_back_color_splash_never_says_it_colored_anything(world):
+    body = reach(world, COLOR_SPLASH)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, *COLOR_SPLASH), body)
+    assert reply.status == 409 and reply.data["status"] == "rolled_back", reply.data
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["outcome"]["requested"] == 3
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert "Successfully colored" not in json.dumps(reply.data)
+    for legacy in ("statistics", "color_assignments", "category"):
+        assert legacy not in reply.data
+
+
+def test_a_color_splash_that_raises_keeps_its_200_error_body_and_gains_an_outcome(world):
+    body = reach(world, COLOR_SPLASH)
+    world.break_start.add("Only")
+    reply = call(world, handler_of(world, *COLOR_SPLASH), body)
+    assert reply.status == 200 and reply.data["status"] == "error"
+    assert reply.data["message"].startswith("Failed to color elements:")
+    assert reply.data["outcome"]["transaction_status"] == "Uninitialized"
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["requested"] == 3
+
+
+def test_color_splash_validation_bodies_are_unchanged_and_carry_no_outcome(world):
+    reach(world, COLOR_SPLASH)
+    unknown = call(world, handler_of(world, *COLOR_SPLASH),
+                   {"category_name": "Nothing", "parameter_name": "Mark"})
+    assert unknown.status == 200 and unknown.data["status"] == "error"
+    assert unknown.data["message"] == "Category 'Nothing' not found"
+    assert "outcome" not in unknown.data
+    world.collector_items = []
+    empty = call(world, handler_of(world, *COLOR_SPLASH), dict(_SPLASH_BODY))
+    assert empty.status == 200 and empty.data["status"] == "error"
+    assert empty.data["message"] == "No elements found in category 'Walls'"
+    assert "outcome" not in empty.data
+    assert world.kinds("transaction") == []
+
+
+def test_clear_colors_with_one_override_that_raises_is_a_partial_naming_the_element(world):
+    reply = colour_call(world, CLEAR_COLORS, {102: RuntimeError("view is locked")})
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed",
+        "requested": 3,
+        "succeeded": [101, 103],
+        "failed": [{"item": 102, "reason": "view is locked"}],
+        "revit_failures": [],
+    }
+    assert reply.data["elements_processed"] == 2 and reply.data["category"] == "Walls"
+    text = format_response(without_attribution(reply.data))
+    assert "=== PARTIAL SUCCESS ===" in text and "view is locked" in text
+
+
+def test_clear_colors_where_every_override_raises_is_a_422_failed(world):
+    failures = dict((ident, RuntimeError("view is locked")) for ident in (101, 102, 103))
+    reply = colour_call(world, CLEAR_COLORS, failures)
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["elements_processed"] == 0
+
+
+def test_clear_colors_success_names_every_cleared_element(world):
+    reply = run(world, CLEAR_COLORS)
+    assert reply.status == 200 and reply.data["status"] == "success", reply.data
+    assert reply.data["outcome"]["succeeded"] == [101, 102, 103]
+    assert reply.data["outcome"]["requested"] == 3
+    assert reply.data["elements_processed"] == 3
+    assert sorted(without_attribution(reply.data)) == [
+        "category", "elements_processed", "message", "outcome", "status"]
+
+
+def test_a_rolled_back_clear_colors_never_says_it_cleared_anything(world):
+    body = reach(world, CLEAR_COLORS)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, *CLEAR_COLORS), body)
+    assert reply.status == 409 and reply.data["status"] == "rolled_back", reply.data
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["outcome"]["requested"] == 3
+    assert "Successfully cleared" not in json.dumps(reply.data)
+    assert "elements_processed" not in reply.data
+
+
+def test_a_clear_colors_that_raises_keeps_its_200_error_body_and_gains_an_outcome(world):
+    body = reach(world, CLEAR_COLORS)
+    world.break_start.add("Only")
+    reply = call(world, handler_of(world, *CLEAR_COLORS), body)
+    assert reply.status == 200 and reply.data["status"] == "error"
+    assert reply.data["message"].startswith("Failed to clear colors:")
+    assert reply.data["outcome"]["transaction_status"] == "Uninitialized"
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["outcome"]["requested"] == 3
+
+
+def test_clear_colors_validation_bodies_are_unchanged_and_carry_no_outcome(world):
+    reach(world, CLEAR_COLORS)
+    unknown = call(world, handler_of(world, *CLEAR_COLORS), {"category_name": "Nothing"})
+    assert unknown.status == 200 and unknown.data["status"] == "error"
+    assert unknown.data["message"] == "Category 'Nothing' not found"
+    assert "outcome" not in unknown.data
+    world.collector_items = []
+    empty = call(world, handler_of(world, *CLEAR_COLORS), {"category_name": "Walls"})
+    assert empty.status == 200 and empty.data["status"] == "warning"
+    assert empty.data["message"] == "No elements found in category 'Walls'"
+    assert "outcome" not in empty.data
+    assert world.kinds("transaction") == []

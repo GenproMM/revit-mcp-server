@@ -65,7 +65,7 @@ keep the Revit half a thin data provider. Pure helpers that both halves need go 
 unit tested; `revit_mcp/integrity.py` is the read-only file reader that feeds `trust.py`.
 
 Verifying the Revit side requires Revit open with a document, pyRevit installed, and
-Routes Server enabled — check `http://localhost:48884/revit_mcp/status/` in a browser.
+Routes Server enabled — check `http://localhost:48884/genpro_revit_mcp/status/` in a browser.
 
 ## Architecture
 

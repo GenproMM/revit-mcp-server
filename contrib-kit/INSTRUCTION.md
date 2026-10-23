@@ -38,7 +38,7 @@ RevitMCP состоит из двух половин, которые разго�
 Затем откройте в браузере:
 
 ```
-http://localhost:48884/revit_mcp/status/
+http://localhost:48884/genpro_revit_mcp/status/
 ```
 
 **Что должно быть:** страница с текстом, где встречается `"health": "healthy"`.

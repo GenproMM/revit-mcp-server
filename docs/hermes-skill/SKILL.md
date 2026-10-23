@@ -89,7 +89,7 @@ metadata:
 4. **Прогнать тесты.** `uv run pytest tests/unit`. Упало — нарушено правило,
    править код, а не тест.
 5. **Проверить на живой модели.** Полностью перезапустить Revit →
-   `http://localhost:48884/revit_mcp/status/?verbose=true` (домен в списке,
+   `http://localhost:48884/genpro_revit_mcp/status/?verbose=true` (домен в списке,
    `health: healthy`) → `mcp dev main.py` и вызвать инструмент.
 6. **Коммит.** Ветка `feature/<тема>`, тело в форме симптом → причина →
    исправление.

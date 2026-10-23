@@ -38,7 +38,7 @@ uv run pytest tests/unit          # ОБЯЗАТЕЛЬНО перед кажды
 
 1. **Полностью закрыть и открыть Revit.** Кнопки Reload недостаточно — она
    валит процесс Revit на первом же запросе.
-2. `http://localhost:48884/revit_mcp/status/?verbose=true` — твой домен в
+2. `http://localhost:48884/genpro_revit_mcp/status/?verbose=true` — твой домен в
    списке, `health: healthy`.
 3. `mcp dev main.py` — вызвать инструмент по-настоящему.
 

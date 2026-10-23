@@ -180,7 +180,7 @@ provider — that is the only way it can be tested without a Revit restart.
   to `/execute_code/`, `exec` it in a throwaway namespace with a fake `api` object that
   captures the handler, then call the handler with `doc`. Prepend `revit_mcp/` to
   `sys.path` and strip `\r\n` — IronPython's `exec` rejects CRLF source.
-- Verify the extension loaded: `http://localhost:48884/revit_mcp/status/` in a browser.
+- Verify the extension loaded: `http://localhost:48884/genpro_revit_mcp/status/` in a browser.
   Add `?verbose=true` to list the registered domains.
 
 ## Commits

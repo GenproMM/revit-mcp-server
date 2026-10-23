@@ -370,6 +370,109 @@ def check_request_parsing(label, source):
     return violations
 
 
+# Phase 4 D-02 -- every Commit() goes through commit_and_report.
+#
+# Revit's Transaction.Commit() does not raise when the failure swallower vetoes
+# the transaction; it returns TransactionStatus.RolledBack. A route that
+# discards that return value answers "success" for an edit Revit threw away,
+# and that is exactly what hid rollbacks on 26 sites until Phase 4. The only
+# place a Commit() may be written is commit_and_report in revit_mcp/utils.py,
+# which reads the status and hands it to finalize_outcome. Phase 6's audit log
+# reads `outcome` from every mutating reply, so a bypass here is not a style
+# problem: it makes the audit record wrong.
+#
+# The second check closes the other half of the same hole. commit_and_report
+# can only report the failures Revit raised if it is given the swallower that
+# collected them, and suppress_warnings() returns that swallower; a discarded
+# result means outcome.revit_failures is silently always empty.
+
+COMMIT_HELPER = "commit_and_report"
+COMMIT_HELPER_HOME = "revit_mcp/utils.py"
+
+
+def check_commit_goes_through_report(label, source):
+    """No `.Commit` attribute in a revit_mcp module outside commit_and_report.
+
+    Any attribute named Commit counts, whether it is called, compared
+    (`ft.Commit() == Committed`) or bound (`commit = t.Commit`). Comments and
+    string literals are not attributes, so a docstring that explains the rule
+    is fine. The single exemption is the module-level `commit_and_report` in
+    revit_mcp/utils.py and applies only there and only to that function.
+    """
+    tree, error = _parse(label, source)
+    if error:
+        return [error]
+
+    exempt = set()
+    if label.replace("\\", "/").endswith(COMMIT_HELPER_HOME):
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == COMMIT_HELPER:
+                for child in ast.walk(node):
+                    exempt.add(id(child))
+
+    lines = sorted({
+        n.lineno for n in ast.walk(tree)
+        if isinstance(n, ast.Attribute) and n.attr == "Commit" and id(n) not in exempt
+    })
+    if not lines:
+        return []
+    return [
+        "{}: Commit() outside commit_and_report at lines {}: use swallower = "
+        "suppress_warnings(t), commit_result = commit_and_report(t, swallower) "
+        "and finalize_outcome(...) (Phase 4 D-02)".format(label, lines)
+    ]
+
+
+def _is_none_constant(node):
+    return isinstance(node, ast.Constant) and node.value is None
+
+
+def check_swallower_is_kept(label, source):
+    """suppress_warnings() must be assigned and commit_and_report must get it."""
+    tree, error = _parse(label, source)
+    if error:
+        return [error]
+
+    discarded = sorted({
+        n.lineno for n in ast.walk(tree)
+        if isinstance(n, ast.Expr)
+        and isinstance(n.value, ast.Call)
+        and getattr(n.value.func, "id", None) == "suppress_warnings"
+    })
+
+    unswallowed = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and getattr(node.func, "id", None) == COMMIT_HELPER):
+            continue
+        if any(isinstance(a, ast.Starred) for a in node.args):
+            continue  # arguments are not statically known
+        if len(node.args) >= 2:
+            second = node.args[1]
+        else:
+            keyword = [k for k in node.keywords if k.arg == "swallower"]
+            second = keyword[0].value if keyword else None
+        if second is None or _is_none_constant(second):
+            unswallowed.append(node.lineno)
+
+    violations = []
+    if discarded:
+        violations.append(
+            "{}: the result of suppress_warnings(...) is discarded at lines "
+            "{}: keep it (swallower = suppress_warnings(t)) and pass it to "
+            "commit_and_report, or outcome.revit_failures can never name what "
+            "Revit rolled back for (Phase 4 D-02)".format(label, discarded)
+        )
+    if unswallowed:
+        violations.append(
+            "{}: commit_and_report needs the swallower as its second argument "
+            "at lines {}: commit_and_report(t, swallower) (Phase 4 D-02)".format(
+                label, sorted(set(unswallowed))
+            )
+        )
+    return violations
+
+
 def check_route_registrar(label, source):
     """Exactly one register_*_routes(api), or discovery cannot find the domain."""
     tree, error = _parse(label, source)
@@ -513,6 +616,8 @@ def check_route_module(label, source):
         + check_ironpython_dialect(label, source)
         + check_element_id(label, source)
         + check_request_parsing(label, source)
+        + check_commit_goes_through_report(label, source)
+        + check_swallower_is_kept(label, source)
         + check_route_registrar(label, source)
     )
 

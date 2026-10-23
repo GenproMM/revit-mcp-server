@@ -100,6 +100,22 @@ def test_route_registrar(path):
     assert not violations, _report(violations)
 
 
+# Phase 4 D-02. No utils.py skip here, unlike test_element_id_helpers_are_used:
+# the one legitimate Commit() lives in utils.py and the checker exempts exactly
+# that function, so the file is checked like every other.
+
+@pytest.mark.parametrize("path", REVIT_MCP_FILES, ids=_rel)
+def test_commits_go_through_commit_and_report(path):
+    violations = conventions.check_commit_goes_through_report(_rel(path), _read(path))
+    assert not violations, _report(violations)
+
+
+@pytest.mark.parametrize("path", REVIT_MCP_FILES, ids=_rel)
+def test_suppress_warnings_result_is_kept(path):
+    violations = conventions.check_swallower_is_kept(_rel(path), _read(path))
+    assert not violations, _report(violations)
+
+
 # --- the MCP half -----------------------------------------------------------
 
 @pytest.mark.parametrize("path", TOOLS_FILES, ids=_rel)
@@ -280,6 +296,160 @@ def test_request_parsing_detector_catches_the_old_idiom():
 def test_request_parsing_detector_allows_the_helper():
     source = "def h(doc, request):\n    data = parse_request_data(request.data)\n"
     assert conventions.check_request_parsing("revit_mcp/x.py", source) == []
+
+
+# --- Phase 4 D-02: a Commit() goes through commit_and_report ----------------
+#
+# A discarded Commit() return hid every rollback: the route answered success
+# for an edit Revit had thrown away, and Phase 6's audit log reads `outcome`.
+# These detectors are proven on known-bad input for the same reason as the rest:
+# the kit ships a copy and a contributor never runs this suite.
+
+_HEADER = "# -*- coding: utf-8 -*-\n"
+
+
+def _commit_hits(source, label="revit_mcp/x.py"):
+    return conventions.check_commit_goes_through_report(label, _HEADER + source)
+
+
+def test_commit_detector_catches_a_bare_commit():
+    violations = _commit_hits(
+        "def h(doc, request):\n"
+        "    t = DB.Transaction(doc, 'x')\n"
+        "    t.Start()\n"
+        "    t.Commit()\n"
+    )
+    assert len(violations) == 1, violations
+    assert "commit_and_report" in violations[0]
+    assert "[5]" in violations[0]
+
+
+def test_commit_detector_catches_a_family_document_comparison():
+    violations = _commit_hits(
+        "def h(ft):\n"
+        "    touched = (ft.Commit() == DB.TransactionStatus.Committed)\n"
+    )
+    assert len(violations) == 1, violations
+    assert "commit_and_report" in violations[0]
+
+
+def test_commit_detector_catches_a_bound_reference():
+    """`commit = t.Commit` then `commit()` is the same bypass, one step removed."""
+    violations = _commit_hits(
+        "def h(t):\n"
+        "    commit = t.Commit\n"
+        "    commit()\n"
+    )
+    assert len(violations) == 1, violations
+
+
+@pytest.mark.parametrize("source", [
+    "def h(t, swallower):\n    commit_result = commit_and_report(t, swallower)\n",
+    "def h(t):\n    # t.Commit() is what commit_and_report calls\n    pass\n",
+    "def h(t):\n    msg = 'rolled back at t.Commit()'\n",
+    "def h(t):\n    '''Docstring that says t.Commit().'''\n",
+    "def h(r):\n    return r == DB.TransactionStatus.Committed\n",
+])
+def test_commit_detector_ignores_the_good_forms_and_mentions(source):
+    assert _commit_hits(source) == []
+
+
+_UTILS_COMMIT = (
+    "def commit_and_report(transaction, swallower=None):\n"
+    "    status = transaction.Commit()\n"
+    "    return status\n"
+)
+
+
+def test_commit_detector_exempts_commit_and_report_in_utils():
+    assert _commit_hits(_UTILS_COMMIT, label="revit_mcp/utils.py") == []
+
+
+def test_commit_detector_utils_exemption_accepts_backslash_labels():
+    assert _commit_hits(_UTILS_COMMIT, label="revit_mcp\\utils.py") == []
+
+
+def test_commit_detector_utils_exemption_is_only_for_that_function():
+    violations = _commit_hits(
+        _UTILS_COMMIT
+        + "def other(t):\n"
+        "    t.Commit()\n",
+        label="revit_mcp/utils.py",
+    )
+    assert len(violations) == 1, violations
+    assert "[6]" in violations[0]
+
+
+def test_commit_detector_utils_exemption_is_only_for_utils():
+    """The same function in any other file is not exempt."""
+    violations = _commit_hits(_UTILS_COMMIT, label="revit_mcp/x.py")
+    assert len(violations) == 1, violations
+
+
+def test_commit_detector_exemption_does_not_cover_a_nested_other_label():
+    """A commit in a function merely nested beside the exempt one is caught."""
+    violations = _commit_hits(
+        "def commit_and_report(transaction, swallower=None):\n"
+        "    return transaction.Commit()\n"
+        "class K:\n"
+        "    def commit_and_report(self, t):\n"
+        "        return t.Commit()\n",
+        label="revit_mcp/utils.py",
+    )
+    # The module-level function is exempt; the method of the same name is not.
+    assert len(violations) == 1, violations
+    assert "[6]" in violations[0]
+
+
+def _swallower_hits(source):
+    return conventions.check_swallower_is_kept("revit_mcp/x.py", _HEADER + source)
+
+
+def test_swallower_detector_catches_a_discarded_suppress_warnings():
+    violations = _swallower_hits("def h(t):\n    suppress_warnings(t)\n")
+    assert len(violations) == 1, violations
+    assert "suppress_warnings" in violations[0]
+    assert "[3]" in violations[0]
+
+
+@pytest.mark.parametrize("call", [
+    "commit_and_report(t)",
+    "commit_and_report(t, None)",
+    "commit_and_report(t, swallower=None)",
+])
+def test_swallower_detector_catches_a_commit_without_a_swallower(call):
+    violations = _swallower_hits("def h(t):\n    r = {}\n".format(call))
+    assert len(violations) == 1, violations
+    assert "commit_and_report" in violations[0]
+
+
+@pytest.mark.parametrize("source", [
+    "def h(t):\n    swallower = suppress_warnings(t)\n",
+    "def h(t, swallower):\n    r = commit_and_report(t, swallower)\n",
+    "def h(t, s):\n    r = commit_and_report(t, swallower=s)\n",
+    "def h(t):\n    # suppress_warnings(t) must keep its result\n    pass\n",
+    "def h(t):\n    msg = 'commit_and_report(t)'\n",
+])
+def test_swallower_detector_ignores_the_good_forms_and_mentions(source):
+    assert _swallower_hits(source) == []
+
+
+def test_route_module_check_reports_the_new_violations_with_the_old():
+    bad = (
+        "# -*- coding: utf-8 -*-\n"
+        "def register_x_routes(api):\n"
+        "    @api.route('/x/', methods=['POST'])\n"
+        "    def h(doc, request):\n"
+        "        t = DB.Transaction(doc, 'x')\n"
+        "        t.Start()\n"
+        "        suppress_warnings(t)\n"
+        "        t.Commit()\n"
+        "        data = json.loads(request.data)\n"
+    )
+    violations = conventions.check_route_module("revit_mcp/x.py", bad)
+    assert any("Commit() outside commit_and_report" in v for v in violations), violations
+    assert any("suppress_warnings" in v for v in violations), violations
+    assert any("parse_request_data" in v for v in violations), violations
 
 
 def test_code_execution_rejects_missing_document_before_transaction():

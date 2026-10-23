@@ -23,7 +23,9 @@ import importlib
 import importlib.util
 import inspect
 import json
+import os
 import sys
+import time
 import types
 from unittest.mock import MagicMock
 
@@ -902,7 +904,7 @@ def test_a_transaction_error_still_rolls_back_and_names_the_document(world):
 
 # The world-wide invariants cover the rows whose modules report an outcome. Plan 04-06
 # migrates documentation and placement and widens this set until it is the whole table.
-OUTCOME_MODULES = {"editing", "interop"}
+OUTCOME_MODULES = {"editing", "interop", "documentation"}
 OUTCOME_ROWS = [key for key in TRANSACTING if key[0] in OUTCOME_MODULES]
 OUTCOME_ROW_IDS = ["{}:{}".format(module, route) for module, route in OUTCOME_ROWS]
 
@@ -1585,6 +1587,306 @@ def test_edit_family_refusal_opens_no_family_and_reports_no_change(world):
                  dict(EDIT_BODY, document=tokens[0]))
     assert_refused(world, reply, 412, "document-not-active")
     assert "documents_changed" not in reply.data
+
+
+# ----------------------------------------------------- documentation outcomes (04-06, D-06, D-12)
+
+
+def db_of():
+    return sys.modules["pyrevit"].DB
+
+
+def export_dir_of(world):
+    return os.path.join(str(world.tmp), "Documents", "RevitMCPExport")
+
+
+class TrackedSheet(object):
+    """A ViewSheet whose every public read is logged, so a test can prove nothing was read
+    from it after the commit event. ``number_error`` makes the SheetNumber setter raise."""
+
+    def __init__(self, world, number_error=None):
+        self.__dict__["_world"] = world
+        self.__dict__["_number_error"] = number_error
+        self.__dict__["_values"] = {"SheetNumber": "A-9", "Name": "Auto",
+                                    "Id": types.SimpleNamespace(Value=555)}
+
+    def __getattribute__(self, name):
+        if name.startswith("_"):
+            return object.__getattribute__(self, name)
+        object.__getattribute__(self, "_world").events.append(("sheetread", "SHEET", name))
+        return object.__getattribute__(self, "_values")[name]
+
+    def __setattr__(self, name, value):
+        if name == "SheetNumber" and self._number_error is not None:
+            raise self._number_error
+        self._values[name] = value
+
+
+def arm_sheet(world, number_error=None):
+    """A title block in the collector and a ViewSheet.Create that hands back a tracked sheet."""
+    world.collector_items = [_title_block]
+    sheet = TrackedSheet(world, number_error)
+    db_of().ViewSheet = types.SimpleNamespace(Create=lambda doc, title_block_id: sheet)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    return sheet
+
+
+def events_after_commit(world, kind):
+    commits = [i for i, event in enumerate(world.events) if event[0] == "commit"]
+    assert commits, "the route never committed"
+    return [event for event in world.events[commits[0]:] if event[0] == kind]
+
+
+def test_create_sheet_success_reports_the_new_sheet_id(world):
+    arm_sheet(world)
+    reply = call(world, handler_of(world, "documentation", "/create_sheet/"),
+                 {"sheet_number": "A-1", "sheet_name": "Plan"})
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"] == {"transaction_status": "Committed", "requested": 1,
+                                     "succeeded": [555], "failed": [], "revit_failures": []}
+    assert reply.data["created"]["id"] == 555 and reply.data["created"]["title_block"] == "TB"
+    assert reply.data["created"]["sheet_number"] == "A-1"
+    assert reply.data["message"] == "Created sheet A-1 - Plan"
+
+
+def test_a_rolled_back_create_sheet_is_a_409_and_the_sheet_is_never_read_after_the_commit(world):
+    arm_sheet(world)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, "documentation", "/create_sheet/"),
+                 {"sheet_number": "A-1", "sheet_name": "Plan"})
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["outcome"]["requested"] == 1
+    assert "created" not in reply.data
+    assert events_after_commit(world, "sheetread") == []
+
+
+def test_a_sheet_number_that_is_in_use_is_a_200_partial_naming_the_step(world):
+    arm_sheet(world, number_error=RuntimeError("in use"))
+    reply = call(world, handler_of(world, "documentation", "/create_sheet/"),
+                 {"sheet_number": "A-1", "sheet_name": "Plan"})
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    assert reply.data["outcome"]["failed"] == [{"item": "sheet_number", "reason": "in use"}]
+    assert reply.data["outcome"]["succeeded"] == [555]
+    assert reply.data["created"]["id"] == 555 and reply.data["created"]["sheet_name"] == "Plan"
+    assert "sheet_number" in reply.data["message"] and "in use" in reply.data["message"]
+
+
+class FakeField(object):
+    def __init__(self, name):
+        self._name = name
+
+    def GetName(self, doc):
+        return self._name
+
+
+class FakeSchedule(object):
+    """A ViewSchedule with two schedulable fields, Mark and Other."""
+
+    def __init__(self, name_error=None):
+        self.added = []
+        self.Id = types.SimpleNamespace(Value=321)
+        self._name = ""
+        self._name_error = name_error
+        fields = [FakeField("Mark"), FakeField("Other")]
+        self.Definition = types.SimpleNamespace(
+            GetSchedulableFields=lambda: fields,
+            AddField=lambda field: self.added.append(field.GetName(None)))
+        body = types.SimpleNamespace(NumberOfRows=4)
+        self._table = types.SimpleNamespace(GetSectionData=lambda section: body)
+
+    @property
+    def Name(self):
+        return self._name
+
+    @Name.setter
+    def Name(self, value):
+        if self._name_error is not None:
+            raise self._name_error
+        self._name = value
+
+    def GetTableData(self):
+        return self._table
+
+
+def arm_schedule(world, name_error=None):
+    schedule = FakeSchedule(name_error)
+    db_of().ViewSchedule = types.SimpleNamespace(CreateSchedule=lambda doc, category_id: schedule)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    return schedule
+
+
+def test_create_schedule_with_a_field_that_does_not_exist_is_a_200_partial(world):
+    schedule = arm_schedule(world)
+    reply = call(world, handler_of(world, "documentation", "/create_schedule/"),
+                 {"category": "OST_Walls", "fields": ["Mark", "Nope"], "schedule_name": "Walls"})
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed", "requested": 1, "succeeded": [321],
+        "failed": [{"item": "Nope", "reason": "field not found"}], "revit_failures": []}
+    assert schedule.added == ["Mark"]
+    assert reply.data["created"]["fields"] == ["Mark"] and reply.data["created"]["id"] == 321
+    assert reply.data["created"]["name"] == "Walls" and reply.data["created"]["row_count"] == 4
+    assert reply.data["fields_not_found"] == ["Nope"]
+    assert reply.data["available_fields"] == ["Mark", "Other"]
+
+
+def test_create_schedule_without_fields_is_a_plain_success(world):
+    schedule = arm_schedule(world)
+    reply = call(world, handler_of(world, "documentation", "/create_schedule/"),
+                 {"category": "OST_Walls"})
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"]["succeeded"] == [321] and reply.data["outcome"]["failed"] == []
+    assert schedule.added == ["Mark", "Other"] and "fields_not_found" not in reply.data
+
+
+def test_a_schedule_that_cannot_take_its_name_is_a_200_partial_naming_the_step(world):
+    arm_schedule(world, name_error=RuntimeError("name taken"))
+    reply = call(world, handler_of(world, "documentation", "/create_schedule/"),
+                 {"category": "OST_Walls", "schedule_name": "Walls"})
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    assert reply.data["outcome"]["failed"] == [{"item": "name", "reason": "name taken"}]
+    assert reply.data["outcome"]["succeeded"] == [321]
+
+
+def test_a_rolled_back_create_schedule_is_a_409_with_nothing_succeeded(world):
+    arm_schedule(world)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, "documentation", "/create_schedule/"),
+                 {"category": "OST_Walls", "fields": ["Mark", "Nope"]})
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["succeeded"] == [] and "created" not in reply.data
+
+
+EXPORT_VIEW = {"view_name": "Plan A"}
+
+
+def export_path(world, extension):
+    return os.path.join(export_dir_of(world), "Plan_A." + extension)
+
+
+def arm_export(world, hook=None, name="Export"):
+    world.collector_items = [_view]
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    if hook is not None:
+        world.hooks[("Only", name)] = hook
+
+
+def test_a_dwg_export_that_returns_true_reports_the_path_as_succeeded(world):
+    arm_export(world, lambda document, *args: True)
+    reply = call(world, handler_of(world, "documentation", "/export_document/"),
+                 dict(EXPORT_VIEW, format="dwg"))
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed", "requested": 1,
+        "succeeded": [export_path(world, "dwg")], "failed": [], "revit_failures": []}
+    assert reply.data["exported"]["file_path"] == export_path(world, "dwg")
+
+
+def test_a_dwg_export_that_returns_false_is_a_422_naming_the_output_path(world):
+    arm_export(world, lambda document, *args: False)
+    reply = call(world, handler_of(world, "documentation", "/export_document/"),
+                 dict(EXPORT_VIEW, format="dwg"))
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["failed"] == [
+        {"item": export_path(world, "dwg"), "reason": "Document.Export returned False"}]
+    assert reply.data["outcome"]["transaction_status"] == "Committed"
+    assert "exported" not in reply.data
+
+
+def test_a_pdf_export_that_returns_false_is_a_422_and_no_longer_a_rolled_back_500(world):
+    arm_export(world, lambda document, *args: False)
+    reply = call(world, handler_of(world, "documentation", "/export_document/"),
+                 dict(EXPORT_VIEW, format="pdf"))
+    assert reply.status == 422 and reply.data["status"] == "failed"
+    assert reply.data["outcome"]["failed"] == [
+        {"item": export_path(world, "pdf"), "reason": "Document.Export returned False"}]
+    assert world.kinds("rollback") == [] and world.kinds("commit")
+
+
+def test_a_pdf_export_that_returns_true_reports_the_pdf_as_succeeded(world):
+    arm_export(world, lambda document, *args: True)
+    reply = call(world, handler_of(world, "documentation", "/export_document/"),
+                 dict(EXPORT_VIEW, format="pdf"))
+    assert reply.status == 200
+    assert reply.data["outcome"]["succeeded"] == [export_path(world, "pdf")]
+
+
+def test_a_pdf_export_that_raises_rolls_back_and_carries_the_outcome_on_its_500(world):
+    def refuses(document, *args):
+        raise RuntimeError("no printer")
+
+    arm_export(world, refuses)
+    reply = call(world, handler_of(world, "documentation", "/export_document/"),
+                 dict(EXPORT_VIEW, format="pdf"))
+    assert reply.status == 500 and "no printer" in reply.data["error"]
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["failed"] == [
+        {"item": export_path(world, "pdf"), "reason": "no printer"}]
+    assert world.kinds("commit") == []
+
+
+def test_a_dwg_export_that_raises_rolls_back_and_carries_the_outcome_on_its_500(world):
+    def refuses(document, *args):
+        raise RuntimeError("no dwg")
+
+    arm_export(world, refuses)
+    reply = call(world, handler_of(world, "documentation", "/export_document/"),
+                 dict(EXPORT_VIEW, format="dwg"))
+    assert reply.status == 500 and "no dwg" in reply.data["error"]
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["failed"] == [
+        {"item": export_path(world, "dwg"), "reason": "no dwg"}]
+
+
+def test_an_image_export_that_leaves_no_file_is_a_422(world):
+    arm_export(world, lambda document, *args: None, name="ExportImage")
+    reply = call(world, handler_of(world, "documentation", "/export_document/"),
+                 dict(EXPORT_VIEW, format="png"))
+    assert reply.status == 422 and reply.data["status"] == "failed"
+    assert reply.data["outcome"]["failed"] == [
+        {"item": export_path(world, "png"), "reason": "expected export file was not created"}]
+    assert reply.data["outcome"]["succeeded"] == []
+
+
+def test_an_image_export_that_writes_its_file_is_a_200_success(world):
+    def writes(document, *args):
+        with open(export_path(world, "png"), "wb") as handle:
+            handle.write(b"x" * 2048)
+
+    arm_export(world, writes, name="ExportImage")
+    reply = call(world, handler_of(world, "documentation", "/export_document/"),
+                 dict(EXPORT_VIEW, format="png"))
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"]["succeeded"] == [export_path(world, "png")]
+    assert reply.data["exported"]["file_size_kb"] == 2
+
+
+def test_an_image_export_never_counts_a_file_from_an_earlier_export_as_its_own(world):
+    os.makedirs(export_dir_of(world))
+    stale = export_path(world, "jpg")
+    with open(stale, "wb") as handle:
+        handle.write(b"old")
+    long_ago = time.time() - 3600
+    os.utime(stale, (long_ago, long_ago))
+    arm_export(world, lambda document, *args: None, name="ExportImage")
+    reply = call(world, handler_of(world, "documentation", "/export_document/"),
+                 dict(EXPORT_VIEW, format="jpg"))
+    assert reply.status == 422
+    assert reply.data["outcome"]["failed"][0]["reason"] == "expected export file was not created"
+
+
+def test_a_rolled_back_export_is_a_409_with_nothing_succeeded(world):
+    arm_export(world, lambda document, *args: True)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, "documentation", "/export_document/"),
+                 dict(EXPORT_VIEW, format="dwg"))
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["succeeded"] == [] and "exported" not in reply.data
 
 
 # ------------------------------------------------------------------- helper contracts

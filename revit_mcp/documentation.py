@@ -4,12 +4,13 @@ Documentation Module for Revit MCP
 Handles sheet creation, schedule creation, and document export
 """
 
-from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
+from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,11 @@ def register_documentation_routes(api):
 
     def _create_sheet(doc, request):
         """Create a drawing sheet in Revit."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -77,9 +83,10 @@ def register_documentation_routes(api):
                     except Exception:
                         continue
 
+            requested = 1
             t = DB.Transaction(doc, "Create Sheet via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 # Activate title block
@@ -90,40 +97,60 @@ def register_documentation_routes(api):
                 # Create the sheet
                 new_sheet = DB.ViewSheet.Create(doc, target_tb.Id)
 
+                # The number and the name are their own steps: a number that is already
+                # taken must show as a failed step, not vanish behind "Created sheet".
                 if sheet_number:
-                    new_sheet.SheetNumber = sheet_number
+                    try:
+                        new_sheet.SheetNumber = sheet_number
+                    except Exception as number_err:
+                        logger.warning("Could not set the sheet number: {}".format(number_err))
+                        failed.append({"item": "sheet_number", "reason": str(number_err)})
                 if sheet_name:
-                    new_sheet.Name = sheet_name
+                    try:
+                        new_sheet.Name = sheet_name
+                    except Exception as name_err:
+                        logger.warning("Could not set the sheet name: {}".format(name_err))
+                        failed.append({"item": "sheet_name", "reason": str(name_err)})
 
-                t.Commit()
-
-                tb_name = get_element_name(target_tb)
-
-                return routes.make_response(
-                    data={
-                        "status": "success",
-                        "created": {
-                            "id": get_element_id_value(new_sheet),
-                            "sheet_number": new_sheet.SheetNumber,
-                            "sheet_name": new_sheet.Name,
-                            "title_block": tb_name,
-                        },
-                        "message": "Created sheet {} - {}".format(
-                            new_sheet.SheetNumber, new_sheet.Name
-                        ),
-                    }
-                )
+                commit_result = commit_and_report(t, swallower)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
                     t.RollBack()
                 raise tx_error
 
+            if not commit_result["committed"]:
+                # A rolled-back sheet never existed: read nothing from it (Pitfall 2).
+                payload, http = finalize_outcome(commit_result, {}, requested, [], failed)
+                return routes.make_response(data=payload, status=http)
+
+            succeeded.append(get_element_id_value(new_sheet))
+            tb_name = get_element_name(target_tb)
+            message = "Created sheet {} - {}".format(new_sheet.SheetNumber, new_sheet.Name)
+            if failed:
+                message += " (not applied: {})".format(
+                    "; ".join("{}: {}".format(f["item"], f["reason"]) for f in failed))
+
+            data = {
+                "created": {
+                    "id": succeeded[0],
+                    "sheet_number": new_sheet.SheetNumber,
+                    "sheet_name": new_sheet.Name,
+                    "title_block": tb_name,
+                },
+                "message": message,
+            }
+            payload, http = finalize_outcome(
+                commit_result, data, requested, succeeded, failed)
+            return routes.make_response(data=payload, status=http)
+
         except Exception as e:
             logger.error("Failed to create sheet: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/create_sheet/", methods=["POST"])
@@ -138,6 +165,11 @@ def register_documentation_routes(api):
 
     def _create_schedule(doc, request):
         """Create a schedule view in Revit."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -172,20 +204,27 @@ def register_documentation_routes(api):
             # Get ElementId for category
             cat_id = DB.ElementId(bic)
 
+            requested = 1
             t = DB.Transaction(doc, "Create Schedule via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 # Create the schedule
                 schedule = DB.ViewSchedule.CreateSchedule(doc, cat_id)
 
                 if schedule_name:
-                    schedule.Name = schedule_name
+                    name_to_set = schedule_name
                 else:
                     # Auto-generate name from category
                     cat_name = category_str.replace("OST_", "")
-                    schedule.Name = "{} Schedule".format(cat_name)
+                    name_to_set = "{} Schedule".format(cat_name)
+                # The name is its own step: a taken name must show as a failed step.
+                try:
+                    schedule.Name = name_to_set
+                except Exception as name_err:
+                    logger.warning("Could not set the schedule name: {}".format(name_err))
+                    failed.append({"item": "name", "reason": str(name_err)})
 
                 # Add fields
                 sched_def = schedule.Definition
@@ -209,6 +248,7 @@ def register_documentation_routes(api):
 
                         if not found:
                             fields_failed.append(field_name)
+                            failed.append({"item": field_name, "reason": "field not found"})
                 else:
                     # Add first few available fields as defaults
                     count = 0
@@ -232,52 +272,62 @@ def register_documentation_routes(api):
                 except Exception:
                     pass
 
-                t.Commit()
-
-                # Get category display name
-                cat_display = category_str.replace("OST_", "").lower()
-
-                result = {
-                    "status": "success",
-                    "created": {
-                        "id": get_element_id_value(schedule),
-                        "name": schedule.Name,
-                        "category": cat_display,
-                        "fields": fields_added,
-                        "row_count": row_count,
-                    },
-                    "message": "Created {} schedule with {} field{} and {} row{}".format(
-                        cat_display,
-                        len(fields_added),
-                        "s" if len(fields_added) != 1 else "",
-                        row_count,
-                        "s" if row_count != 1 else "",
-                    ),
-                }
-
-                if fields_failed:
-                    # Get available field names for error context
-                    available = []
-                    for sf in schedulable_fields:
-                        try:
-                            available.append(sf.GetName(doc))
-                        except Exception:
-                            continue
-                    result["fields_not_found"] = fields_failed
-                    result["available_fields"] = sorted(available)[:30]
-
-                return routes.make_response(data=result)
+                commit_result = commit_and_report(t, swallower)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
                     t.RollBack()
                 raise tx_error
 
+            if not commit_result["committed"]:
+                # A rolled-back schedule never existed: read nothing from it (Pitfall 2).
+                payload, http = finalize_outcome(commit_result, {}, requested, [], failed)
+                return routes.make_response(data=payload, status=http)
+
+            succeeded.append(get_element_id_value(schedule))
+
+            # Get category display name
+            cat_display = category_str.replace("OST_", "").lower()
+
+            result = {
+                "created": {
+                    "id": succeeded[0],
+                    "name": schedule.Name,
+                    "category": cat_display,
+                    "fields": fields_added,
+                    "row_count": row_count,
+                },
+                "message": "Created {} schedule with {} field{} and {} row{}".format(
+                    cat_display,
+                    len(fields_added),
+                    "s" if len(fields_added) != 1 else "",
+                    row_count,
+                    "s" if row_count != 1 else "",
+                ),
+            }
+
+            if fields_failed:
+                # Get available field names for error context
+                available = []
+                for sf in schedulable_fields:
+                    try:
+                        available.append(sf.GetName(doc))
+                    except Exception:
+                        continue
+                result["fields_not_found"] = fields_failed
+                result["available_fields"] = sorted(available)[:30]
+
+            payload, http = finalize_outcome(
+                commit_result, result, requested, succeeded, failed)
+            return routes.make_response(data=payload, status=http)
+
         except Exception as e:
             logger.error("Failed to create schedule: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/create_schedule/", methods=["POST"])
@@ -292,6 +342,11 @@ def register_documentation_routes(api):
 
     def _export_document(doc, request):
         """Export a view or sheet to file."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -355,13 +410,30 @@ def register_documentation_routes(api):
 
             fmt = export_format.lower()
 
+            # The file this call is expected to write. It is the item every export result
+            # names, so it is fixed before anything runs.
+            if fmt == "png" or fmt == "jpg":
+                safe_name = actual_view_name.replace(" ", "_").replace("/", "_")
+                file_path = os.path.join(
+                    export_dir, safe_name + (".png" if fmt == "png" else ".jpg"))
+            elif fmt == "pdf":
+                file_path = os.path.join(
+                    export_dir, actual_view_name.replace(" ", "_") + ".pdf")
+            else:
+                safe_name = actual_view_name.replace(" ", "_")
+                file_path = os.path.join(export_dir, safe_name + ".dwg")
+
+            requested = 1
             t = DB.Transaction(doc, "Export Document via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
-                file_path = ""
                 file_size_kb = 0
+                # What the export call itself said (D-06): the Boolean Document.Export
+                # returns, or, for an image, whether this call wrote the file.
+                export_ok = False
+                failure_reason = None
 
                 if fmt == "png" or fmt == "jpg":
                     # Image export
@@ -384,14 +456,20 @@ def register_documentation_routes(api):
                     else:
                         options.HLRandWFViewsFileType = DB.ImageFileType.JPGMedium
 
-                    safe_name = actual_view_name.replace(" ", "_").replace("/", "_")
                     options.FilePath = os.path.join(export_dir, safe_name)
 
+                    export_started = time.time()
                     doc.ExportImage(options)
 
-                    # Find the exported file
-                    expected_ext = ".png" if fmt == "png" else ".jpg"
-                    file_path = os.path.join(export_dir, safe_name + expected_ext)
+                    # ExportImage returns nothing, so the file is the evidence. A file left
+                    # by an earlier export does not count: it must have been written by this
+                    # call (two seconds of slack for coarse file-system timestamps).
+                    export_ok = (
+                        os.path.exists(file_path)
+                        and os.path.getmtime(file_path) >= export_started - 2
+                    )
+                    if not export_ok:
+                        failure_reason = "expected export file was not created"
 
                 elif fmt == "pdf":
                     # PDF export (Revit 2022+)
@@ -404,27 +482,16 @@ def register_documentation_routes(api):
                         view_ids = List[DB.ElementId]()
                         view_ids.Add(target_view.Id)
 
-                        success = doc.Export(export_dir, view_ids, pdf_options)
-
-                        if success:
-                            file_path = os.path.join(
-                                export_dir,
-                                actual_view_name.replace(" ", "_") + ".pdf"
-                            )
-                        else:
-                            # Fallback to image
-                            t.RollBack()
-                            return routes.make_response(
-                                data={
-                                    "error": "PDF export failed — ensure Revit PDF printer is configured. Try format 'png' as an alternative.",
-                                },
-                                status=500,
-                            )
+                        export_ok = bool(doc.Export(export_dir, view_ids, pdf_options))
+                        if not export_ok:
+                            failure_reason = "Document.Export returned False"
                     except Exception as pdf_err:
                         t.RollBack()
+                        failed.append({"item": file_path, "reason": str(pdf_err)})
                         return routes.make_response(
                             data={
                                 "error": "PDF export not available: {}. Try format 'png' as an alternative.".format(str(pdf_err)),
+                                "outcome": exception_outcome(t, requested, succeeded, failed),
                             },
                             status=500,
                         )
@@ -438,50 +505,70 @@ def register_documentation_routes(api):
                         view_ids = List[DB.ElementId]()
                         view_ids.Add(target_view.Id)
 
-                        safe_name = actual_view_name.replace(" ", "_")
-                        doc.Export(export_dir, safe_name, view_ids, dwg_options)
-                        file_path = os.path.join(export_dir, safe_name + ".dwg")
+                        export_ok = bool(doc.Export(export_dir, safe_name, view_ids, dwg_options))
+                        if not export_ok:
+                            failure_reason = "Document.Export returned False"
                     except Exception as dwg_err:
                         t.RollBack()
+                        failed.append({"item": file_path, "reason": str(dwg_err)})
                         return routes.make_response(
-                            data={"error": "DWG export failed: {}".format(str(dwg_err))},
+                            data={
+                                "error": "DWG export failed: {}".format(str(dwg_err)),
+                                "outcome": exception_outcome(t, requested, succeeded, failed),
+                            },
                             status=500,
                         )
 
-                t.Commit()
-
-                # Get file size
-                try:
-                    if file_path and os.path.exists(file_path):
-                        file_size_kb = int(os.path.getsize(file_path) / 1024)
-                except Exception:
-                    pass
-
-                return routes.make_response(
-                    data={
-                        "status": "success",
-                        "exported": {
-                            "view_name": actual_view_name,
-                            "format": fmt,
-                            "file_path": file_path,
-                            "file_size_kb": file_size_kb,
-                        },
-                        "message": "Exported '{}' to {} ({} KB)".format(
-                            actual_view_name, fmt.upper(), file_size_kb
-                        ),
-                    }
-                )
+                commit_result = commit_and_report(t, swallower)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
                     t.RollBack()
                 raise tx_error
 
+            if export_ok:
+                if commit_result["committed"]:
+                    succeeded.append(file_path)
+            else:
+                failed.append({"item": file_path, "reason": failure_reason})
+
+            # Get file size, only for an export that was reported and that was kept
+            if export_ok and commit_result["committed"]:
+                try:
+                    if file_path and os.path.exists(file_path):
+                        file_size_kb = int(os.path.getsize(file_path) / 1024)
+                except Exception:
+                    pass
+
+            if export_ok:
+                data = {
+                    "exported": {
+                        "view_name": actual_view_name,
+                        "format": fmt,
+                        "file_path": file_path,
+                        "file_size_kb": file_size_kb,
+                    },
+                    "message": "Exported '{}' to {} ({} KB)".format(
+                        actual_view_name, fmt.upper(), file_size_kb
+                    ),
+                }
+            else:
+                data = {
+                    "message": "Export of '{}' to {} failed: {} ({})".format(
+                        actual_view_name, fmt.upper(), failure_reason, file_path
+                    ),
+                }
+            payload, http = finalize_outcome(
+                commit_result, data, requested, succeeded, failed)
+            return routes.make_response(data=payload, status=http)
+
         except Exception as e:
             logger.error("Failed to export document: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/export_document/", methods=["POST"])

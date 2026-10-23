@@ -902,7 +902,7 @@ def test_a_transaction_error_still_rolls_back_and_names_the_document(world):
 
 # The world-wide invariants cover the rows whose modules report an outcome. Plan 04-06
 # migrates documentation and placement and widens this set until it is the whole table.
-OUTCOME_MODULES = {"editing"}
+OUTCOME_MODULES = {"editing", "interop"}
 OUTCOME_ROWS = [key for key in TRANSACTING if key[0] in OUTCOME_MODULES]
 OUTCOME_ROW_IDS = ["{}:{}".format(module, route) for module, route in OUTCOME_ROWS]
 
@@ -1096,6 +1096,200 @@ def test_a_modify_whose_transaction_cannot_start_carries_the_outcome_on_its_500(
     assert reply.status == 500
     assert reply.data["outcome"]["transaction_status"] == "Uninitialized"
     assert reply.data["outcome"]["succeeded"] == []
+
+
+# --- export_ifc (D-06: the Boolean Document.Export returns)
+
+
+def test_export_ifc_that_returns_true_reports_the_file_as_succeeded(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "interop", "/export_ifc/"), {"file_path": "out.ifc"})
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"] == {"transaction_status": "Committed", "requested": 1,
+                                     "succeeded": ["out.ifc"], "failed": [], "revit_failures": []}
+    assert reply.data["file_path"] == "out.ifc" and reply.data["ifc_version"] == "IFC2x3"
+    assert "file_size_kb" in reply.data and reply.data["message"].startswith("Exported IFC")
+
+
+def test_export_ifc_that_returns_false_is_a_422_and_never_a_success(world):
+    arm(world)
+    world.hooks[(None, "Export")] = lambda document, *args: False
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "interop", "/export_ifc/"), {"file_path": "out.ifc"})
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    outcome = reply.data["outcome"]
+    assert outcome["failed"] == [{"item": "out.ifc", "reason": "Document.Export returned False"}]
+    assert outcome["succeeded"] == [] and outcome["transaction_status"] == "Committed"
+    assert not reply.data["message"].startswith("Exported IFC")
+
+
+def test_export_ifc_rolled_back_is_a_409_with_nothing_succeeded(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, "interop", "/export_ifc/"), {"file_path": "out.ifc"})
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["succeeded"] == [] and "file_path" not in reply.data
+
+
+def test_export_ifc_that_raises_rolls_back_and_carries_the_outcome_on_its_500(world):
+    arm(world)
+
+    def refuses(document, *args):
+        raise RuntimeError("exporter crashed")
+
+    world.hooks[(None, "Export")] = refuses
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "interop", "/export_ifc/"), {"file_path": "out.ifc"})
+    assert reply.status == 500 and "exporter crashed" in reply.data["error"]
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["outcome"]["requested"] == 1
+    assert world.kinds("commit") == []
+
+
+# --- link_file (TRUTH-01: no element id back from Revit is a failure)
+
+
+def test_an_import_that_hands_back_no_element_id_is_a_422_naming_the_file(world):
+    arm(world)
+    world.imported_id = None
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    path = (world.tmp / "plan.dwg").as_posix()
+    reply = call(world, handler_of(world, "interop", "/link_file/"),
+                 {"file_path": path, "mode": "import"})
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["failed"] == [
+        {"item": path, "reason": "Revit returned no element id for the imported file"}]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["element_id"] is None and reply.data["mode"] == "import"
+
+
+def test_a_link_that_hands_back_no_element_id_says_linked_in_its_reason(world):
+    arm(world)
+    world.imported_id = None
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    path = (world.tmp / "plan.dwg").as_posix()
+    reply = call(world, handler_of(world, "interop", "/link_file/"),
+                 {"file_path": path, "mode": "link"})
+    assert reply.status == 422
+    assert reply.data["outcome"]["failed"][0]["reason"] == (
+        "Revit returned no element id for the linked file")
+
+
+def test_an_import_that_returns_an_element_id_succeeds_with_the_file_path(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    path = (world.tmp / "plan.dwg").as_posix()
+    reply = call(world, handler_of(world, "interop", "/link_file/"),
+                 {"file_path": path, "mode": "import"})
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["element_id"] == 77 and reply.data["file_name"] == "plan.dwg"
+    assert reply.data["outcome"] == {"transaction_status": "Committed", "requested": 1,
+                                     "succeeded": [path], "failed": [], "revit_failures": []}
+    assert sorted(without_attribution(reply.data)) == [
+        "element_id", "file_name", "file_type", "message", "mode", "outcome", "status"]
+
+
+def test_an_unsupported_file_type_still_rolls_back_and_answers_400_without_an_outcome(world):
+    arm(world)
+    (world.tmp / "notes.txt").write_bytes(b"x")
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "interop", "/link_file/"),
+                 {"file_path": (world.tmp / "notes.txt").as_posix()})
+    assert reply.status == 400 and "Unsupported file type" in reply.data["error"]
+    assert "outcome" not in reply.data and world.kinds("commit") == []
+    assert world.kinds("rollback")
+
+
+# --- save_document (D-06: no transaction, transaction_status null)
+
+
+def test_a_save_in_place_reports_the_path_the_document_has_with_a_null_transaction_status(world):
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "document", "/save_document/"), {})
+    assert reply.status == 200 and reply.data["operation"] == "save"
+    assert reply.data["outcome"] == {"transaction_status": None, "requested": 1,
+                                     "succeeded": [ONLY_PATH], "failed": [], "revit_failures": []}
+    assert world.transactions == []
+
+
+def test_a_save_as_reports_the_path_the_document_has_after_it(world):
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    requested = (world.tmp / "asked.rvt").as_posix()
+    actual = (world.tmp / "actually.rvt").as_posix()
+
+    def lands_elsewhere(document, *args, **kwargs):
+        document._lifetime.path = actual
+
+    world.hooks[("Only", "SaveAs")] = lands_elsewhere
+    reply = call(world, handler_of(world, "document", "/save_document/"), {"file_path": requested})
+    assert reply.status == 200 and reply.data["file_path"] == actual
+    assert reply.data["outcome"]["succeeded"] == [actual]
+    assert reply.data["outcome"]["transaction_status"] is None
+    assert requested not in reply.data["outcome"]["succeeded"]
+
+
+def test_a_save_that_raises_is_a_500_with_the_document_path_as_the_failed_item(world):
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+
+    def refuses(document, *args, **kwargs):
+        raise RuntimeError("file is locked")
+
+    world.hooks[("Only", "Save")] = refuses
+    reply = call(world, handler_of(world, "document", "/save_document/"), {})
+    assert reply.status == 500 and "file is locked" in reply.data["error"]
+    assert reply.data["outcome"] == {
+        "transaction_status": None, "requested": 1, "succeeded": [],
+        "failed": [{"item": ONLY_PATH, "reason": "file is locked"}], "revit_failures": []}
+
+
+def test_a_save_as_that_raises_names_the_requested_path_as_the_failed_item(world):
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    requested = (world.tmp / "x.rvt").as_posix()
+
+    def refuses(document, *args, **kwargs):
+        raise RuntimeError("disk full")
+
+    world.hooks[("Only", "SaveAs")] = refuses
+    reply = call(world, handler_of(world, "document", "/save_document/"), {"file_path": requested})
+    assert reply.status == 500
+    assert reply.data["outcome"]["failed"] == [{"item": requested, "reason": "disk full"}]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["transaction_status"] is None
+
+
+def test_a_save_of_an_untitled_document_falls_back_to_its_title_as_the_item(world):
+    world.open(BETA, "", active=True)
+    world.tokens()
+    requested = (world.tmp / "new.rvt").as_posix()
+
+    def lands_nowhere(document, *args, **kwargs):
+        document._lifetime.path = ""
+
+    world.hooks[(BETA, "SaveAs")] = lands_nowhere
+    reply = call(world, handler_of(world, "document", "/save_document/"), {"file_path": requested})
+    assert reply.status == 200
+    assert reply.data["outcome"]["succeeded"] == [BETA]
+
+
+def test_the_never_saved_400_carries_no_outcome(world):
+    world.open(BETA, "", active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "document", "/save_document/"), {})
+    assert reply.status == 400 and "outcome" not in reply.data
 
 
 def test_export_document_reports_the_view_it_exported_and_the_document_it_came_from(world):

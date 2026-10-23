@@ -4,7 +4,7 @@ Interop Module for Revit MCP
 Handles IFC export and external file linking/importing
 """
 
-from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
+from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import clr
@@ -22,6 +22,11 @@ def register_interop_routes(api):
 
     def _export_ifc(doc, request):
         """Export the model to IFC format."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -43,6 +48,7 @@ def register_interop_routes(api):
                     status=400,
                 )
 
+            requested = 1
             ifc_version = data.get("ifc_version", "IFC2x3")
             export_base_quantities = data.get("export_base_quantities", True)
             view_name = data.get("view_name")
@@ -89,39 +95,55 @@ def register_interop_routes(api):
 
             t = DB.Transaction(doc, "Export IFC via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
-                doc.Export(output_dir or ".", file_name, ifc_options)
-                t.Commit()
+                # Document.Export answers a Boolean: False means Revit wrote no file.
+                # Reading it is what keeps a failed export from being reported as one (D-06).
+                export_ok = bool(doc.Export(output_dir or ".", file_name, ifc_options))
+                commit_result = commit_and_report(t, swallower)
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
                     t.RollBack()
                 raise tx_error
 
-            # Get file size
-            file_size_kb = 0
-            try:
-                if os.path.exists(file_path):
-                    file_size_kb = int(os.path.getsize(file_path) / 1024)
-            except Exception:
-                pass
+            if export_ok:
+                if commit_result["committed"]:
+                    succeeded.append(file_path)
+            else:
+                failed.append({"item": file_path, "reason": "Document.Export returned False"})
 
-            return routes.make_response(
-                data={
-                    "status": "success",
-                    "file_path": file_path,
-                    "file_size_kb": file_size_kb,
-                    "ifc_version": ifc_version,
-                    "message": "Exported IFC to '{}' ({} KB)".format(file_path, file_size_kb),
-                }
-            )
+            # Get file size, only for an export that Revit reported and that was kept
+            file_size_kb = 0
+            if export_ok and commit_result["committed"]:
+                try:
+                    if os.path.exists(file_path):
+                        file_size_kb = int(os.path.getsize(file_path) / 1024)
+                except Exception:
+                    pass
+
+            if export_ok:
+                message = "Exported IFC to '{}' ({} KB)".format(file_path, file_size_kb)
+            else:
+                message = "Revit's Export call returned False; no IFC was exported to '{}'".format(
+                    file_path)
+            data = {
+                "file_path": file_path,
+                "file_size_kb": file_size_kb,
+                "ifc_version": ifc_version,
+                "message": message,
+            }
+            payload, http = finalize_outcome(
+                commit_result, data, requested, succeeded, failed)
+            return routes.make_response(data=payload, status=http)
 
         except Exception as e:
             logger.error("Failed to export IFC: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/export_ifc/", methods=["POST"])
@@ -136,6 +158,11 @@ def register_interop_routes(api):
 
     def _link_file(doc, request):
         """Link or import an external file."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -157,6 +184,7 @@ def register_interop_routes(api):
                     status=500,
                 )
 
+            requested = 1
             mode = data.get("mode", "link")
             position = data.get("position")
 
@@ -166,13 +194,14 @@ def register_interop_routes(api):
 
             t = DB.Transaction(doc, "Link/Import File via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 result_id = None
 
                 if file_ext == ".rvt":
-                    # Revit link
+                    # Revit link (an .rvt is only ever linked, whatever mode was asked for)
+                    mode = "link"
                     model_path = DB.ModelPathUtils.ConvertUserVisiblePathToModelPath(file_path)
                     link_options = DB.RevitLinkOptions(False)  # not relative
                     link_result = DB.RevitLinkType.Create(doc, model_path, link_options)
@@ -222,20 +251,28 @@ def register_interop_routes(api):
                         status=400,
                     )
 
-                t.Commit()
+                if result_id is None:
+                    failed.append({
+                        "item": file_path,
+                        "reason": "Revit returned no element id for the {}ed file".format(mode),
+                    })
+                else:
+                    succeeded.append(file_path)
 
-                return routes.make_response(
-                    data={
-                        "status": "success",
-                        "element_id": result_id,
-                        "file_name": file_name,
-                        "file_type": file_type,
-                        "mode": mode,
-                        "message": "{}ed file '{}'".format(
-                            mode.capitalize(), file_name
-                        ),
-                    }
-                )
+                commit_result = commit_and_report(t, swallower)
+
+                data = {
+                    "element_id": result_id,
+                    "file_name": file_name,
+                    "file_type": file_type,
+                    "mode": mode,
+                    "message": "{}ed file '{}'".format(
+                        mode.capitalize(), file_name
+                    ),
+                }
+                payload, http = finalize_outcome(
+                    commit_result, data, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -246,7 +283,9 @@ def register_interop_routes(api):
             logger.error("Failed to link file: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/link_file/", methods=["POST"])

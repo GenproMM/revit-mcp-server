@@ -14,7 +14,7 @@ that Document after the operation.
 """
 
 from pyrevit import routes, revit, DB
-from .utils import parse_request_data
+from .utils import parse_request_data, build_outcome
 from .identity import (
     mutation_document_or_response,
     request_document_selector,
@@ -35,6 +35,24 @@ def _same_path(left, right):
         return left == right
 
 
+def _document_handle(doc, preferred=None):
+    """The item an outcome names for a save: `preferred` when given, else the path the
+    document reports now, else its title. Never raises."""
+    if preferred:
+        return preferred
+    try:
+        path = doc.PathName or ""
+    except Exception:
+        path = ""
+    if path:
+        return path
+    try:
+        title = doc.Title or ""
+    except Exception:
+        title = ""
+    return title or "document"
+
+
 def register_document_routes(api):
     """Register document persistence routes with the API."""
 
@@ -44,7 +62,12 @@ def register_document_routes(api):
         injected one). If a file_path is given (or the document has never been
         saved, e.g. it was started from a template), performs SaveAs; otherwise
         saves in place.
+
+        No transaction is opened, so every outcome here carries transaction_status null
+        (D-06): succeeded is the path the document has after the save, failed is the
+        path that could not be saved and the exception text.
         """
+        file_path = None
         try:
             if not doc:
                 return routes.make_response(
@@ -104,7 +127,11 @@ def register_document_routes(api):
                     except Exception as ws_err:
                         return routes.make_response(
                             data={"error": "Could not set worksharing save options: "
-                                           "{}".format(str(ws_err))},
+                                           "{}".format(str(ws_err)),
+                                  "outcome": build_outcome(
+                                      None, 1, [],
+                                      [{"item": _document_handle(doc, file_path),
+                                        "reason": str(ws_err)}], [])},
                             status=500,
                         )
 
@@ -136,6 +163,7 @@ def register_document_routes(api):
                         saved_at,
                         " as a central model" if as_central else "",
                     ),
+                    "outcome": build_outcome(None, 1, [_document_handle(doc)], [], []),
                 }
                 if landed_elsewhere:
                     reply["requested_file_path"] = file_path
@@ -156,12 +184,17 @@ def register_document_routes(api):
                 "operation": "save",
                 "file_path": path_on_disk,
                 "message": "Document saved",
+                "outcome": build_outcome(None, 1, [_document_handle(doc)], [], []),
             })
 
         except Exception as e:
             logger.error("save_document failed: {}".format(str(e)))
             return routes.make_response(
-                data={"error": str(e)}, status=500
+                data={"error": str(e),
+                      "outcome": build_outcome(
+                          None, 1, [],
+                          [{"item": _document_handle(doc, file_path), "reason": str(e)}], [])},
+                status=500
             )
 
     @api.route("/save_document/", methods=["POST"])

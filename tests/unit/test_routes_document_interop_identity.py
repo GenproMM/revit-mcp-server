@@ -30,6 +30,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from revit_mcp import identity
+from revit_mcp.textutils import classify_outcome
 
 IDENT = {"pid": 4242, "actual_port": 48885, "session_token": "tok-abc", "revit_version": "2024"}
 
@@ -191,7 +192,7 @@ class RouteDocument(_Touchable):
         self._world.record("attr", self, name)
         if self._world.explode:
             raise RuntimeError("document access failed: " + name)
-        hook = self._world.hooks.get((self.label, name))
+        hook = self._world.hooks.get((self.label, name)) or self._world.hooks.get((None, name))
         if hook is not None:
             return lambda *args, **kwargs: hook(self, *args, **kwargs)
         return MagicMock(name=name)
@@ -299,6 +300,10 @@ class World(object):
         self.commit_status = "Committed"
         self.break_start = set()
         self.family_load_error = None
+        self.transactions = []
+        # The element id doc.Import / doc.Link hand back through the out-reference.
+        self.imported_id = 77
+        self.sets = []
         self.app = RouteApplication(self)
         self.uiapp = RouteUIApp(self, self.app)
         self.injected = InjectedDocument(self)
@@ -343,25 +348,35 @@ def make_db(world):
             world.record("transaction", doc, name)
             self.doc = doc
             self.started = False
+            self.status = "Uninitialized"
+            world.transactions.append(self)
 
         def Start(self):
             if world.explode or getattr(self.doc, "label", None) in world.break_start:
                 raise RuntimeError("transaction could not start")
             self.started = True
+            self.status = "Started"
             world.record("start", self.doc)
 
         def Commit(self):
             world.record("commit", self.doc)
+            self.status = world.commit_status
             return world.commit_status
 
         def RollBack(self):
             world.record("rollback", self.doc)
+            self.status = "RolledBack"
+
+        def GetStatus(self):
+            # A real method, not __getattr__, so no "txattr" event is recorded and
+            # test_suppress_warnings_comes_immediately_after_start is unaffected.
+            return self.status
 
         def HasStarted(self):
             return self.started
 
         def HasEnded(self):
-            return False
+            return self.status in ("Committed", "RolledBack")
 
         def __enter__(self):
             return self
@@ -413,6 +428,11 @@ def make_db(world):
     db.IFailuresPreprocessor = IFailuresPreprocessor
     db.IFamilyLoadOptions = object
     db.TransactionStatus = types.SimpleNamespace(Committed="Committed", RolledBack="RolledBack")
+    db.StorageType = types.SimpleNamespace(String="String", Integer="Integer",
+                                           Double="Double", ElementId="ElementId")
+    # Distinguishable ids: delete_elements builds an id per input and reports it back.
+    db.ElementId = MagicMock(
+        name="DB.ElementId", side_effect=lambda value: types.SimpleNamespace(Value=int(value)))
     db.FakeList = FakeList
     return db
 
@@ -466,7 +486,12 @@ def world(monkeypatch, tmp_path):
 
     class _Reference(object):
         def __getitem__(self, _type):
-            return lambda: types.SimpleNamespace(Value=None)
+            def make():
+                # What doc.Import / doc.Link leave in the out-reference: an ElementId, or nothing.
+                imported = w.imported_id
+                value = None if imported is None else types.SimpleNamespace(Value=imported)
+                return types.SimpleNamespace(Value=value)
+            return make
 
     monkeypatch.setitem(sys.modules, "clr", types.SimpleNamespace(Reference=_Reference()))
     generic = types.ModuleType("System.Collections.Generic")
@@ -552,6 +577,54 @@ def two_documents(world, active="beta"):
     beta = world.open(BETA, "")
     world.activate(beta if active == "beta" else alpha)
     return alpha, beta, world.tokens()
+
+
+class FakeParam(object):
+    """A string parameter modify_element can write (or, read-only, cannot)."""
+
+    def __init__(self, world, read_only=False):
+        self._world = world
+        self.IsReadOnly = read_only
+        self.StorageType = "String"
+        self.value = ""
+
+    def AsString(self):
+        return self.value
+
+    def Set(self, value):
+        self._world.sets.append(value)
+        self.value = value
+        return True
+
+
+class FakeElement(object):
+    """An element GetElement answers, with the parameters it was armed with."""
+
+    def __init__(self, world, ident, params):
+        self.Id = types.SimpleNamespace(Value=ident)
+        self._params = params
+        self.Parameters = [types.SimpleNamespace(Definition=types.SimpleNamespace(Name=name))
+                           for name in params]
+
+    def LookupParameter(self, name):
+        return self._params.get(name)
+
+
+def arm(world, items=(), missing=(), read_only=False, extra_params=None):
+    """Collector results and the element GetElement answers, so a route reaches a real
+    success. ``missing`` lists element ids GetElement answers None for; every other id is
+    an element whose ``Mark`` parameter is a writable string (read-only when asked)."""
+    world.collector_items = list(items)
+
+    def get_element(doc, eid):
+        value = getattr(eid, "Value", None)
+        if value in missing:
+            return None
+        params = {"Mark": FakeParam(world, read_only=read_only)}
+        params.update(extra_params or {})
+        return FakeElement(world, value if isinstance(value, int) else 1, params)
+
+    world.hooks[(None, "GetElement")] = get_element
 
 
 ATTRIBUTION_KEYS = ("document", "process_identity")
@@ -759,7 +832,7 @@ def test_a_validation_error_after_the_guard_is_attributed_too(world, key):
 @pytest.mark.parametrize("key", list(TRANSACTING), ids=TRANSACTING_IDS)
 def test_a_guarded_success_opens_its_transaction_on_the_resolved_document(world, key):
     items, body = TRANSACTING[key]
-    world.collector_items = list(items)
+    arm(world, items)
     two_documents(world, active="beta")
     tokens = world.tokens()
     reply = call(world, handler_of(world, *key), dict(fill(world, body), document=tokens[1]))
@@ -773,7 +846,7 @@ def test_a_guarded_success_opens_its_transaction_on_the_resolved_document(world,
 @pytest.mark.parametrize("key", list(TRANSACTING), ids=TRANSACTING_IDS)
 def test_suppress_warnings_comes_immediately_after_start(world, key):
     items, body = TRANSACTING[key]
-    world.collector_items = list(items)
+    arm(world, items)
     world.open("Only", ONLY_PATH, active=True)
     world.tokens()
     call(world, handler_of(world, *key), fill(world, body))
@@ -791,7 +864,7 @@ def test_a_guarded_success_keeps_its_original_body_keys(world):
                  {"element_ids": [1]})
     assert reply.status == 200
     assert sorted(without_attribution(reply.data)) == [
-        "cascaded_ids", "deleted_count", "deleted_ids", "message", "status"]
+        "cascaded_ids", "deleted_count", "deleted_ids", "message", "outcome", "status"]
 
 
 def test_rolled_back_409_stays_an_error_and_names_the_document(world):
@@ -823,6 +896,206 @@ def test_a_transaction_error_still_rolls_back_and_names_the_document(world):
     assert reply.status == 500
     assert reply.data["document"]["title"] == "Only"
     assert world.kinds("commit") == []
+
+
+# ------------------------------------------------- outcomes (phase 4, TRUTH-01/02, D-03..D-06)
+
+# The world-wide invariants cover the rows whose modules report an outcome. Plan 04-06
+# migrates documentation and placement and widens this set until it is the whole table.
+OUTCOME_MODULES = {"editing"}
+OUTCOME_ROWS = [key for key in TRANSACTING if key[0] in OUTCOME_MODULES]
+OUTCOME_ROW_IDS = ["{}:{}".format(module, route) for module, route in OUTCOME_ROWS]
+
+
+def reach(world, key):
+    """Arm the fake so the row's route reaches a real success on the one open document."""
+    items, body = TRANSACTING[key]
+    arm(world, items)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    return fill(world, body)
+
+
+@pytest.mark.parametrize("key", OUTCOME_ROWS, ids=OUTCOME_ROW_IDS)
+def test_every_transacting_success_carries_an_outcome_that_agrees_with_its_status(world, key):
+    reply = call(world, handler_of(world, *key), reach(world, key))
+    assert reply.status in (200, 422), reply.data
+    outcome = reply.data["outcome"]
+    assert outcome["transaction_status"] == "Committed"
+    expected = classify_outcome(True, len(outcome["succeeded"]), len(outcome["failed"]))
+    assert (reply.data["status"], reply.status) == expected
+    assert reply.status == 200, "the armed row must reach a real success: {}".format(reply.data)
+
+
+@pytest.mark.parametrize("key", OUTCOME_ROWS, ids=OUTCOME_ROW_IDS)
+def test_every_transacting_rollback_is_a_409_with_nothing_succeeded(world, key):
+    body = reach(world, key)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, *key), body)
+    assert reply.status == 409, reply.data
+    assert reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == []
+
+
+@pytest.mark.parametrize("key", OUTCOME_ROWS, ids=OUTCOME_ROW_IDS)
+def test_every_transacting_500_carries_the_real_transaction_status(world, key):
+    body = reach(world, key)
+    world.break_start.add("Only")
+    reply = call(world, handler_of(world, *key), body)
+    assert reply.status == 500, reply.data
+    assert world.transactions, "the route never built a transaction"
+    assert reply.data["outcome"]["transaction_status"] == world.transactions[-1].status
+    assert reply.data["outcome"]["succeeded"] == []
+
+
+# --- delete_elements (D-05: all or nothing)
+
+
+def test_a_committed_delete_reports_every_requested_id_as_succeeded(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "editing", "/delete_elements/"), {"element_ids": [1, 2]})
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"] == {"transaction_status": "Committed", "requested": 2,
+                                     "succeeded": [1, 2], "failed": [], "revit_failures": []}
+    assert reply.data["deleted_ids"] == [1, 2] and reply.data["deleted_count"] == 2
+    assert reply.data["cascaded_ids"] == [] and reply.data["message"] == "Deleted 2 elements"
+
+
+def test_a_rolled_back_delete_is_a_409_that_names_no_deleted_id(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, "editing", "/delete_elements/"), {"element_ids": [1, 2]})
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert "deleted_ids" not in reply.data and "deleted_count" not in reply.data
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["outcome"]["requested"] == 2
+    assert reply.data["document"]["title"] == "Only"
+
+
+def test_a_missing_id_refuses_the_whole_delete_before_any_transaction(world):
+    arm(world, missing=(999,))
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "editing", "/delete_elements/"),
+                 {"element_ids": [1, 999]})
+    assert reply.status == 404 and "999" in reply.data["error"]
+    assert world.kinds("transaction") == [] and "Delete" not in world.attrs("Only")
+    assert "outcome" not in reply.data
+
+
+def test_a_delete_that_raises_midway_rolls_back_and_never_answers_partial(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+
+    def second_delete_fails(document, eid):
+        if eid.Value == 2:
+            raise RuntimeError("cannot delete 2")
+        return []
+
+    world.hooks[("Only", "Delete")] = second_delete_fails
+    reply = call(world, handler_of(world, "editing", "/delete_elements/"), {"element_ids": [1, 2]})
+    assert reply.status == 500 and "cannot delete 2" in reply.data["error"]
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data.get("status") != "partial" and world.kinds("commit") == []
+
+
+def test_a_delete_whose_transaction_cannot_start_carries_the_outcome_on_its_500(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    world.break_start.add("Only")
+    reply = call(world, handler_of(world, "editing", "/delete_elements/"), {"element_ids": [1]})
+    assert reply.status == 500 and world.kinds("commit") == []
+    assert reply.data["outcome"] == {"transaction_status": "Uninitialized", "requested": 1,
+                                     "succeeded": [], "failed": [], "revit_failures": []}
+
+
+def test_a_cascaded_delete_keeps_its_cascaded_ids_beside_the_outcome(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    world.hooks[("Only", "Delete")] = lambda document, eid: [
+        types.SimpleNamespace(Value=eid.Value), types.SimpleNamespace(Value=50)]
+    reply = call(world, handler_of(world, "editing", "/delete_elements/"), {"element_ids": [1]})
+    assert reply.status == 200
+    assert reply.data["cascaded_ids"] == [50] and reply.data["deleted_ids"] == [1]
+    assert reply.data["outcome"]["succeeded"] == [1] and "1 hosted element" in reply.data["message"]
+
+
+# --- modify_element (D-03, D-04: classified through finalize_outcome)
+
+
+def test_a_modify_where_some_parameters_fail_is_a_200_partial_naming_each_one(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "editing", "/modify_element/"),
+                 {"element_id": 1, "parameters": {"Mark": "A", "Nope": "x"}})
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    outcome = reply.data["outcome"]
+    assert outcome["succeeded"] == ["Mark"] and outcome["requested"] == 2
+    assert outcome["failed"] == [{"item": "Nope", "reason": "not found"}]
+    assert outcome["transaction_status"] == "Committed"
+    # the legacy keys stay beside the outcome (D-03)
+    assert [change["parameter"] for change in reply.data["changes"]] == ["Mark"]
+    assert [entry["parameter"] for entry in reply.data["failed"]] == ["Nope"]
+    assert reply.data["transaction_status"] == "Committed" and world.sets == ["A"]
+
+
+def test_a_modify_where_every_parameter_is_read_only_is_a_422_with_an_error(world):
+    arm(world, read_only=True)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "editing", "/modify_element/"),
+                 {"element_id": 1, "parameters": {"Mark": "A"}})
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["failed"] == [{"item": "Mark", "reason": "read-only"}]
+    assert reply.data["outcome"]["succeeded"] == [] and world.sets == []
+
+
+def test_a_modify_that_commits_every_parameter_is_a_plain_success(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "editing", "/modify_element/"),
+                 {"element_id": 1, "parameters": {"Mark": "A"}})
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"]["succeeded"] == ["Mark"] and reply.data["outcome"]["failed"] == []
+    assert sorted(without_attribution(reply.data)) == [
+        "changes", "element_id", "failed", "message", "outcome", "status", "transaction_status"]
+
+
+def test_a_rolled_back_modify_keeps_its_attempted_changes_and_gains_the_outcome(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, "editing", "/modify_element/"),
+                 {"element_id": 1, "parameters": {"Mark": "A", "Nope": "x"}})
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert [change["parameter"] for change in reply.data["attempted_changes"]] == ["Mark"]
+    outcome = reply.data["outcome"]
+    assert outcome["succeeded"] == [] and outcome["transaction_status"] == "RolledBack"
+    assert outcome["failed"] == [{"item": "Nope", "reason": "not found"}]
+    assert outcome["requested"] == 2
+
+
+def test_a_modify_whose_transaction_cannot_start_carries_the_outcome_on_its_500(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    world.break_start.add("Only")
+    reply = call(world, handler_of(world, "editing", "/modify_element/"),
+                 {"element_id": 1, "parameters": {"Mark": "A"}})
+    assert reply.status == 500
+    assert reply.data["outcome"]["transaction_status"] == "Uninitialized"
+    assert reply.data["outcome"]["succeeded"] == []
 
 
 def test_export_document_reports_the_view_it_exported_and_the_document_it_came_from(world):

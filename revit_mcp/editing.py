@@ -4,7 +4,7 @@ Editing Module for Revit MCP
 Handles element deletion, modification, and selection retrieval
 """
 
-from .utils import get_element_name, make_element_id, get_element_id_value, suppress_warnings, parse_request_data, commit_and_report
+from .utils import get_element_name, make_element_id, get_element_id_value, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, build_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
@@ -18,6 +18,11 @@ def register_editing_routes(api):
 
     def _delete_elements(doc, request):
         """Delete one or more elements from the Revit model."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -38,7 +43,11 @@ def register_editing_routes(api):
                     data={"error": "No element_ids provided"}, status=400
                 )
 
-            # Validate all elements exist before deleting
+            requested = len(element_ids)
+
+            # Validate all elements exist before deleting. All or nothing (D-05): the
+            # first missing id refuses the whole call, so a committed delete removed
+            # every requested element and there is never a partial status here.
             elements_to_delete = []
             for eid in element_ids:
                 elem_id = make_element_id(eid)
@@ -53,7 +62,7 @@ def register_editing_routes(api):
             # Delete in a single transaction
             t = DB.Transaction(doc, "Delete Elements via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 deleted_ids = []
@@ -72,7 +81,9 @@ def register_editing_routes(api):
                             if del_id_int != primary_id and del_id_int not in cascaded_ids:
                                 cascaded_ids.append(del_id_int)
 
-                t.Commit()
+                commit_result = commit_and_report(t, swallower)
+                if commit_result["committed"]:
+                    succeeded.extend(element_ids)
 
                 # Remove primary IDs from cascaded list
                 cascaded_ids = [cid for cid in cascaded_ids if cid not in deleted_ids]
@@ -87,15 +98,15 @@ def register_editing_routes(api):
                         "s" if len(cascaded_ids) != 1 else ""
                     )
 
-                return routes.make_response(
-                    data={
-                        "status": "success",
-                        "deleted_count": len(deleted_ids),
-                        "deleted_ids": deleted_ids,
-                        "cascaded_ids": cascaded_ids,
-                        "message": message,
-                    }
-                )
+                data = {
+                    "deleted_count": len(deleted_ids),
+                    "deleted_ids": deleted_ids,
+                    "cascaded_ids": cascaded_ids,
+                    "message": message,
+                }
+                payload, http = finalize_outcome(
+                    commit_result, data, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -106,7 +117,9 @@ def register_editing_routes(api):
             logger.error("Failed to delete elements: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/delete_elements/", methods=["POST"])
@@ -121,6 +134,11 @@ def register_editing_routes(api):
 
     def _modify_element(doc, request):
         """Modify parameter values on a Revit element."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        outcome_failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -147,6 +165,8 @@ def register_editing_routes(api):
                     data={"error": "No parameters provided"}, status=400
                 )
 
+            requested = len(parameters)
+
             # Find the element
             elem_id = make_element_id(element_id)
             elem = doc.GetElement(elem_id)
@@ -165,6 +185,15 @@ def register_editing_routes(api):
                 changes = []
                 failed = []
 
+                def fail(param_name, reason, available=None):
+                    # One reason text, two shapes: the legacy `failed` entry and the
+                    # D-03 outcome.failed entry (item = the parameter name).
+                    entry = {"parameter": param_name, "reason": reason}
+                    if available is not None:
+                        entry["available_parameters"] = available
+                    failed.append(entry)
+                    outcome_failed.append({"item": param_name, "reason": reason})
+
                 for param_name, new_value in parameters.items():
                     param = elem.LookupParameter(param_name)
                     if not param:
@@ -176,18 +205,11 @@ def register_editing_routes(api):
                             except Exception:
                                 continue
                         available.sort()
-                        failed.append({
-                            "parameter": param_name,
-                            "reason": "not found",
-                            "available_parameters": available[:20],
-                        })
+                        fail(param_name, "not found", available[:20])
                         continue
 
                     if param.IsReadOnly:
-                        failed.append({
-                            "parameter": param_name,
-                            "reason": "read-only",
-                        })
+                        fail(param_name, "read-only")
                         continue
 
                     # Get old value
@@ -215,10 +237,7 @@ def register_editing_routes(api):
                         elif param.StorageType == DB.StorageType.ElementId:
                             param.Set(make_element_id(new_value))
                         else:
-                            failed.append({
-                                "parameter": param_name,
-                                "reason": "unsupported storage type",
-                            })
+                            fail(param_name, "unsupported storage type")
                             continue
 
                         changes.append({
@@ -227,11 +246,9 @@ def register_editing_routes(api):
                             "new_value": str(new_value),
                             "status": "set",
                         })
+                        succeeded.append(param_name)
                     except Exception as set_err:
-                        failed.append({
-                            "parameter": param_name,
-                            "reason": "set failed: {}".format(str(set_err)),
-                        })
+                        fail(param_name, "set failed: {}".format(str(set_err)))
 
                 # t.Commit() can return TransactionStatus.RolledBack silently
                 # when _FailureSwallower vetoes an error-severity failure --
@@ -254,6 +271,9 @@ def register_editing_routes(api):
                             "failed": failed,
                             "transaction_status": commit_result["transaction_status"],
                             "failures": commit_result["failures"],
+                            "outcome": build_outcome(
+                                commit_result["transaction_status"], requested, [],
+                                outcome_failed, commit_result["failures"]),
                             "message": (
                                 "Parameter Set() calls succeeded in-transaction, "
                                 "but Revit rolled the transaction back at Commit() "
@@ -270,16 +290,16 @@ def register_editing_routes(api):
                     element_id,
                 )
 
-                return routes.make_response(
-                    data={
-                        "status": "success",
-                        "element_id": element_id,
-                        "changes": changes,
-                        "failed": failed,
-                        "transaction_status": commit_result["transaction_status"],
-                        "message": message,
-                    }
-                )
+                data = {
+                    "element_id": element_id,
+                    "changes": changes,
+                    "failed": failed,
+                    "transaction_status": commit_result["transaction_status"],
+                    "message": message,
+                }
+                payload, http = finalize_outcome(
+                    commit_result, data, requested, succeeded, outcome_failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -290,7 +310,9 @@ def register_editing_routes(api):
             logger.error("Failed to modify element: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, outcome_failed)},
+                status=500
             )
 
     @api.route("/modify_element/", methods=["POST"])

@@ -363,6 +363,77 @@ def test_unverifiable_when_the_check_itself_raises(tmp_path, monkeypatch):
         trust.INTEGRITY_UNVERIFIABLE, trust.REASON_READ_ERROR)
 
 
+# ---- share drop (WR-01)
+#
+# CPython on Windows maps ERROR_BAD_NETPATH (53) and ERROR_BAD_NET_NAME (67) to
+# errno ENOENT, so a share that drops after _manifest.json was read looks, to the
+# reader, like every listed file being absent. That must never be called tampering.
+
+
+def _network_enoent(winerror=None):
+    """An OSError with errno ENOENT, the way a dropped network path surfaces."""
+    if winerror is None:
+        error = OSError(errno.ENOENT, "gone")
+    else:
+        error = OSError(errno.ENOENT, "network path not found", None, winerror)
+    assert error.errno == errno.ENOENT
+    if os.name == "nt" and winerror is not None:
+        assert error.winerror == winerror
+    return error
+
+
+SHARE_DROP = [("enoent", None), ("winerror53", 53), ("winerror67", 67)]
+
+
+@contextlib.contextmanager
+def _share_outage(monkeypatch, make_error, failing_open, failing_listdir, record=None):
+    """The write guards plus an outage: open() and os.listdir fail from a chosen call number.
+
+    failing_open(n) / failing_listdir(n) decide, for the n-th call (counted from 1),
+    whether it raises make_error(). Only a listing of a path ending in /revit_mcp can
+    fail; every other listing is real. record, a list, receives every path open() is
+    asked for, a failed open included.
+    """
+    with _guards(monkeypatch):
+        guarded_open = builtins.open
+        real_listdir = os.listdir
+        counts = {"open": 0, "listdir": 0}
+
+        def outage_open(path, mode="r", *args, **kwargs):
+            counts["open"] += 1
+            if record is not None:
+                record.append(os.fspath(path))
+            if failing_open(counts["open"]):
+                raise make_error()
+            return guarded_open(path, mode, *args, **kwargs)
+
+        def outage_listdir(path="."):
+            counts["listdir"] += 1
+            normalized = os.fspath(path).replace("\\", "/")
+            if normalized.endswith("/revit_mcp") and failing_listdir(counts["listdir"]):
+                raise make_error()
+            return real_listdir(path)
+
+        monkeypatch.setattr(builtins, "open", outage_open)
+        monkeypatch.setattr(os, "listdir", outage_listdir)
+        yield counts
+
+
+@pytest.mark.parametrize("label,winerror", SHARE_DROP, ids=[s[0] for s in SHARE_DROP])
+def test_share_drop_after_manifest_read_is_unverifiable_absence_unconfirmed(
+        tmp_path, monkeypatch, label, winerror):
+    root = str(tmp_path / "tree")
+    _build_tree(root)
+    before = _snapshot(root)
+    with _share_outage(monkeypatch, lambda: _network_enoent(winerror),
+                       lambda n: n >= 2, lambda n: True):
+        result = integrity.check_integrity(root)
+    assert result["state"] == trust.INTEGRITY_UNVERIFIABLE, result
+    assert result["reason"] == "absence_unconfirmed", result
+    assert result["modified"] == [] and result["missing"] == [] and result["unexpected"] == []
+    assert _snapshot(root) == before
+
+
 # ---------------------------------------------------------------- dev junction
 
 

@@ -224,6 +224,25 @@ def test_unverifiable_property_never_mismatch_when_a_file_is_also_modified():
                                     trust.REASON_READ_ERROR)
 
 
+# ---- absence_unconfirmed (WR-01)
+#
+# An ENOENT is a missing file only once the reader confirmed it. An absence it could
+# not confirm arrives as observed["unconfirmed"] and is unverifiable, never a mismatch.
+
+def test_absence_unconfirmed_reason_value_is_pinned():
+    assert trust.REASON_ABSENCE_UNCONFIRMED == "absence_unconfirmed"
+
+
+def test_unverifiable_unconfirmed_absence_is_absence_unconfirmed():
+    observed = _observed(present_py=[A], unconfirmed=[B])
+    del observed["hashes"][B]
+    result = trust.evaluate_integrity(_manifest(), observed)
+    assert result["state"] == trust.INTEGRITY_UNVERIFIABLE
+    assert result["reason"] == trust.REASON_ABSENCE_UNCONFIRMED
+    assert _lists(result) == ([], [], [])
+    assert trust.mismatch_files(result) == []
+
+
 # ---------------------------------------------------------------- ordering and encoding
 
 def test_result_does_not_depend_on_input_ordering():

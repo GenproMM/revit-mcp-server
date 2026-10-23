@@ -256,6 +256,13 @@ def gate_applies(method):
 # not be read is "unverifiable", so an unreachable share can never be reported as
 # tampering. evaluate_integrity() is pure: revit_mcp/integrity.py does the reading
 # and hands it what it saw.
+#
+# An ENOENT is a missing file only when the reader confirmed it (WR-01): a share
+# that drops mid-check also answers ENOENT. An absence the reader could not confirm
+# arrives as the optional observation key "unconfirmed" and is unverifiable with
+# the reason absence_unconfirmed, a fourth unverifiable reason beside the three
+# D-13 lists. Precedence: manifest_missing, manifest_unreadable, read_error (shape
+# or unreadable), absence_unconfirmed, then mismatch or match.
 
 INTEGRITY_MATCH = "verified_match"
 INTEGRITY_MISMATCH = "verified_mismatch"
@@ -264,6 +271,7 @@ INTEGRITY_UNVERIFIABLE = "unverifiable"
 REASON_MANIFEST_MISSING = "manifest_missing"
 REASON_MANIFEST_UNREADABLE = "manifest_unreadable"
 REASON_READ_ERROR = "read_error"
+REASON_ABSENCE_UNCONFIRMED = "absence_unconfirmed"
 
 MANIFEST_SCHEMA = 1
 INTEGRITY_FAILURE_STATUS = 423
@@ -334,16 +342,22 @@ def evaluate_integrity(manifest, observed):
 
     manifest is the parsed _manifest.json or None when it is absent. observed is
     {"hashes": {relpath: sha256}, "present_py": [relpath of every revit_mcp/*.py
-    seen], "unreadable": [relpath that could not be read]}. The result is
-    {"state", "reason", "modified", "missing", "unexpected"} with sorted lists.
+    seen], "unreadable": [relpath that could not be read]} and may carry
+    "unconfirmed": [relpath whose absence the reader could not confirm]. The
+    result is {"state", "reason", "modified", "missing", "unexpected"} with sorted
+    lists.
 
     A None manifest is unverifiable/manifest_missing; a malformed manifest is
-    unverifiable/manifest_unreadable; an observation of the wrong shape, or any
-    unreadable path, is unverifiable/read_error even when other files differ
-    (an unreachable file is never a mismatch). Otherwise modified (hash differs),
-    missing (not observed) and unexpected (a .py present but not listed) decide
-    verified_mismatch versus verified_match. Underscore-prefixed .py files count:
-    they are shipped code any module can import.
+    unverifiable/manifest_unreadable; an observation of the wrong shape (a
+    non-list "unconfirmed" included), or any unreadable path, is
+    unverifiable/read_error even when other files differ (an unreachable file is
+    never a mismatch). A non-empty "unconfirmed" is unverifiable/absence_unconfirmed
+    even when another file differs: an ENOENT is a missing file only when the
+    reader confirmed it (WR-01), because a dropped share answers ENOENT too. An
+    absent or empty "unconfirmed" changes nothing. Otherwise modified (hash
+    differs), missing (not observed) and unexpected (a .py present but not listed)
+    decide verified_mismatch versus verified_match. Underscore-prefixed .py files
+    count: they are shipped code any module can import.
     """
     try:
         if manifest is None:
@@ -354,10 +368,13 @@ def evaluate_integrity(manifest, observed):
         if (not isinstance(observed, dict)
                 or not isinstance(observed.get("hashes"), dict)
                 or not isinstance(observed.get("present_py"), list)
-                or not isinstance(observed.get("unreadable"), list)):
+                or not isinstance(observed.get("unreadable"), list)
+                or not isinstance(observed.get("unconfirmed", []), list)):
             return unverifiable(REASON_READ_ERROR)
         if observed["unreadable"]:
             return unverifiable(REASON_READ_ERROR)
+        if observed.get("unconfirmed"):
+            return unverifiable(REASON_ABSENCE_UNCONFIRMED)
         hashes = observed["hashes"]
         modified = [p for p in files if p in hashes and hashes[p] != files[p]]
         missing = [p for p in files if p not in hashes]

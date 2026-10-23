@@ -114,6 +114,17 @@ headless Routes server *forever* — every later request times out until a human
 Pattern: `revit_mcp/editing.py:55-58`. The one exception: `Save`/`SaveAs` must run **outside**
 any transaction (`revit_mcp/document.py`).
 
+Keep what `suppress_warnings(t)` returns (`swallower = suppress_warnings(t)`) and commit **only**
+through `commit_and_report(t, swallower)`; a bare `t.Commit()` discards the `TransactionStatus`
+Revit returns, so a rollback reads as a success. `scripts/conventions.py` rejects a `Commit`
+attribute anywhere in `revit_mcp/` except inside `commit_and_report`, and rejects a discarded
+swallower, in the repository suite and in `scripts/intake_package.py`. Every mutating reply is then
+built with `finalize_outcome(commit_result, data, requested, succeeded, failed)` (a 500 reply uses
+`exception_outcome`). It adds an `outcome` block (`transaction_status`, `requested`, `succeeded`,
+`failed` as `{item, reason}`, `revit_failures`) and sets the status: `success` (200), `partial`
+(200), `failed` (422) or `rolled_back` (409). A validation refusal before any transaction (400,
+404, 503) carries no `outcome`.
+
 **Never touch `ElementId.Value` / `.IntegerValue` or call `DB.ElementId(int)` directly.** Use
 `get_element_id_value()` and `make_element_id()` from `revit_mcp/utils.py` — they span the
 Revit 2024–2027 API differences via try/except chains. Bare `DB.ElementId(<int>)` fails on
@@ -148,7 +159,10 @@ included — hits pyRevit's broken parse rather than the route.
 `error/failed/failure/exception`.** Every other dict is data. Do not add new implicit error
 signals to `format_response` (`tools/utils.py`) — treating status-less dicts as failures was a
 real shipped bug (commit `c1231f6`) that hid valid data behind an `=== ERROR DETAILS ===` banner;
-`tests/test_model_info_format.py` guards against its return.
+`tests/test_model_info_format.py` guards against its return. `partial` is deliberately **not** an
+error: a mixed batch is a 200 with its own `PARTIAL SUCCESS` branch in `format_response`, which
+lists the failed items and their reasons, while `failed` (422) and `rolled_back` (409) reach the
+model as errors.
 
 **Tool functions always return `str`, always via `format_response(response)`.** The transport
 coerces exceptions to `"Error: …"` strings, so a bridge result may be `dict` or `str` — never
@@ -195,7 +209,7 @@ parameter including `ctx`. `check_clashes` in `tools/clash_tools.py` is the refe
   `bridge.py` module docstring for the full statement.
 - `_revit_call` wording note: a busy queue or a failed connect says the request was not sent; a POST
   that failed after sending says the outcome is unknown.
-- Bulk routes catch per-element exceptions, `continue`, and still report `"status": "success"`; the count is the only hint that elements were skipped.
+- Bulk routes still catch per-element exceptions and `continue`, but they now list every skipped item with its reason in `outcome.failed` and answer `partial` (some succeeded) or `failed` (none did). `delete_elements` and `transform_elements` stay all-or-nothing: they either commit every requested element or roll back with a 409.
 - `/execute_code/` is unauthenticated arbitrary IronPython with full `doc`/`DB`/`clr`/`System` access. It is the de-facto fallback for missing tools — prefer promoting a snippet into a typed route.
 - `revit_mcp/colors.py` is 1246 lines (twice the next largest). Split by route before adding to it.
 - `except Exception: pass` appears 60+ times in `revit_mcp/`; when touching one, narrow it and log at warning level.

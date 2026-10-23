@@ -139,20 +139,39 @@ def register_{domain}_routes(api):
             # ЧИТАЕТЕ? Транзакцию НЕ открывать — читающий маршрут не должен
             # помечать документ изменённым.
             #
-            # ПИШЕТЕ? Только такой формой, и suppress_warnings строкой после
-            # Start(): без него штатное предупреждение Revit открывает
-            # модальное окно и вешает сервер навсегда.
+            # ПИШЕТЕ? Только такой формой. suppress_warnings строкой после
+            # Start() и ОБЯЗАТЕЛЬНО сохраните то, что он вернул: без вызова
+            # штатное предупреждение Revit открывает модальное окно и вешает
+            # сервер навсегда, а без swallower commit_and_report не назовёт,
+            # из-за чего Revit откатил транзакцию. t.Commit() самим не
+            # вызывать — проверка conventions это отклонит. Реальный
+            # TransactionStatus читает только commit_and_report.
             #
             #     t = DB.Transaction(doc, "{title} via MCP")
             #     t.Start()
-            #     suppress_warnings(t)
+            #     swallower = suppress_warnings(t)
+            #     succeeded = []
+            #     failed = []
             #     try:
-            #         ...
-            #         t.Commit()
+            #         for item in items:
+            #             try:
+            #                 ...
+            #                 succeeded.append(item)
+            #             except Exception as err:
+            #                 failed.append({{"item": item, "reason": str(err)}})
+            #         commit_result = commit_and_report(t, swallower)
             #     except Exception:
             #         if t.HasStarted() and not t.HasEnded():
             #             t.RollBack()
             #         raise
+            #     payload, http = finalize_outcome(
+            #         commit_result, {{"message": "..."}}, len(items),
+            #         succeeded, failed)
+            #     return routes.make_response(data=payload, status=http)
+            #
+            # finalize_outcome добавляет блок `outcome` и выбирает статус:
+            # success (200), partial (200), failed (422) или rolled_back (409).
+            # Во внешнем `except` ответ 500 собирайте через exception_outcome.
             #
             # Идентификаторы: get_element_id_value(elem) на чтение,
             # make_element_id(value) на создание. Никогда .IntegerValue и
@@ -160,9 +179,11 @@ def register_{domain}_routes(api):
             #
             # Имена: get_element_name(elem) — сохраняет кириллицу.
             #
-            # Много элементов? Ловите исключение на каждом, считайте пропуски
-            # и отдавайте их в ответе. "success" с молча пропущенными
-            # элементами — это баг, который здесь уже случался.
+            # Много элементов? Сбой на элементе кладите в `failed` вместе с
+            # причиной, а не в безымянный счётчик: finalize_outcome сделает
+            # ответ partial (200), failed (422) или rolled_back (409).
+            # "success" с молча пропущенными элементами — это баг, который
+            # здесь уже случался.
             # ---------------------------------------------------------------
 
             results = []
@@ -279,7 +300,10 @@ def cmd_new(args):
             "        response = await revit_post(\"/%s/\", data, ctx)" % args.domain
         )
         method = "POST"
-        suppress_import = ", make_element_id, parse_request_data, suppress_warnings"
+        suppress_import = (
+            ", make_element_id, parse_request_data, suppress_warnings,"
+            " commit_and_report, finalize_outcome"
+        )
 
     os.makedirs(os.path.join(package_dir, "revit_mcp"))
     os.makedirs(os.path.join(package_dir, "tools"))

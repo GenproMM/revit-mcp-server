@@ -75,20 +75,39 @@ def register_{domain}_routes(api):
             # Reading elements? Do NOT open a transaction -- a read-only route
             # must not dirty the document.
             #
-            # Writing? Use exactly this shape, and keep suppress_warnings on
-            # the line after Start(): without it a routine Revit warning opens
-            # a modal dialog that blocks this server forever.
+            # Writing? Use exactly this shape. Keep suppress_warnings on the
+            # line after Start() and KEEP what it returns: without the call a
+            # routine Revit warning opens a modal dialog that blocks this
+            # server forever, and without the swallower commit_and_report
+            # cannot name what Revit rolled back for. Never call t.Commit()
+            # yourself -- scripts/conventions.py rejects it. Only
+            # commit_and_report reads the real TransactionStatus.
             #
             #     t = DB.Transaction(doc, "{title} via MCP")
             #     t.Start()
-            #     suppress_warnings(t)
+            #     swallower = suppress_warnings(t)
+            #     succeeded = []
+            #     failed = []
             #     try:
-            #         ...
-            #         t.Commit()
+            #         for item in items:
+            #             try:
+            #                 ...
+            #                 succeeded.append(item)
+            #             except Exception as err:
+            #                 failed.append({{"item": item, "reason": str(err)}})
+            #         commit_result = commit_and_report(t, swallower)
             #     except Exception:
             #         if t.HasStarted() and not t.HasEnded():
             #             t.RollBack()
             #         raise
+            #     payload, http = finalize_outcome(
+            #         commit_result, {{"message": "..."}}, len(items),
+            #         succeeded, failed)
+            #     return routes.make_response(data=payload, status=http)
+            #
+            # finalize_outcome adds the `outcome` block and picks the status:
+            # success (200), partial (200), failed (422) or rolled_back (409).
+            # In the outer `except`, build the 500 reply with exception_outcome.
             #
             # Element ids: get_element_id_value(elem) to read,
             # make_element_id(value) to build. Never .IntegerValue, never
@@ -96,9 +115,11 @@ def register_{domain}_routes(api):
             #
             # Names: get_element_name(elem) -- it preserves Cyrillic.
             #
-            # Iterating many elements? Catch per element, count what you
-            # skipped, and report it. Returning "success" while silently
-            # dropping elements is a bug this repo has shipped before.
+            # Iterating many elements? A per-item failure goes into `failed`
+            # with its reason, never into a bare counter: finalize_outcome
+            # turns the reply into partial (200), failed (422) or rolled_back
+            # (409). Returning "success" while silently dropping elements is a
+            # bug this repo has shipped before.
             # ---------------------------------------------------------------
 
             results = []
@@ -254,7 +275,7 @@ def main():
         suppress_import=(
             ""
             if args.get
-            else ", make_element_id, parse_request_data, suppress_warnings"
+            else ", make_element_id, parse_request_data, suppress_warnings, commit_and_report, finalize_outcome"
         ),
         mm_constant="" if args.no_mm else "\nMM_TO_FEET = 1.0 / 304.8\n",
     )

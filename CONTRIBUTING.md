@@ -105,6 +105,19 @@ turns a silently dropped tool into a failing test and a blocked release.
   dialog that blocks the headless Routes server *forever* — every later request times
   out until a human clicks it. Pattern: `revit_mcp/editing.py`. The one exception:
   `Save`/`SaveAs` run **outside** any transaction.
+- **Keep the swallower and commit only through `commit_and_report(t, swallower)`.**
+  `swallower = suppress_warnings(t)` returns the object that collects what Revit
+  reported; discarding it leaves `outcome.revit_failures` empty for ever. A bare
+  `t.Commit()` discards the `TransactionStatus` Revit returns, so a rollback looks
+  like a success. `scripts/conventions.py` rejects both (the repository tests and
+  `scripts/intake_package.py` run it).
+- **Build every mutating reply with `finalize_outcome`.** Pass the `commit_and_report`
+  result, your own reply data, the number requested and the `succeeded` and `failed`
+  lists (`failed` entries are `{"item": ..., "reason": ...}`). The reply carries an
+  `outcome` block and a status of `success` (200), `partial` (200), `failed` (422) or
+  `rolled_back` (409). Build the 500 reply of the outer `except` with
+  `exception_outcome`. A refusal before any transaction (400, 404, 503) carries no
+  outcome.
 - **Read-only routes open no transaction at all.**
 - **Never touch `ElementId.Value` / `.IntegerValue` or call `DB.ElementId(int)`.** Use
   `get_element_id_value()` and `make_element_id()` from `revit_mcp/utils.py`. A bare
@@ -127,8 +140,9 @@ turns a silently dropped tool into a failing test and a blocked release.
   preserve non-ASCII text — Cyrillic names must survive. A fork regression once folded
   every Russian name to `?????`; `tests/unit/test_textutils.py` guards against its
   return.
-- **Batch operations report what they skipped.** Catching a per-element exception,
-  `continue`, and still returning `"status": "success"` hides real failures.
+- **Batch operations report what they skipped.** A per-element failure goes into
+  `failed` with its reason; `finalize_outcome` then answers `partial` or `failed`
+  instead of `"status": "success"` with only a count.
 
 ## Tool docstrings are the API contract
 

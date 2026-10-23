@@ -4,7 +4,7 @@ Code Execution Module for Revit MCP
 Handles direct execution of IronPython code in Revit context.
 """
 from pyrevit import routes, revit, DB
-from .utils import suppress_warnings, parse_request_data, commit_and_report
+from .utils import suppress_warnings, parse_request_data, commit_and_report, build_outcome, exception_outcome
 from .identity import process_identity_or_error
 import logging
 import sys
@@ -56,6 +56,8 @@ def register_code_execution_routes(api):
 
     def _execute_code(doc, request):
         """Execute IronPython code in Revit context (body unchanged by plan 02-15)."""
+        # Hoisted so a 500 can carry the real transaction status (D-13, D-14).
+        t = None
         try:
             # During OpenAndActivateDocument, pyRevit can invoke the route
             # once with a stale/null injected document. Prefer the current
@@ -150,6 +152,9 @@ def register_code_execution_routes(api):
                             "code_executed": code_to_execute,
                             "transaction_status": commit_result["transaction_status"],
                             "failures": commit_result["failures"],
+                            "outcome": build_outcome(
+                                commit_result["transaction_status"], None, [], [],
+                                commit_result["failures"]),
                             "message": (
                                 "The code ran without raising an exception, but "
                                 "Revit rolled the transaction back at Commit() "
@@ -171,6 +176,9 @@ def register_code_execution_routes(api):
                         ),
                         "code_executed": code_to_execute,
                         "transaction_status": commit_result["transaction_status"],
+                        "outcome": build_outcome(
+                            commit_result["transaction_status"], None, [], [],
+                            commit_result["failures"]),
                     }
                 )
 
@@ -233,6 +241,7 @@ def register_code_execution_routes(api):
                     "error_type": error_type,
                     "traceback": error_traceback,
                     "code_attempted": code_to_execute,
+                    "outcome": exception_outcome(t, None, [], []),
                 }
 
                 if partial_output:
@@ -248,7 +257,10 @@ def register_code_execution_routes(api):
 
         except Exception as e:
             logger.error("Execute code request failed: {}".format(str(e)))
-            return routes.make_response(data={"error": str(e)}, status=500)
+            reply = {"error": str(e)}
+            if t is not None:
+                reply["outcome"] = exception_outcome(t, None, [], [])
+            return routes.make_response(data=reply, status=500)
 
     @api.route("/execute_code/", methods=["POST"])
     def execute_code(uiapp, doc, request):

@@ -14,7 +14,7 @@ is roughly ten extra discipline models and ten times the memory.
 """
 
 from pyrevit import routes, DB
-from .utils import parse_request_data
+from .utils import parse_request_data, build_outcome
 from .textutils import sanitize_string, describe_broken_path
 from .identity import (
     read_live_snapshot, get_document_registry, current_descriptor, process_identity_or_error,
@@ -426,6 +426,14 @@ def register_worksharing_routes(api):
         directly is what corrupts workshared models, and a Revit Server
         central cannot be opened in place at all.
         """
+        # Hoisted so a 500 can name the requested file in its outcome (D-06).
+        file_path = None
+
+        def open_failed(text):
+            # No transaction exists around an open, so the status is null; the item is
+            # the requested file and the reason is the reply's own error text.
+            return build_outcome(None, 1, [], [{"item": file_path, "reason": text}], [])
+
         try:
             data = {}
             if request and request.data:
@@ -493,9 +501,9 @@ def register_worksharing_routes(api):
                     model_path, patterns
                 )
                 if cfg_error:
+                    error = "Could not build workset configuration: {}".format(cfg_error)
                     return routes.make_response(
-                        data={"error": "Could not build workset configuration: {}".format(
-                            cfg_error)},
+                        data={"error": error, "outcome": open_failed(error)},
                         status=500,
                     )
                 options.SetOpenWorksetsConfiguration(config)
@@ -529,6 +537,7 @@ def register_worksharing_routes(api):
                                 "error": local_report["error"],
                                 "file_path": file_path,
                                 "requested_detach": detach,
+                                "outcome": open_failed(local_report["error"]),
                             },
                             status=500,
                         )
@@ -546,19 +555,22 @@ def register_worksharing_routes(api):
                 else:
                     opened = app.OpenDocumentFile(open_path, options)
             except Exception as oe:
+                error = "Open failed: {}".format(str(oe))
                 return routes.make_response(
                     data={
-                        "error": "Open failed: {}".format(str(oe)),
+                        "error": error,
                         "file_path": file_path,
                         "requested_detach": detach,
                         "is_workshared": is_workshared,
+                        "outcome": open_failed(error),
                     },
                     status=500,
                 )
 
             if opened is None:
+                error = "Revit returned no document for {}".format(file_path)
                 return routes.make_response(
-                    data={"error": "Revit returned no document for {}".format(file_path)},
+                    data={"error": error, "outcome": open_failed(error)},
                     status=500,
                 )
 
@@ -582,6 +594,7 @@ def register_worksharing_routes(api):
                 "is_local_copy": local_report is not None,
                 # The Document Revit actually opened, read after the API call.
                 "document": _opened_document_descriptor(opened, uiapp),
+                "outcome": build_outcome(None, 1, [file_path], [], []),
             }
             if local_report:
                 result["local_path"] = local_report["local_path"]
@@ -597,7 +610,10 @@ def register_worksharing_routes(api):
 
         except Exception as e:
             logger.error("open_model failed: {}".format(str(e)))
-            return routes.make_response(data={"error": str(e)}, status=500)
+            reply = {"error": str(e)}
+            if file_path:
+                reply["outcome"] = open_failed(str(e))
+            return routes.make_response(data=reply, status=500)
 
     @api.route("/open_model/", methods=["POST"])
     def open_model(uiapp, doc, request):

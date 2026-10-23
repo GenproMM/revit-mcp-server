@@ -1301,7 +1301,7 @@ def test_open_model_opens_no_transaction_and_never_touches_the_injected_document
 def test_open_model_keeps_its_original_reply_keys_and_adds_only_identity(world, model_file):
     reply = open_model(world, {"file_path": model_file})
     original = ["activated", "audited", "detach", "document_title", "file_path", "is_central",
-                "is_local_copy", "is_workshared", "message", "requested_detach",
+                "is_local_copy", "is_workshared", "message", "outcome", "requested_detach",
                 "saved_in_version", "status", "worksets_total"]
     assert sorted(without_attribution(reply.data)) == original
     assert set(reply.data) - set(original) == {"document", "process_identity"}
@@ -1381,6 +1381,44 @@ def test_open_model_is_honest_when_the_opened_document_cannot_be_given_a_selecto
     assert reply.data["process_identity"] == IDENT
 
 
+def test_open_model_success_carries_an_outcome_with_a_null_transaction_status(world, model_file):
+    reply = open_model(world, {"file_path": model_file})
+    assert reply.status == 200, reply.data
+    assert reply.data["outcome"] == {"transaction_status": None, "requested": 1,
+                                     "succeeded": [model_file], "failed": [], "revit_failures": []}
+    assert world.kinds("transaction") == []
+
+
+def test_open_model_open_failure_names_the_requested_file_and_the_reason_in_the_outcome(
+        world, model_file):
+    world.open_error = "file is locked"
+    reply = open_model(world, {"file_path": model_file})
+    assert reply.status == 500 and "document" not in reply.data
+    assert reply.data["outcome"] == {
+        "transaction_status": None, "requested": 1, "succeeded": [],
+        "failed": [{"item": model_file, "reason": "Open failed: file is locked"}],
+        "revit_failures": []}
+
+
+def test_open_model_that_returns_no_document_is_a_failed_item_in_the_outcome(world, model_file):
+    world.open_returns_none = True
+    reply = open_model(world, {"file_path": model_file})
+    assert reply.status == 500 and "document" not in reply.data
+    (entry,) = reply.data["outcome"]["failed"]
+    assert entry["item"] == model_file and "returned no document" in entry["reason"]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["transaction_status"] is None
+
+
+def test_open_model_validation_and_missing_file_replies_carry_no_outcome(world, tmp_path):
+    missing = open_model(world, {})
+    assert missing.status == 400 and "outcome" not in missing.data
+    absent = open_model(world, {"file_path": str(tmp_path / "nope.rvt")})
+    assert absent.status == 404 and "outcome" not in absent.data
+    bad = open_model(world, {"file_path": str(tmp_path), "detach": "sideways"})
+    assert "outcome" not in bad.data
+
+
 def test_open_model_source_still_configures_worksets_and_never_reads_host_app():
     source = (REPO / "revit_mcp" / "worksharing.py").read_text(encoding="utf-8")
     assert "SetOpenWorksetsConfiguration" in source and "DetachFromCentralOption" in source
@@ -1443,7 +1481,8 @@ def test_execute_code_succeeds_with_the_exception_notice_and_no_attribution(worl
     assert reply.status == 200
     assert_exception_labelled(world, reply)
     assert set(reply.data) == {"status", "description", "output", "code_executed",
-                               "transaction_status", "document_scope", "process_identity"}
+                               "transaction_status", "outcome", "document_scope",
+                               "process_identity"}
 
 
 def test_execute_code_error_reply_carries_the_notice_and_no_attribution(world):
@@ -1463,6 +1502,51 @@ def test_execute_code_rollback_stays_a_409_error_and_carries_the_notice(world):
     assert "No changes were saved" in reply.data["message"]
     assert reply.data["transaction_status"] == "RolledBack"
     assert_exception_labelled(world, reply)
+
+
+def test_execute_code_success_carries_an_outcome_with_the_real_transaction_status(world):
+    world.open("Only", ONLY_PATH, active=True)
+    reply = run_code(world)
+    assert reply.status == 200
+    assert reply.data["outcome"] == {"transaction_status": "Committed", "requested": None,
+                                     "succeeded": [], "failed": [], "revit_failures": []}
+
+
+def test_execute_code_rollback_outcome_says_rolled_back_and_keeps_its_409_body(world):
+    world.open("Only", ONLY_PATH, active=True)
+    world.commit_status = "RolledBack"
+    reply = run_code(world)
+    assert reply.status == 409
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["requested"] is None
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["outcome"]["failed"] == []
+    assert reply.data["outcome"]["revit_failures"] == reply.data["failures"]
+    assert reply.data["code_executed"] == CODE["code"]
+
+
+def test_execute_code_error_outcome_carries_the_status_after_the_rollback(world):
+    world.open("Only", ONLY_PATH, active=True)
+    reply = run_code(world, {"code": "raise ValueError('boom')", "description": "bad"})
+    assert reply.status == 500 and reply.data["status"] == "error"
+    assert reply.data["outcome"] == {"transaction_status": "RolledBack", "requested": None,
+                                     "succeeded": [], "failed": [], "revit_failures": []}
+
+
+def test_execute_code_outcome_never_carries_the_code_the_output_or_the_traceback(world):
+    world.open("Only", ONLY_PATH, active=True)
+    for body in ({"code": "print('secret-output')", "description": "d"},
+                 {"code": "raise ValueError('secret-boom')", "description": "d"}):
+        reply = run_code(world, body)
+        rendered = json.dumps(reply.data["outcome"])
+        assert "secret" not in rendered and "print(" not in rendered and "Traceback" not in rendered
+
+
+def test_execute_code_early_errors_carry_no_outcome(world):
+    world.open("Only", ONLY_PATH, active=True)
+    empty = run_code(world, {"code": "", "description": "none"})
+    assert empty.status == 400 and "outcome" not in empty.data
+    bad = run_code(world, request=types.SimpleNamespace(data=b"{not json"))
+    assert bad.status == 500 and "outcome" not in bad.data
 
 
 def test_execute_code_early_error_replies_carry_the_notice_too(world):

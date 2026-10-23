@@ -241,6 +241,17 @@ parameter including `ctx`. `check_clashes` in `tools/clash_tools.py` is the refe
 - `README.md` — user setup, pyRevit install, full tool catalogue
 - `LLM.txt` — long-form background; note its directory layout predates the current flat layout
 
+## Release checkpoints (GSD)
+
+Релизы не готовятся параллельно с фазами — они предлагаются на границе фазы. Когда фаза
+стала Complete (verify-work пройден или пользователь закрыл её решением), **до** перехода к
+следующей фазе (`/gsd-next`, `/gsd-progress`, `/gsd-plan-phase N+1`) прочитай
+`.planning/RELEASES.md`, найди чекпоинт этой фазы (поле **Release checkpoint** в ROADMAP.md)
+и через `AskUserQuestion` предложи: готовить релиз сейчас / отложить / пропустить.
+Ответ запиши в Ledger в RELEASES.md. Предложение — не разрешение: `publish-extension.cmd`,
+`build-payload.cmd`, push и тег запускает только пользователь. Если чекпоинт фазы уже
+предложен, повторно не спрашивай.
+
 ## Obsidian Knowledge Vault
 Хранилище знаний: .\rvt-mcp_Obsidian
 ### При старте сессии

@@ -8,8 +8,9 @@ starts with the fully CPython-testable serialization and configurable-port work,
 live identity, two-listener refusal and multi-document addressing forward as early as their
 dependencies allow — so an engineer can work with several documents, including documents in
 different Revit instances, in one assistant session — then builds the secret/integrity logic
-and honest per-route outcomes, wires the secret gate and integrity check live, and finishes
-with a structured audit log built on top of outcomes that are, by that point, already honest.
+and honest per-route outcomes, wires the secret gate and integrity check live, builds
+a structured audit log on top of outcomes that are, by that point, already honest, and then
+adds repository-owned mutation policies and human approval without changing Hermes Fork.
 Two hard orderings shape this sequence: `commit_and_report`/honest-batch-reporting must
 exist before the audit log is built on it (an audit log built earlier would faithfully
 record the same false successes it exists to expose), and configurable-port plus
@@ -24,6 +25,9 @@ instead of one, and the `startup.py` chokepoint is touched twice.
 
 ## Phases
 
+
+**Releases:** Phases 3–7 each carry a **Release checkpoint**. When a phase closes, offer the release before routing to the next phase — protocol, checklist and ledger in `.planning/RELEASES.md`.
+
 **Phase Numbering:**
 
 - Integer phases (1, 2, 3): Planned milestone work
@@ -37,6 +41,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 4: Honest outcomes on every mutating route** - Every mutating route, including the two known stragglers, reports what actually happened in Revit rather than an assumed success
 - [ ] **Phase 5: Live secret gate and integrity enforcement** - The Phase 3 secret gate and integrity check are wired into the live chokepoint and binding
 - [ ] **Phase 6: Structured audit log of true outcomes** - Every mutation lands in a local, rotation-capped JSONL log carrying the same honest outcome the client saw, without leaking the secret
+- [ ] **Phase 7: Repository-owned mutation safety and human approval** - Редактируемые правила, объяснение риска и одноразовое подтверждение опасных операций реализованы в этом репозитории; Hermes Fork не изменяется, Jev необязателен и не ослабляет правила
 
 ## Phase Details
 
@@ -105,6 +110,7 @@ Plans:
 ### Phase 3: Secret gate and payload integrity (unit-verified)
 
 **Goal**: The logic that will reject an unauthenticated mutation and detect a tampered `revit_mcp/` payload exists, is correct on both runtimes per the unit-test suite, and is generated consistently by the build pipeline — but is not yet wired into a live route. This phase's output is inert by design (ARCHITECTURE.md's build-before-wiring ordering): live enforcement is Phase 5's job.
+**Release checkpoint**: R1 — on phase close, offer a release bundling Phases 1–3 (Phases 1–2 were never shipped); the Phase 3 code ships dormant. See `.planning/RELEASES.md`.
 **Depends on**: Nothing (parallel to Phases 1–2, different runtimes/files)
 **Requirements**: SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, INTG-01, INTG-02, INTG-03, INTG-04, INTG-05, INTG-06, INTG-07, INTG-08
 **Success Criteria** (what must be TRUE):
@@ -123,6 +129,7 @@ Plans:
 ### Phase 4: Honest outcomes on every mutating route
 
 **Goal**: Every mutating route reports what Revit actually did — including partial batch failure and rollback — never an assumed or collapsed success. This is a hard prerequisite for Phase 6's audit log, not parallel work: an audit log built against routes that still collapse partial failure into `status: success` would faithfully record the same lie it exists to expose.
+**Release checkpoint**: R2 — on phase close, offer a release; mutation response shape changes. See `.planning/RELEASES.md`.
 **Depends on**: Nothing (independent of Phases 1–3 and 5; must complete before Phase 6)
 **Requirements**: TRUTH-01, TRUTH-02, TRUTH-03, TRUTH-04
 **Success Criteria** (what must be TRUE):
@@ -137,6 +144,7 @@ Plans:
 ### Phase 5: Live secret gate and integrity enforcement
 
 **Goal**: The secret gate and integrity check built in Phase 3 are wired into the live request chokepoint in `startup.py` (the same one Phase 2 uses for identity) and become binding. This is a live-Revit restart-per-iteration phase.
+**Release checkpoint**: R3 — on phase close, offer a PILOT-FIRST release (one-way door: unauthenticated mutations start failing). Plan the mixed-version rollout order (Revit half at next Revit restart, CPython half at next logon) and the Revit-half rollback during planning of this phase, not at release time. See `.planning/RELEASES.md`.
 **Depends on**: Phase 2 (live chokepoint), Phase 3 (secret/integrity logic to wire in)
 **Requirements**: live enforcement of SEC-01..08 and INTG-01..08 (traced to Phase 3, where the logic is built; they become user-observably true here)
 **Success Criteria** (what must be TRUE):
@@ -150,6 +158,7 @@ Plans:
 ### Phase 6: Structured audit log of true outcomes
 
 **Goal**: Every mutation is recorded in a local, structured, honest log — reflecting Phase 4's real per-element outcomes, not the request's stated intent — without becoming a second place the shared secret leaks. Deliberately last: both research documents agree this is the single highest-value ordering decision in the milestone.
+**Release checkpoint**: R4 — on phase close, offer a release. See `.planning/RELEASES.md`.
 **Depends on**: Phase 4 (honest outcomes to log), Phase 2 (identity fields to include in each entry), Phase 5 (live secret, so the no-leak check is meaningful)
 **Requirements**: AUDIT-01, AUDIT-02, AUDIT-03, AUDIT-04, AUDIT-05, AUDIT-06, AUDIT-07, AUDIT-08
 **Success Criteria** (what must be TRUE):
@@ -164,11 +173,35 @@ Plans:
 
 **Plans**: TBD
 
+### Phase 7: Repository-owned mutation safety and human approval
+
+**Goal:** Инженер получает понятное объяснение риска и подтверждает конкретную опасную операцию до её выполнения. Вся логика безопасности принадлежит revit-mcp-server (CPython + Revit extension), правила корректируются без изменения кода, Hermes Fork не требует доработок. Jev — необязательный семантический классификатор, не источник разрешения и не замена детерминированным правилам.
+**Release checkpoint:** R5 = v0.1 — при закрытии фазы предложить PILOT-FIRST релиз и закрытие milestone (`/gsd-complete-milestone`). См. `.planning/RELEASES.md`.
+**Depends on:** Phase 6; использует identity/addressing Phase 2, honest outcomes Phase 4 и live authentication/integrity Phase 5, не создавая параллельных механизмов
+**Requirements**: TBD — формализовать при планировании по 07-CONTEXT.md; новые идентификаторы требований пока не назначены
+**Context**: `phases/07-repository-owned-mutation-safety-and-human-approval/07-CONTEXT.md`
+**Research inputs**: `phases/07-repository-owned-mutation-safety-and-human-approval/07-RESEARCH-NOTES.md` (исследование сессии, не завершённая проверка реализации)
+**Success Criteria** (what must be TRUE):
+
+  1. Правила и обязательное enforcement находятся только в этом репозитории; read-only интеграционная проверка использует неизменённый Hermes. Несовместимый или отсутствующий канал подтверждения блокирует защищённую операцию, а не принимает сообщение агента или `approved=true`.
+  2. Валидируемая локальная политика классифицирует все доступные инструменты/маршруты, включая альтернативные пути мутации; неизвестный путь не получает неявного разрешения. Подтверждение охватывает перезапись параметров, удаление, трансформации и фактические пути создания общих параметров; ограничения instance/type и каскадного охвата явно видны человеку.
+  3. Одноразовое разрешение связано с нормализованными аргументами, выбранными процессом/документом, версией политики и сроком; оно проверяется до эффекта и атомарно потребляется. Повтор, изменение аргументов/документа, restart, отказ и timeout не разрешают мутацию. Прямой вызов защищённого HTTP-маршрута без надлежащего разрешения отклоняется до эффекта, а не только на MCP-стороне.
+  4. Ошибочная/отсутствующая политика и недоступность Jev не ослабляют обязательные правила. Hot reload атомарен; первая невалидная конфигурация блокирует защищённые операции, невалидное обновление сохраняет последнюю валидную версию с диагностикой. Ожидающее разрешение не переживает применённую смену политики.
+  5. Повторная доставка не выполняет одну разрешённую мутацию дважды; журнал и ответ различают отказ, expiry, committed, rolled_back, partial и unknown, не выдавая подтверждение за успешное выполнение. После неизвестного результата автоматического повтора нет; гарантия при новом запросе клиента описана отдельно и не завышена.
+  6. Оба execute-code пути сохраняют явный статус доверенного произвольного кода по D-15, без скрытого отключения и без обещания sandbox/полной confinement. Перед заявлением о защите всех операций зафиксированы границы обхода через arbitrary code, ОС-доступ и cross-process handler overlap (backlog 999.1).
+  7. Офлайн негативные/конкурентные тесты и отдельно разрешённый live bench подтверждают контракт. Изменения Revit extension проверяются после полного restart, не Reload; ни принятие фазы, ни создание этих материалов не разрешает live-операции или внешнюю передачу BIM-данных.
+
+**Plans:** 0 plans — фаза добавлена, декомпозиция и проверка совместимости ещё не выполнены
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 7 to break down)
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
-(Phase 2 requires Phase 1. Phases 3 and 4 have no dependency on 1–2 and may be interleaved. Phase 5 requires Phases 2 and 3. Phase 6 requires Phases 2, 4 and 5.)
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
+(Phase 2 requires Phase 1. Phases 3 and 4 have no dependency on 1–2 and may be interleaved. Phase 5 requires Phases 2 and 3. Phase 6 requires Phases 2, 4 and 5. Phase 7 builds on Phases 2, 4, 5 and 6; backlog 999.1 remains a separate acceptance concern for cross-process guarantees.)
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -178,6 +211,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 4. Honest outcomes on every mutating route | 0/TBD | Not started | - |
 | 5. Live secret gate and integrity enforcement | 0/TBD | Not started | - |
 | 6. Structured audit log of true outcomes | 0/TBD | Not started | - |
+| 7. Repository-owned mutation safety and human approval | 0/TBD | Not planned | - |
 
 ## Backlog
 

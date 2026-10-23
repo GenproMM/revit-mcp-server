@@ -72,6 +72,16 @@ The `revit_mcp/` folder and `startup.py` need to run inside Revit via pyRevit.
 
 ### Step 3: Activate pyRevit Routes
 
+If another MCP is already installed, preserve its extension, client entry and
+shared Routes settings. Our API and Python package are `genpro_revit_mcp`, loaded
+from our adjacent `revit_mcp/` directory. Do not replace the other extension's
+`revit_mcp` package. Reuse the existing loopback port (set `REVIT_PORT` for our
+server if it is not 48884). Shared runtime/Routes changes need agreement with
+the other extension's owner. Use both MCPs sequentially: namespace isolation
+does not fix pyRevit's shared concurrent-request dispatcher.
+
+For a new pyRevit setup only:
+
 1. In Revit, go to pyRevit tab > Settings
 2. Navigate to Routes > activate **Routes Server**
 3. pyRevit will start listening on `http://localhost:48884/`
@@ -81,7 +91,7 @@ The `revit_mcp/` folder and `startup.py` need to run inside Revit via pyRevit.
 Open a browser and go to:
 
 ```
-http://localhost:48884/revit_mcp/status/
+http://127.0.0.1:48884/genpro_revit_mcp/status/
 ```
 
 You should see:
@@ -92,7 +102,7 @@ You should see:
   "health": "healthy",
   "revit_available": true,
   "document_title": "your_project_name",
-  "api_name": "revit_mcp"
+  "api_name": "genpro_revit_mcp"
 }
 ```
 

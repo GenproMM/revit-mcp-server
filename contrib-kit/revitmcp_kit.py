@@ -36,7 +36,7 @@ except ImportError:
     )
     raise SystemExit(2)
 
-BRIDGE = "http://127.0.0.1:48884/revit_mcp"
+BRIDGE = "http://127.0.0.1:48884/genpro_revit_mcp"
 
 IDENT_HINT = "только строчные латинские буквы, цифры и подчёркивание"
 
@@ -394,10 +394,12 @@ class _FakeAPI(object):
 
 # Ваш маршрут импортирует хелперы относительно (from .utils import ...), а
 # относительный импорт работает только внутри настоящего пакета -- поэтому
-# сначала грузим сам revit_mcp (extension root уже на sys.path благодаря
-# pyRevit) и исполняем код с __package__, указывающим на него.
-import revit_mcp as _revit_mcp_pkg
-_ns = {{"__package__": "revit_mcp", "__name__": "revit_mcp._contrib_probe"}}
+# используем только наш пакет, уже загруженный startup.py под уникальным именем.
+# Если его нет, проба отказывает, а не импортирует пакет чужого расширения.
+import sys as _sys
+if "genpro_revit_mcp" not in _sys.modules:
+    raise ImportError("Our extension package is not loaded; fully restart Revit")
+_ns = {{"__package__": "genpro_revit_mcp", "__name__": "genpro_revit_mcp._contrib_probe"}}
 exec(_src, _ns)
 
 _api = _FakeAPI()

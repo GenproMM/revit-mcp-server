@@ -8,7 +8,7 @@ revit_mcp/<domain>.py exposing a register_<domain>_routes callable is
 registered automatically. Adding a capability therefore touches no shared
 file, which also keeps this module out of every merge with upstream.
 
-Discovery uses os.listdir rather than pkgutil: this runs under IronPython 2.7
+Discovery uses os.listdir rather than pkgutil: this runs under IronPython
 and the extension is frequently loaded over a UNC share, where a plain
 directory listing is the predictable option.
 
@@ -21,17 +21,46 @@ from pyrevit import routes
 import logging
 import os
 import re
+import sys
+import types
 
 logger = logging.getLogger(__name__)
 
-# Initialize the main API. The namespace is a deployment contract: the sibling
-# GenproMCP extension declares routes.API('genpro_mcp') so the two coexist on
-# port 48884 without colliding.
-api = routes.API("revit_mcp")
+# Both names belong to this extension, not another vendor's revit_mcp fork.
+api = routes.API("genpro_revit_mcp")
 
-_PACKAGE = "revit_mcp"
+_PACKAGE = "genpro_revit_mcp"
 
 _REGISTRAR = re.compile(r"^register_\w+_routes$")
+
+
+def _load_package():
+    """Load our source tree under an owned name without importing revit_mcp.
+
+    pyRevit can share a module table/search path with other extensions. Relative
+    sibling imports stay inside this alias; never replace a foreign module.
+    """
+    directory = os.path.realpath(os.path.join(os.path.dirname(__file__), "revit_mcp"))
+    existing = sys.modules.get(_PACKAGE)
+    if existing is not None:
+        paths = getattr(existing, "__path__", [])
+        if len(paths) != 1 or os.path.normcase(os.path.realpath(paths[0])) != os.path.normcase(directory):
+            raise ImportError("Our package alias has a conflicting path: {}".format(paths))
+        return existing
+    package = types.ModuleType(_PACKAGE)
+    package.__file__ = os.path.join(directory, "__init__.py")
+    package.__path__ = [directory]
+    package.__package__ = _PACKAGE
+    sys.modules[_PACKAGE] = package
+    try:
+        with open(package.__file__, "rb") as source:
+            code = source.read().decode("utf-8-sig").replace("\r\n", "\n")
+        exec(compile(code, package.__file__, "exec"), package.__dict__)
+    except Exception:
+        if sys.modules.get(_PACKAGE) is package:
+            del sys.modules[_PACKAGE]
+        raise
+    return package
 
 
 def _domain_modules(package):
@@ -82,8 +111,8 @@ def register_routes():
     # Imported here, not at module top, matching the convention this file has
     # always followed: everything under revit_mcp/ is imported inside the
     # register function.
-    import revit_mcp
-    from revit_mcp import registry
+    package = _load_package()
+    registry = __import__("{}.registry".format(_PACKAGE), fromlist=["registry"])
 
     registry.reset()
 
@@ -96,7 +125,7 @@ def register_routes():
         registry.FAILED["identity"] = "{}: {}".format(type(exc).__name__, str(exc))
         logger.exception("Failed to initialize process identity")
 
-    for name in _domain_modules(revit_mcp):
+    for name in _domain_modules(package):
         try:
             module = __import__("{}.{}".format(_PACKAGE, name), fromlist=[name])
             registrar = _registrar_in(module)

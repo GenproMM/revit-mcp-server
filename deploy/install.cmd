@@ -6,8 +6,8 @@ rem      \\srv-dfs\BIM\RevitMCP\install\install.cmd
 rem
 rem  Everything lands in the user's profile. No admin rights, no UAC prompt.
 rem
-rem  Steps: mirror payload -> configure pyRevit (via pyrevit.exe only) ->
-rem         register with Hermes -> schedule updates -> add a shortcut.
+rem  Steps: mirror payload -> check shared Routes -> register OUR extension ->
+rem         show manual Hermes setup -> schedule updates -> add a shortcut.
 rem ===========================================================================
 setlocal enabledelayedexpansion
 
@@ -61,18 +61,7 @@ if not exist "%SHARE%\payload\VERSION" (
     goto :fail
 )
 
-rem --- 0. Hermes must be closed --------------------------------------------
-rem Hermes reads config.yaml at startup and can write it back from its own
-rem settings UI, which would silently discard our entry. Asking up front turns
-rem a confusing half-finished install into one clear instruction.
-:checkhermes
-tasklist /FI "IMAGENAME eq hermes.exe" 2>nul | find /i "hermes.exe" >nul
-if errorlevel 1 goto :hermesclosed
-echo  Hermes Agent is running. Please close it completely, then press any key.
-echo  ^(Its config file has to be edited while it is not holding it.^)
-pause >nul
-goto :checkhermes
-:hermesclosed
+rem Hermes configuration is manual. Never rewrite an existing MCP entry here.
 
 rem --- 1. payload ----------------------------------------------------------
 echo  [1/6] Copying the server and its dependencies...
@@ -116,46 +105,20 @@ if not defined PYREVIT (
 )
 echo        cli: !PYREVIT!
 
-rem An older copy in the user's own Extensions folder would be a second
-rem extension calling routes.API("revit_mcp"); one silently wins. Rename
-rem rather than delete -- reversible, and pyRevit ignores the new name.
-for %%o in (revit-mcp-server.extension revit-mcp-python.extension mcp-server-for-revit-python.extension) do (
-    if exist "%APPDATA%\pyRevit\Extensions\%%o" (
-        echo        retiring old local copy: %%o
-        move /y "%APPDATA%\pyRevit\Extensions\%%o" "%APPDATA%\pyRevit\Extensions\%%o.retired" >nul 2>&1
-    )
+rem Shared Routes belongs to every extension. Read settings, never rewrite them.
+"%MCP_PYEXE%" "%~dp0check_routes_config.py"
+if errorlevel 1 goto :fail
+
+rem A same-name local installation needs an explicit migration decision.
+rem Never move it or guess that another vendor's extension is obsolete.
+if exist "%APPDATA%\pyRevit\Extensions\revit-mcp-server.extension" (
+    echo  ERROR: an existing revit-mcp-server.extension needs manual path review.
+    echo  No extension was moved or disabled. Ask the maintainer before migrating.
+    goto :fail
 )
 
-"!PYREVIT!" configs routes enable >nul 2>&1
-"!PYREVIT!" configs routes port 48884 >nul 2>&1
-rem coreapi is deliberately NOT enabled: it exposes pyRevit's own API surface
-rem for no benefit here.
-rem Unregister the retired share root before adding the current one. The old
-rem root sat inside \\srv-dfs\BIM\01_Ресурсы плагинов, a git repository owned by
-rem the domain admins: pyRevit opens every registered extension path as a repo,
-rem libgit2 climbs to that .git, and the ownership check throws
-rem   "repository path '//srv-dfs/BIM/01_Ресурсы плагинов' is not owned by
-rem    current user"
-rem in the user's face. Adding the new path does not remove the old one, so a
-rem machine installed before 2026-09-09 would keep the fault after moving.
-rem
-rem The path is never spelled out here. The folder above it is Cyrillic, cmd
-rem parses this file in the console codepage (866 on a Russian Windows, and a
-rem double-click always gives us that), so a literal would arrive mangled and
-rem the forget would silently miss. Instead the exact string is read back from
-rem pyRevit's own config -- where it is already correctly encoded -- and matched
-rem on its ASCII segment. Reading that file is fine; only writing it by hand is
-rem forbidden, and the forget itself still goes through pyrevit.exe.
-rem "pyrevit extensions paths" with no argument prints usage, not the list,
-rem which is why the config is the source here.
-rem Drop this block once every workstation has re-run the installer.
-rem The whole match-and-forget runs inside Python: the path must never round
-rem trip through a cmd variable, because that is where the console codepage
-rem would mangle it. Python holds the string and hands it straight to
-rem pyrevit.exe as an argv element.
-"%MCP_PYEXE%" "%~dp0forget_retired_path.py" "!PYREVIT!" 827_RevitMCP
-
 "!PYREVIT!" extensions paths add "%EXTPATH%" >nul 2>&1
+if errorlevel 1 goto :fail
 
 rem Clear a stale disable. pyRevit reads default_enabled only the FIRST time it
 rem sees an extension and keys the config section by folder name -- which has
@@ -169,49 +132,14 @@ rem server. Verified on the first pilot machine. publish-extension.cmd guards
 rem the other half of this -- what we publish -- but nothing else undoes what a
 rem previous version already wrote here.
 "!PYREVIT!" extensions enable revit-mcp-server >nul 2>&1
-rem GenproMCP is retired by this install: this server supersedes it.
-rem
-rem NOT because of a route-name collision -- the comment that used to say so
-rem was wrong. GenproMCP declares routes.API('genpro_mcp') and this extension
-rem declares routes.API("revit_mcp"), so they would coexist on 48884 quite
-rem happily. It is disabled because the decision is one server, one namespace,
-rem one deployment channel -- not because it would break anything.
-rem
-rem KNOWN GAP, accepted deliberately: open_revit_server_model has not been
-rem ported yet, so from this install until that port ships there is no way to
-rem open an RSN:// model in the background with #_RVT_LINK worksets closed.
-rem The BIM audit workflow opens those models by hand in the meantime. Close
-rem the gap by porting the operation (ExternalEvent controller, dialog
-rem watchdog, operation state machine) into revit_mcp/.
-"!PYREVIT!" extensions disable GenproMCP >nul 2>&1
-"!PYREVIT!" extensions disable GenproMCP.extension >nul 2>&1
-echo        routes enabled on 48884, extension path registered, extension enabled
-echo        GenproMCP disabled (superseded; see the note in install.cmd)
-
-rem Read-only sanity check. Routes must stay on loopback: /execute_code/ is
-rem unauthenticated arbitrary IronPython with full doc/DB/clr access, and
-rem 127.0.0.1 is the only thing containing it.
-findstr /i /c:"host = \"127.0.0.1\"" "%APPDATA%\pyRevit\pyRevit_config.ini" >nul 2>&1
-if errorlevel 1 (
-    echo(
-    echo        WARNING: could not confirm [routes] host = "127.0.0.1".
-    echo        Verify it before using this on a shared network. The route
-    echo        /execute_code/ is unauthenticated remote code execution.
-    echo(
-)
+if errorlevel 1 goto :fail
+echo        OUR extension path registered and enabled; other extensions unchanged
 
 rem --- 3. Hermes -----------------------------------------------------------
-echo  [3/6] Registering the MCP server with Hermes Agent...
-rem No PYTHONPATH: the embeddable interpreter ignores it. configure_hermes.py
-rem puts its own install-libs\ on sys.path instead.
-"%MCP_PYEXE%" "%DEST%\current\configure_hermes.py" --root "%DEST%\current" --python "%MCP_PYEXE%"
-set "HRC=%errorlevel%"
-if not "%HRC%"=="0" (
-    echo(
-    echo        Hermes config was NOT written automatically ^(see above^).
-    echo        Everything else is installed; finish that step by hand.
-    echo(
-)
+echo  [3/6] Manual MCP registration required; Hermes config was not changed.
+echo        Follow USER-GUIDE.md in Hermes UI. Do not replace another MCP entry.
+echo        Keep its command, environment and enabled state unchanged.
+echo        Use the shared Routes port reported above as OUR REVIT_PORT.
 
 rem --- 4. automatic updates at logon ---------------------------------------
 rem Task Scheduler is the better trigger (it can wait for the network), but on
@@ -230,7 +158,7 @@ if defined SCHEDULED (
     del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\RevitMCP Update.lnk" 2>nul
 ) else (
     echo        no rights for Task Scheduler; using the Startup folder instead
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    powershell -NoProfile -Command ^
       "try {" ^
       "  $p = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\RevitMCP Update.lnk';" ^
       "  $w = New-Object -ComObject WScript.Shell;" ^
@@ -246,7 +174,7 @@ if defined SCHEDULED (
 
 rem --- 5. shortcut ---------------------------------------------------------
 echo  [5/6] Adding a manual-update shortcut...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+powershell -NoProfile -Command ^
   "try {" ^
   "  $dir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs';" ^
   "  $w = New-Object -ComObject WScript.Shell;" ^
@@ -268,10 +196,11 @@ echo(
 echo   Two things left, both one-time:
 echo(
 echo     1. Restart Revit completely ^(not pyRevit Reload^), open a model,
-echo        then check http://localhost:48884/revit_mcp/status/ in a browser.
-echo        It should return JSON.
+echo        then check http://127.0.0.1:PORT/genpro_revit_mcp/status/ in a browser.
+echo        Replace PORT with the shared Routes port reported above.
+echo        It should return JSON with api_name = genpro_revit_mcp.
 echo(
-echo     2. Restart Hermes Agent, or run /reload-mcp in it.
+echo     2. Register OUR server manually in Hermes UI, then reload its MCP tools.
 echo(
 echo   Updates arrive on their own from now on: they are fetched a few minutes
 echo   after you log on, and the Revit half refreshes whenever Revit restarts.
@@ -281,7 +210,8 @@ exit /b 0
 
 :fail
 echo(
-echo  Installation aborted. Nothing was left half-configured.
+echo  Installation stopped. Earlier completed steps may remain; see output above.
+echo  No other extension was retired or disabled; shared Routes settings were not changed.
 echo(
 pause
 exit /b 1

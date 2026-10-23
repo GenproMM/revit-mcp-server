@@ -16,6 +16,29 @@ IronPython with full `doc`/`DB`/`clr` access.
 Both halves therefore run on the workstation. **The server is a distribution
 and update point, not a runtime.**
 
+## Coexistence with another MCP
+
+Our extension folder remains `revit-mcp-server.extension`. Its API namespace is
+`genpro_revit_mcp`; `startup.py` explicitly loads the adjacent `revit_mcp/`
+source directory as the Python package `genpro_revit_mcp`. Relative imports stay
+inside that owned package. Neither `sys.modules["revit_mcp"]` nor another
+extension's files or routes are replaced. The bridge never falls back to
+`/revit_mcp/` when our API is absent.
+
+`install.cmd` does not retire or disable other extensions, forget their search
+paths, change shared Routes settings, switch pyRevit attachments or overwrite
+Hermes entries. A read-only settings check requires enabled Routes on
+`127.0.0.1` and reports the existing port for OUR `REVIT_PORT`. Missing or unsafe
+settings stop installation for an operator decision. A same-name local copy
+also stops installation for explicit path review.
+
+This is namespace isolation, **not dispatcher isolation**. Both MCPs still use
+pyRevit's shared dispatcher. Validate them sequentially, preserving the foreign
+status response before/after; never infer concurrent-request safety from two
+working status URLs. Full live coexistence acceptance is separate from offline
+tests. Both the extension and CPython payload must be updated together for this
+namespace migration; keep the foreign MCP unchanged.
+
 ## Layout
 
 ```
@@ -134,12 +157,14 @@ interpreter. `publish-extension.cmd` refuses to publish unless
 
 ## First-time install (per user)
 
-The user double-clicks `\\srv-dfs\BIM\RevitMCP\install\install.cmd`, closes
-Hermes when asked, then restarts Revit and Hermes. That is the whole procedure.
+The user double-clicks `\\srv-dfs\BIM\06_RevitMCP\install\install.cmd`, checks
+its output, fully restarts Revit at an agreed time, and registers OUR MCP through
+Hermes UI following USER-GUIDE.md. Never replace a foreign MCP entry.
 
-It copies the payload, verifies the interpreter actually runs, configures
-pyRevit through `pyrevit.exe`, registers the server with Hermes, schedules
-updates and adds a Start Menu shortcut.
+It copies the payload, verifies the interpreter, reads shared Routes settings,
+registers/enables only our extension through `pyrevit.exe`, and attempts update
+scheduling and Start Menu shortcuts without bypassing PowerShell policy. Hermes
+configuration remains manual. No shared runtime or Routes setting is changed.
 
 **The document to hand users is [USER-GUIDE.md](USER-GUIDE.md)** (Russian):
 install, update, the Hermes MCP block including a manual merge, and a symptom
@@ -194,9 +219,11 @@ goes in the `env:` block; Hermes runs `python.exe` directly.
 only; on an IPv6-enabled image `localhost` resolves `::1` first and every call
 eats a failed connect.
 
-**`REVIT_PORT` is a deployment knob.** Default 48884. `configure_hermes.py`
-registers one `revit` entry on the default port and is unchanged; engineers share
-that entry and do not add or copy entries. An invalid value makes `server.py`
+**`REVIT_PORT` is a deployment knob.** Default 48884. Set it to the existing
+shared Routes port during manual registration of OUR entry; do not repurpose a
+foreign `revit` entry. Engineers share the provisioned entry and do not add or
+copy entries for multiple Revit processes. The legacy `configure_hermes.py`
+helper is not invoked by the installer: it must not overwrite a foreign entry. An invalid value makes `server.py`
 exit 2 with the reason on stderr (visible in the Hermes MCP log). Reaching a
 second Revit per call is a later phase.
 Overlapping sessions against one Revit can still cross-wire until d27-c lands.
@@ -231,14 +258,15 @@ retires the `chcp` dance above, since nothing non-ASCII would remain in the scri
 
 **`/execute_code/` is unauthenticated RCE.** Fleet-wide rollout is fleet-wide
 exposure; the only thing containing it is `[routes] host = "127.0.0.1"`.
-`install.cmd` warns if it cannot confirm that. Get this reviewed before rollout.
+`install.cmd` stops if it cannot confirm enabled loopback Routes. It never
+changes the shared settings; get any required change reviewed before rollout.
 
 ## Diagnosing a broken workstation
 
 | Symptom | Check |
 |---|---|
 | Hermes shows no Revit tools | Does `<pyrevit python.exe> %LOCALAPPDATA%\RevitMCP\current\app\warm.py` succeed? Is the managed block in the file Hermes actually reads — run `configure_hermes.py --print-only` and compare its `# target:` line |
-| Tools present, every call errors | `http://localhost:48884/revit_mcp/status/` in a browser — empty means the extension did not load |
+| Tools present, every call errors | `http://localhost:48884/genpro_revit_mcp/status/` in a browser — empty means the extension did not load |
 | Extension did not load | `[revit-mcp-server.extension] disabled` in `pyRevit_config.ini`; extension path registered; Revit fully restarted (Reload is not enough) |
 | Server will not start | Compare `payload\ENGINE` with the machine's `bin\cengines\CPY*` — a pyRevit engine bump needs a payload rebuild |
 | `pyRevit's CPython engine was not found` | pyRevit is genuinely absent, or installed somewhere `find-python.cmd` does not probe. Both `bin\cengines\CPY*` and `bin\engines\CPY*` are searched |

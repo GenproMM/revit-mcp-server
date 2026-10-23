@@ -85,7 +85,7 @@ rem line. An untracked .py in revit_mcp stops the publish.
 rem Keep the workstation-side scripts next to the payload they install.
 rem "%%~dp0" ends in a backslash, which would escape the closing quote --
 rem hence the trailing dot.
-robocopy "%~dp0." "%MCP_SHARE_ROOT%\install" install.cmd update.cmd find-python.cmd forget_retired_path.py /NFL /NDL /NJH /NJS /NP >nul
+robocopy "%~dp0." "%MCP_SHARE_ROOT%\install" install.cmd update.cmd find-python.cmd check_routes_config.py /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 (echo ERROR: could not publish installer scripts. & exit /b 1)
 
 echo(

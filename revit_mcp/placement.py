@@ -799,6 +799,12 @@ def register_placement_routes(api):
         itself is transacted against the family document.
         """
         family_doc = None
+        # Hoisted so every 500 can say what the family transaction really is (D-14).
+        # Items: each parameter name, "shared:NAME" and "new_type:NAME".
+        ft = None
+        requested = None
+        outcome_succeeded = []
+        outcome_failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -879,10 +885,11 @@ def register_placement_routes(api):
 
             ft = DB.Transaction(family_doc, "Edit family via MCP")
             ft.Start()
-            suppress_warnings(ft)
+            swallower = suppress_warnings(ft)
             try:
                 if new_type_name:
                     manager.CurrentType = manager.NewType(new_type_name)
+                    outcome_succeeded.append("new_type:{}".format(new_type_name))
                 elif type_name:
                     chosen = None
                     for candidate in manager.Types:
@@ -918,6 +925,12 @@ def register_placement_routes(api):
                         applied[param_name] = raw_value
                     except Exception as pe:
                         failed[param_name] = str(pe)
+                for param_name in parameters:
+                    if param_name in applied:
+                        outcome_succeeded.append(param_name)
+                    else:
+                        outcome_failed.append({"item": param_name,
+                                               "reason": failed.get(param_name, "not applied")})
 
                 # Add shared parameters to the family
                 added_shared = {}
@@ -964,15 +977,39 @@ def register_placement_routes(api):
                             except Exception as e:
                                 failed_shared[param_name] = str(e)
 
+                # Shared parameters: "already exists" is a no-op, in neither list.
+                # Walked in request order so the lists are deterministic.
+                seen_shared = set()
+                for param_name in add_shared:
+                    if param_name in seen_shared:
+                        continue
+                    seen_shared.add(param_name)
+                    if added_shared.get(param_name) == "added":
+                        outcome_succeeded.append("shared:{}".format(param_name))
+                    elif param_name in failed_shared:
+                        outcome_failed.append({"item": "shared:{}".format(param_name),
+                                               "reason": failed_shared[param_name]})
+                requested = len(outcome_succeeded) + len(outcome_failed)
+
                 # The family document is closed without saving below, so this edit only
                 # reaches the project through the reload; the status is recorded so the
                 # reply never claims a change a rolled-back commit did not make.
+                commit_result = commit_and_report(ft, swallower)
                 touched["family_edited"] = (
-                    ft.Commit() == DB.TransactionStatus.Committed)
+                    commit_result["committed"] and bool(outcome_succeeded))
             except Exception as tx_error:
                 if ft.HasStarted() and not ft.HasEnded():
                     ft.RollBack()
                 raise tx_error
+
+            # A rolled-back family commit, or an edit in which nothing applied, never
+            # reaches the project: no LoadFamily, no "reloaded", no "project_changed" (D-01).
+            gate_payload, gate_http = finalize_outcome(
+                commit_result, {}, requested, outcome_succeeded, outcome_failed)
+            if gate_http == 409:
+                family_doc.Close(False)
+                family_doc = None
+                return routes.make_response(data=gate_payload, status=gate_http)
 
             available_types = _type_names()
             current_type = ""
@@ -982,7 +1019,7 @@ def register_placement_routes(api):
                 logger.warning("Could not read the family current type")
 
             reloaded = False
-            if reload_back:
+            if gate_http == 200 and reload_back:
                 # LoadFamily(Document, IFamilyLoadOptions) overwrites the
                 # project copy and updates every placed instance. Without the
                 # options object Revit has no answer for "family already in
@@ -997,15 +1034,24 @@ def register_placement_routes(api):
                         data={"error": "Family edited but reload failed: {}".format(str(le)),
                               "family_name": family_name,
                               "parameters_applied": applied,
-                              "parameters_failed": failed},
+                              "parameters_failed": failed,
+                              "outcome": exception_outcome(
+                                  ft, requested, outcome_succeeded, outcome_failed)},
                         status=500,
                     )
 
             family_doc.Close(False)
             family_doc = None
 
-            return routes.make_response(data={
-                "status": "success",
+            if outcome_succeeded or not outcome_failed:
+                message = ("Edited family '{}' ({} param(s) applied, {} failed, {} shared added)"
+                           .format(family_name, len(applied), len(failed),
+                                   len(added_shared)))
+            else:
+                message = ("No change was applied to family '{}' ({} param(s) failed, "
+                           "{} shared failed)".format(family_name, len(failed),
+                                                      len(failed_shared)))
+            payload, http = finalize_outcome(commit_result, {
                 "family_name": family_name,
                 "current_type": current_type,
                 "type_created": new_type_name or None,
@@ -1015,10 +1061,9 @@ def register_placement_routes(api):
                 "shared_parameters_added": added_shared if add_shared else {},
                 "shared_parameters_failed": failed_shared if add_shared else {},
                 "reloaded": reloaded,
-                "message": "Edited family '{}' ({} param(s) applied, {} failed, {} shared added)"
-                           .format(family_name, len(applied), len(failed),
-                                   len(added_shared)),
-            })
+                "message": message,
+            }, requested, outcome_succeeded, outcome_failed)
+            return routes.make_response(data=payload, status=http)
 
         except Exception as e:
             logger.error("edit_family failed: {}".format(str(e)))
@@ -1028,7 +1073,10 @@ def register_placement_routes(api):
                 except Exception:
                     logger.warning("Could not close the family document after failure")
             return routes.make_response(
-                data={"error": str(e), "traceback": traceback.format_exc()}, status=500
+                data={"error": str(e), "traceback": traceback.format_exc(),
+                      "outcome": exception_outcome(
+                          ft, requested, outcome_succeeded, outcome_failed)},
+                status=500
             )
 
     @api.route("/edit_family/", methods=["POST"])

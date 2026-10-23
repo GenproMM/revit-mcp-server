@@ -939,11 +939,10 @@ def test_a_transaction_error_still_rolls_back_and_names_the_document(world):
 
 # ------------------------------------------------- outcomes (phase 4, TRUTH-01/02, D-03..D-06)
 
-# The world-wide invariants cover the rows whose modules report an outcome. Plan 04-06
-# migrates documentation and placement and widens this set until it is the whole table.
-OUTCOME_MODULES = {"editing", "interop", "documentation", "placement"}
-OUTCOME_ROWS = [key for key in TRANSACTING if key[0] in OUTCOME_MODULES]
-OUTCOME_ROW_IDS = ["{}:{}".format(module, route) for module, route in OUTCOME_ROWS]
+# The world-wide invariants run over the whole TRANSACTING table with no restriction, so a
+# route added to the table is covered by them automatically (D-04, D-14).
+OUTCOME_ROWS = list(TRANSACTING)
+OUTCOME_ROW_IDS = TRANSACTING_IDS
 
 
 def reach(world, key):
@@ -2124,6 +2123,127 @@ def test_load_family_validation_replies_carry_no_outcome(world):
     assert missing.status == 400 and "outcome" not in missing.data
     absent = call(world, handler, {"file_path": (world.tmp / "Nope.rfa").as_posix()})
     assert absent.status == 404 and "outcome" not in absent.data
+
+
+# ------------------------------------ edit_family outcomes (04-06, D-01, D-14, TRUTH-01)
+
+FAMILY_LABEL = "FAMILY:Door.rfa"
+
+
+def test_edit_family_that_applies_its_parameter_carries_the_family_transaction_outcome(world):
+    arm_family(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "placement", "/edit_family/"), EDIT_BODY)
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"] == {"transaction_status": "Committed", "requested": 1,
+                                     "succeeded": ["Width"], "failed": [], "revit_failures": []}
+    assert reply.data["reloaded"] is True
+    assert reply.data["parameters_applied"] == {"Width": 900}
+    assert reply.data["parameters_failed"] == {}
+
+
+def test_edit_family_rolled_back_family_commit_is_a_409_that_never_reloads_the_family(world):
+    family_doc = arm_family(world)
+    world.open("Only", ONLY_PATH, active=True)
+    token = world.tokens()[0]
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, "placement", "/edit_family/"), EDIT_BODY)
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert world.kinds("load_into") == [], "a rolled-back edit must never be loaded into the project"
+    assert not reply.data.get("reloaded") and not reply.data.get("project_changed")
+    assert "parameters_applied" not in reply.data
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["documents_changed"] == [
+        project_entry(token, changed=False), family_entry(changed=False)]
+    assert ("close", FAMILY_LABEL, False) in world.events
+    assert family_doc.FamilyManager.set_calls == ["900"]
+
+
+def test_edit_family_in_which_no_parameter_applies_is_a_422_that_never_reloads(world):
+    arm_family(world)
+    world.open("Only", ONLY_PATH, active=True)
+    token = world.tokens()[0]
+    reply = call(world, handler_of(world, "placement", "/edit_family/"),
+                 {"family_name": "Door", "parameters": {"Nope": 1}})
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["failed"] == [{"item": "Nope", "reason": "no such family parameter"}]
+    assert reply.data["outcome"]["transaction_status"] == "Committed"
+    assert reply.data["parameters_failed"] == {"Nope": "no such family parameter"}
+    assert reply.data["reloaded"] is False and world.kinds("load_into") == []
+    assert reply.data["documents_changed"] == [
+        project_entry(token, changed=False), family_entry(changed=False)]
+    assert ("close", FAMILY_LABEL, False) in world.events
+
+
+def test_edit_family_with_one_applied_and_one_failed_parameter_is_a_200_partial(world):
+    family_doc = arm_family(world)
+    family_doc.FamilyManager.params["Fixed"] = FakeFamParam(read_only=True)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "placement", "/edit_family/"),
+                 {"family_name": "Door", "parameters": {"Width": 900, "Fixed": 1, "Nope": 2}})
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed", "requested": 3, "succeeded": ["Width"],
+        "failed": [{"item": "Fixed", "reason": "read-only"},
+                   {"item": "Nope", "reason": "no such family parameter"}],
+        "revit_failures": []}
+    assert reply.data["reloaded"] is True and ("load_into", FAMILY_LABEL, "Only") in world.events
+
+
+def test_edit_family_that_creates_a_type_and_adds_a_missing_shared_parameter_names_both_items(world):
+    arm_family(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "placement", "/edit_family/"),
+                 {"family_name": "Door", "new_type_name": "Wide", "parameters": {"Width": 900},
+                  "add_shared_parameters": ["Ghost", "Width"]})
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    outcome = reply.data["outcome"]
+    assert outcome["succeeded"] == ["new_type:Wide", "Width"]
+    assert outcome["failed"] == [
+        {"item": "shared:Ghost", "reason": "not found in shared parameters file"}]
+    assert outcome["requested"] == 3, "Width already exists, so it is a no-op in neither list"
+    assert reply.data["type_created"] == "Wide" and reply.data["current_type"] == "Wide"
+
+
+def test_edit_family_reload_failure_is_still_a_500_and_carries_the_family_transaction_status(world):
+    arm_family(world)
+    world.family_load_error = RuntimeError("load refused")
+    world.open("Only", ONLY_PATH, active=True)
+    token = world.tokens()[0]
+    reply = call(world, handler_of(world, "placement", "/edit_family/"), EDIT_BODY)
+    assert reply.status == 500 and "Family edited but reload failed" in reply.data["error"]
+    assert reply.data["outcome"] == {"transaction_status": "Committed", "requested": 1,
+                                     "succeeded": ["Width"], "failed": [], "revit_failures": []}
+    assert reply.data["documents_changed"] == [
+        project_entry(token, changed=False), family_entry(changed=True)]
+
+
+def test_edit_family_whose_transaction_cannot_start_carries_the_real_status_on_its_500(world):
+    arm_family(world)
+    world.break_start.add(FAMILY_LABEL)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "placement", "/edit_family/"), EDIT_BODY)
+    assert reply.status == 500
+    assert reply.data["outcome"]["transaction_status"] == world.transactions[-1].status
+    assert reply.data["outcome"]["succeeded"] == []
+
+
+def test_edit_family_validation_replies_carry_no_outcome(world):
+    arm_family(world)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    handler = handler_of(world, "placement", "/edit_family/")
+    unknown = call(world, handler, {"family_name": "Door", "type_name": "Nope",
+                                    "parameters": {"Width": 900}})
+    assert unknown.status == 404 and "outcome" not in unknown.data
+    nothing = call(world, handler, {"family_name": "Door"})
+    assert nothing.status == 400 and "outcome" not in nothing.data
 
 
 # ------------------------------------------------------------------- helper contracts

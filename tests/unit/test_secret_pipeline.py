@@ -576,3 +576,173 @@ def test_publish_smoke_scratch_share(tmp_path):
     for _, dirs, _ in os.walk(ext):
         assert "__pycache__" not in dirs
     assert [os.path.exists(path) for path in guarded] == existed
+
+
+# --- build-payload.cmd order, gate.py pair check, CLAUDE.md (plan 03-07) ----
+
+
+def test_build_payload_order_stage_between_app_copy_and_gate():
+    lines = _cmd_lines(BUILD_PAYLOAD_CMD)
+    order = [
+        ("tests robocopy", lambda ln: ln.lower().startswith('robocopy "%repo%\\tests"')),
+        ("secret stage", lambda ln: 'secret_tool.py" stage' in ln),
+        ("gate", lambda ln: 'gate.py"' in ln and ln.startswith('"%MCP_PYEXE%"')),
+        ("publish mir", lambda ln: ln.lower().startswith('robocopy "%build%" "%out%" /mir')),
+    ]
+    indexes = [_find(lines, pred, label) for label, pred in order]
+    assert indexes == sorted(set(indexes)), dict(zip([o[0] for o in order], indexes))
+
+
+def test_build_payload_order_stage_arguments_and_failure():
+    lines = _cmd_lines(BUILD_PAYLOAD_CMD)
+    stage = lines[_find(lines, lambda ln: 'secret_tool.py" stage' in ln, "stage")]
+    assert stage.startswith('"%MCP_PYEXE%" "%~dp0secret_tool.py" stage')
+    assert '--secret-file "%MCP_SECRET_FILE%"' in stage
+    assert '--dest "%BUILD%\\app\\_bridge_secret"' in stage
+    assert "|| (echo ERROR:" in stage and "exit /b 1)" in stage
+    assert "!" not in stage, "delayed expansion is on in build-payload.cmd"
+    assert sum(1 for ln in lines if 'secret_tool.py" stage' in ln) == 1
+
+
+def test_build_payload_staging_line_is_not_a_root_module_copy():
+    pattern = re.compile(r'^\s*copy\s+/y\s+"%REPO%\\([A-Za-z0-9_]+)\.py"', re.IGNORECASE)
+    for line in _cmd_lines(BUILD_PAYLOAD_CMD):
+        if 'secret_tool.py" stage' in line:
+            assert not pattern.match(line)
+
+
+def test_build_payload_cmd_stays_lf():
+    with open(os.path.join(REPO, BUILD_PAYLOAD_CMD), "rb") as handle:
+        assert b"\r" not in handle.read()
+    with open(os.path.join(REPO, CONFIG_CMD), "rb") as handle:
+        assert b"\r" not in handle.read()
+
+
+@pytest.fixture(scope="module")
+def gate():
+    saved = list(sys.path)
+    try:
+        return _load("deploy_gate_under_test", os.path.join("deploy", "gate.py"))
+    finally:
+        sys.path[:] = saved
+
+
+def _gate_ast():
+    with open(os.path.join(REPO, "deploy", "gate.py"), encoding="utf-8") as handle:
+        return ast.parse(handle.read())
+
+
+def test_gate_main_runs_only_as_script():
+    tree = _gate_ast()
+    for node in tree.body:
+        if isinstance(node, ast.Expr):
+            assert "asyncio" not in ast.dump(node), "module-level call at line {}".format(node.lineno)
+    guards = [n for n in tree.body if isinstance(n, ast.If)
+              and "__main__" in ast.dump(n.test)]
+    assert len(guards) == 1
+    assert "asyncio" in ast.dump(guards[0]) and "main" in ast.dump(guards[0])
+
+
+def test_gate_main_checks_the_pair_before_spawning_the_server():
+    main = [n for n in _gate_ast().body
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == "main"][0]
+    lines = {}
+    for node in ast.walk(main):
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "id", getattr(node.func, "attr", None))
+            lines.setdefault(name, node.lineno)
+    assert "_secret_pair_status" in lines and "stdio_client" in lines
+    assert lines["_secret_pair_status"] < lines["stdio_client"]
+
+
+def test_gate_import_does_not_run_main(gate):
+    assert gate.__name__ == "deploy_gate_under_test"
+    assert callable(gate._secret_pair_status)
+    assert gate.SECRET_ARTIFACT.endswith("_bridge_secret")
+
+
+def test_gate_pair_equal_is_ok(gate, tmp_path):
+    secret = tmp_path / "secret"
+    artifact = tmp_path / "art"
+    _write(secret, b"S" * 43)
+    _write(artifact, b"S" * 43)
+    status, message = gate._secret_pair_status(str(artifact), str(secret))
+    assert status == "ok"
+    assert "S" * 43 not in message
+
+
+def test_gate_pair_one_byte_off_fails_without_printing_either_value(gate, tmp_path):
+    secret = tmp_path / "secret"
+    artifact = tmp_path / "art"
+    _write(secret, b"A" * 43)
+    _write(artifact, b"A" * 42 + b"B")
+    status, message = gate._secret_pair_status(str(artifact), str(secret))
+    assert status == "failed"
+    assert "byte for byte" in message
+    assert "A" * 20 not in message and "B" * 5 not in message
+
+
+def test_gate_pair_artifact_missing_fails(gate, tmp_path):
+    secret = tmp_path / "secret"
+    _write(secret, b"A" * 43)
+    status, message = gate._secret_pair_status(str(tmp_path / "nope"), str(secret))
+    assert status == "failed"
+    assert "nope" in message
+
+
+def test_gate_pair_secret_file_missing_fails(gate, tmp_path):
+    artifact = tmp_path / "art"
+    _write(artifact, b"A" * 43)
+    status, message = gate._secret_pair_status(str(artifact), str(tmp_path / "gone"))
+    assert status == "failed"
+    assert "gone" in message
+
+
+def test_gate_pair_empty_secret_file_fails(gate, tmp_path):
+    secret = tmp_path / "secret"
+    artifact = tmp_path / "art"
+    _write(secret, b"  \n")
+    _write(artifact, b"  \n")
+    status, message = gate._secret_pair_status(str(artifact), str(secret))
+    assert status == "failed"
+    assert "empty" in message
+
+
+def test_gate_pair_unset_variable_is_unchecked(gate, tmp_path, monkeypatch):
+    monkeypatch.delenv("MCP_SECRET_FILE", raising=False)
+    artifact = tmp_path / "art"
+    _write(artifact, b"A" * 43)
+    status, message = gate._secret_pair_status(str(artifact))
+    assert status == "unchecked"
+    monkeypatch.setenv("MCP_SECRET_FILE", "")
+    assert gate._secret_pair_status(str(artifact))[0] == "unchecked"
+
+
+def test_gate_pair_uses_environment_value(gate, tmp_path, monkeypatch):
+    secret = tmp_path / "secret"
+    artifact = tmp_path / "art"
+    _write(secret, b"E" * 43)
+    _write(artifact, b"E" * 43)
+    monkeypatch.setenv("MCP_SECRET_FILE", str(secret))
+    assert gate._secret_pair_status(str(artifact))[0] == "ok"
+    _write(artifact, b"F" * 43)
+    assert gate._secret_pair_status(str(artifact))[0] == "failed"
+
+
+def _claude_md():
+    with open(os.path.join(REPO, "CLAUDE.md"), encoding="utf-8") as handle:
+        return handle.read()
+
+
+def test_claude_md_names_both_shared_helpers():
+    text = _claude_md()
+    assert "`revit_mcp/textutils.py` and `revit_mcp/trust.py`" in text
+    assert "revit_mcp/integrity.py" in text
+
+
+def test_claude_md_documents_the_secret_and_manifest_pipeline():
+    text = _claude_md()
+    for needle in ("network barrier", "MCP_SECRET_FILE", "scripts/dev_secret.py",
+                   "_manifest.json", "_bridge_secret", "_mcp",
+                   "deploy/make_manifest.py", "unverifiable"):
+        assert needle in text, "CLAUDE.md lost {!r}".format(needle)

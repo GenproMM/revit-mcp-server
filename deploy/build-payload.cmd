@@ -117,6 +117,13 @@ if errorlevel 8 exit /b 1
 robocopy "%REPO%\tests" "%BUILD%\app\tests" /E /XJ /XD __pycache__ /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 exit /b 1
 
+rem The shared secret: the same MCP_SECRET_FILE that publish-extension.cmd
+rem stages into the extension, so both halves of one build hold one
+rem byte-identical value. bridge.py reads app\_bridge_secret. Nothing sends it
+rem before Phase 5. secret_tool.py creates MCP_SECRET_FILE once and never
+rem overwrites it. It runs before gate.py, which checks the pair.
+"%MCP_PYEXE%" "%~dp0secret_tool.py" stage --secret-file "%MCP_SECRET_FILE%" --dest "%BUILD%\app\_bridge_secret" || (echo ERROR: could not stage the shared secret. & exit /b 1)
+
 >"%BUILD%\ENGINE" echo %MCP_ENGINE%
 "%MCP_PYEXE%" -m compileall -q "%BUILD%\app" >nul 2>&1
 

@@ -61,7 +61,8 @@ whether it needs live Revit.
 There is no lint/format config and no CI. `revit_mcp/` cannot be imported under CPython (it
 needs pyRevit), so **new domain logic belongs on the CPython side where it can be tested**;
 keep the Revit half a thin data provider. Pure helpers that both halves need go in
-`revit_mcp/textutils.py`, which imports nothing from pyRevit and is unit tested.
+`revit_mcp/textutils.py` and `revit_mcp/trust.py`, which import nothing from pyRevit and are
+unit tested; `revit_mcp/integrity.py` is the read-only file reader that feeds `trust.py`.
 
 Verifying the Revit side requires Revit open with a document, pyRevit installed, and
 Routes Server enabled — check `http://localhost:48884/revit_mcp/status/` in a browser.
@@ -234,6 +235,20 @@ parameter including `ctx`. `check_clashes` in `tools/clash_tools.py` is the refe
 - Requests sent while Revit is still initializing **hang** rather than failing: handlers run
   through a Revit external event that does not pump until startup finishes. Poll `/status/`
   (a GET, which answers 503 promptly) before issuing the first POST.
+- **Shared secret and integrity manifest are built, not enforced until Phase 5.**
+  `deploy/secret_tool.py` stages `_bridge_secret` from `MCP_SECRET_FILE` (`deploy/config.cmd`)
+  into the extension (`revit_mcp\_bridge_secret`) and the payload (`app\_bridge_secret`). It is
+  created once and no build regenerates it; rotation is delete the file, rebuild both halves,
+  restart Revit everywhere. A request carries it in the body under the reserved `_mcp` key,
+  never a header, and no tool may put `_mcp` in its own data. It is a network barrier against
+  callers on the LAN, not protection from anyone who can read the share, `ext\` or an installed
+  payload. `deploy/make_manifest.py` writes `_manifest.json` from `git ls-files` over the
+  published copies right after the `revit_mcp` copy and fails the publish on an untracked
+  `.py`; both artifact names are gitignored and excluded from the extension robocopy. On a dev
+  machine run `uv run python scripts/dev_secret.py` once and run the server from the repo with
+  `uv run main.py`, not from an installed payload, or the two halves read different secrets.
+  The junction has no `_manifest.json`, so the integrity check reports `unverifiable` there and
+  blocks nothing.
 
 ## Reference documents
 

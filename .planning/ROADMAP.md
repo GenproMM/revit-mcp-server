@@ -186,7 +186,7 @@ Plans:
   3. A batch operation run against a mix of valid and invalid element ids returns the succeeded and skipped/failed ids alongside each other, not only a count.
   4. A batch operation's partial failure produces a status distinguishable both from full success and from full failure — exercised live against at least one batch route with an intentionally-invalid id mixed in.
 
-**Plans:** 10/11 plans executed
+**Plans:** 11/11 plans executed
 
 Plans:
 
@@ -214,7 +214,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 04-11-PLAN.md — Live gate (human-run, one-shot once a write is sent; a zero-POST preflight stop is rerun, after a full Revit restart): modify_element, tag_elements partial and 422, export_ifc, delete_elements
+- [x] 04-11-PLAN.md — Live gate (human-run, one-shot once a write is sent; a zero-POST preflight stop is rerun, after a full Revit restart): modify_element, tag_elements partial and 422, export_ifc, delete_elements
 
 ### Phase 5: Live secret gate and integrity enforcement
 
@@ -283,7 +283,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Serialization and configurable addressing | 7/7 | Complete    | 2026-10-14 |
 | 2. Live identity, ambiguity refusal, and multi-document addressing | 20/20 | Complete    | 2026-10-23 |
 | 3. Secret gate and payload integrity (unit-verified) | 9/9 | Complete    | 2026-10-23 |
-| 4. Honest outcomes on every mutating route | 10/11 | In Progress|  |
+| 4. Honest outcomes on every mutating route | 11/11 | In Progress|  |
 | 5. Live secret gate and integrity enforcement | 0/TBD | Not started | - |
 | 6. Structured audit log of true outcomes | 0/TBD | Not started | - |
 | 7. Repository-owned mutation safety and human approval | 0/TBD | Not planned | - |

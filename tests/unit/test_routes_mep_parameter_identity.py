@@ -890,10 +890,12 @@ EXPECTED_KEYS = {
                                      "system_name", "system_type"],
     ("parameters", "/set_parameter/"): ["element_id", "message", "new_value", "old_value",
                                         "parameter_name", "status", "transaction_status"],
-    ("rooms", "/create_room/"): ["area", "level", "message", "name", "number", "room_id", "status"],
-    ("rooms", "/create_room_separation/"): ["line_count", "line_ids", "message", "status"],
-    ("structure", "/create_grid/"): ["count", "created", "message", "status"],
-    ("structure", "/create_framing/"): ["count", "created", "message", "status"],
+    ("rooms", "/create_room/"): ["area", "level", "message", "name", "number", "outcome",
+                                 "room_id", "status"],
+    ("rooms", "/create_room_separation/"): ["line_count", "line_ids", "message", "outcome",
+                                            "status"],
+    ("structure", "/create_grid/"): ["count", "created", "message", "outcome", "status"],
+    ("structure", "/create_framing/"): ["count", "created", "message", "outcome", "status"],
     ("tags", "/tag_elements/"): ["message", "outcome", "skipped", "status", "tag_ids",
                                  "tagged_count"],
 }
@@ -1351,3 +1353,232 @@ def test_a_newly_created_mep_system_reports_its_name_step(world, name_param, sta
     assert reply.data["outcome"]["succeeded"] == [88]
     assert reply.data["outcome"]["failed"] == failed
     assert reply.data["system_id"] == 88
+
+
+# --------------------------- rooms and structure: honest outcomes (D-12, TRUTH-03; plan 04-02)
+
+ZERO_LENGTH = {"start_point": {"x": 0, "y": 0, "z": 0}, "end_point": {"x": 0, "y": 0, "z": 0}}
+
+
+class StepGrid(object):
+    """A grid whose Name setter can be made to raise, like a duplicate grid name."""
+
+    def __init__(self, ident, name_raises=None):
+        self.Id = types.SimpleNamespace(Value=ident)
+        self._name = "G"
+        self._raises = name_raises
+
+    @property
+    def Name(self):
+        return self._name
+
+    @Name.setter
+    def Name(self, value):
+        if self._raises is not None:
+            raise self._raises
+        self._name = value
+
+
+def structure_call(world, route, body, items=()):
+    arm(world, items)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    return call(world, handler_of(world, "structure", route), body)
+
+
+def grid_answers(world, grid):
+    world.db.Grid = MagicMock(name="DB.Grid")
+    world.db.Grid.Create.return_value = grid
+
+
+def test_create_grid_with_one_valid_and_one_zero_length_grid_is_a_partial_naming_the_index(world):
+    grid_answers(world, StepGrid(31))
+    reply = structure_call(world, "/create_grid/",
+                           {"grids": [dict(_POINTS, name="A"), ZERO_LENGTH]})
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed",
+        "requested": 2,
+        "succeeded": [31],
+        "failed": [{"item": 1, "reason": "grid has zero length"}],
+        "revit_failures": [],
+    }
+    assert reply.data["count"] == 1 and len(reply.data["created"]) == 1
+    text = format_response(reply.data)
+    assert "=== PARTIAL SUCCESS ===" in text and "grid has zero length" in text
+
+
+def test_create_grid_with_only_zero_length_grids_is_a_422_failed(world):
+    grid_answers(world, StepGrid(31))
+    reply = structure_call(world, "/create_grid/", {"grids": [ZERO_LENGTH, ZERO_LENGTH]})
+    assert reply.status == 422
+    assert reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert [entry["item"] for entry in reply.data["outcome"]["failed"]] == [0, 1]
+    assert reply.data["count"] == 0
+
+
+def test_create_grid_whose_name_cannot_be_set_is_a_partial_but_keeps_the_created_grid(world):
+    grid_answers(world, StepGrid(31, name_raises=RuntimeError("dup")))
+    reply = structure_call(world, "/create_grid/", {"grids": [dict(_POINTS, name="A")]})
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"]["succeeded"] == [31]
+    assert reply.data["outcome"]["failed"] == [{"item": "0.name", "reason": "dup"}]
+    assert reply.data["count"] == 1
+
+
+def test_create_grid_rolled_back_is_a_409_with_nothing_succeeded(world):
+    grid_answers(world, StepGrid(31))
+    world.commit_status = "RolledBack"
+    reply = structure_call(world, "/create_grid/", {"grids": [dict(_POINTS, name="A")]})
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["succeeded"] == []
+    assert "created" not in reply.data and "count" not in reply.data
+
+
+def test_create_framing_with_one_valid_and_one_zero_length_beam_is_a_partial(world):
+    arm(world, [_named("B")])
+    override_create(world, NewFamilyInstance=lambda *args: StepElement(world, 41))
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "structure", "/create_framing/"),
+                 {"elements": [dict(_POINTS, type_name="B", level_name="L1"), ZERO_LENGTH]})
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"]["requested"] == 2
+    assert reply.data["outcome"]["succeeded"] == [41]
+    assert reply.data["outcome"]["failed"] == [{"item": 1, "reason": "beam has zero length"}]
+    assert reply.data["count"] == 1
+
+
+def test_create_framing_with_only_zero_length_beams_is_a_422(world):
+    arm(world, [_named("B")])
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "structure", "/create_framing/"),
+                 {"elements": [ZERO_LENGTH]})
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["failed"] == [{"item": 0, "reason": "beam has zero length"}]
+
+
+def test_create_framing_rolled_back_is_a_409_with_nothing_succeeded(world):
+    arm(world, [_named("B")])
+    world.commit_status = "RolledBack"
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "structure", "/create_framing/"),
+                 MUTATIONS[("structure", "/create_framing/")])
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["succeeded"] == []
+
+
+ROOM_BODY = {"level_name": "L1", "name": "Lobby", "number": "101"}
+
+
+def room_world(world, room, rolled_back=False):
+    arm(world, [_named("L1")])
+    override_create(world, NewRoom=lambda *args: room)
+    if rolled_back:
+        world.commit_status = "RolledBack"
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+
+
+def make_room(world, **params):
+    defaults = {"Name": StepParam(), "Number": StepParam(), "Area": StepParam(area=10.0)}
+    defaults.update(params)
+    return StepElement(world, 301, defaults)
+
+
+@pytest.mark.parametrize("step,param_name,body_key", [
+    ("name", "Name", "name"),
+    ("number", "Number", "number"),
+])
+def test_create_room_whose_name_or_number_is_read_only_is_a_partial_naming_the_step(
+        world, step, param_name, body_key):
+    room = make_room(world, **{param_name: StepParam(read_only=True)})
+    room_world(world, room)
+    reply = call(world, handler_of(world, "rooms", "/create_room/"), ROOM_BODY)
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"]["succeeded"] == [301]
+    assert reply.data["outcome"]["failed"] == [
+        {"item": step, "reason": "parameter is read-only"}]
+    assert reply.data["room_id"] == 301
+
+
+def test_create_room_whose_name_raises_on_set_reports_the_exception_text(world):
+    room = make_room(world, Name=StepParam(raises=RuntimeError("name taken")))
+    room_world(world, room)
+    reply = call(world, handler_of(world, "rooms", "/create_room/"), ROOM_BODY)
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    assert reply.data["outcome"]["failed"] == [{"item": "name", "reason": "name taken"}]
+
+
+def test_create_room_with_writable_name_and_number_is_a_success_that_reads_the_result(world):
+    room = make_room(world)
+    room_world(world, room)
+    reply = call(world, handler_of(world, "rooms", "/create_room/"), ROOM_BODY)
+    assert reply.status == 200 and reply.data["status"] == "success", reply.data
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed", "requested": 1, "succeeded": [301],
+        "failed": [], "revit_failures": [],
+    }
+    assert reply.data["name"] == "Lobby" and reply.data["number"] == "101"
+    assert reply.data["area"] == pytest.approx(0.93, abs=0.01)
+
+
+def test_create_room_rolled_back_is_a_409_and_never_reads_the_room_after_the_commit(world):
+    room = make_room(world)
+    room_world(world, room, rolled_back=True)
+    reply = call(world, handler_of(world, "rooms", "/create_room/"), ROOM_BODY)
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["succeeded"] == []
+    assert "room_id" not in reply.data and "area" not in reply.data
+    after_commit = [name for name, commits in room.lookups if commits >= 1]
+    assert after_commit == [], "the room was read after a rolled-back commit"
+
+
+def test_create_room_that_yields_no_room_is_still_a_500_that_rolls_back_with_an_outcome(world):
+    room_world(world, None)
+    reply = call(world, handler_of(world, "rooms", "/create_room/"), ROOM_BODY)
+    assert reply.status == 500 and "Failed to create room" in reply.data["error"]
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == []
+    assert world.kinds("rollback") and world.kinds("commit") == []
+
+
+SEPARATION_BODY = {"lines": [dict(_POINTS), dict(_POINTS)], "view_name": "Plan A"}
+
+
+def test_create_room_separation_that_creates_lines_lists_their_ids(world):
+    arm(world, [_named("Plan A")])
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "rooms", "/create_room_separation/"), SEPARATION_BODY)
+    assert reply.status == 200 and reply.data["status"] == "success", reply.data
+    assert reply.data["outcome"]["succeeded"] == [501, 502]
+    assert reply.data["outcome"]["requested"] == 2
+    assert reply.data["line_ids"] == [501, 502] and reply.data["line_count"] == 2
+
+
+def test_create_room_separation_that_creates_nothing_is_a_422_naming_every_input_line(world):
+    arm(world, [_named("Plan A")])
+    override_create(world, NewRoomBoundaryLines=lambda *args: None)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "rooms", "/create_room_separation/"), SEPARATION_BODY)
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["failed"] == [
+        {"item": 0, "reason": "NewRoomBoundaryLines created no line"},
+        {"item": 1, "reason": "NewRoomBoundaryLines created no line"},
+    ]
+
+
+def test_create_room_separation_rolled_back_is_a_409_with_nothing_succeeded(world):
+    arm(world, [_named("Plan A")])
+    world.commit_status = "RolledBack"
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "rooms", "/create_room_separation/"), SEPARATION_BODY)
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["succeeded"] == [] and "line_ids" not in reply.data

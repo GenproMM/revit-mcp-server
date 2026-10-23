@@ -4,7 +4,10 @@ Structure Module for Revit MCP
 Handles grid creation and structural framing placement
 """
 
-from .utils import get_element_name, find_family_symbol_safely, get_element_id_value, suppress_warnings, parse_request_data
+from .utils import (
+    get_element_name, find_family_symbol_safely, get_element_id_value, suppress_warnings,
+    parse_request_data, commit_and_report, finalize_outcome, exception_outcome,
+)
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
@@ -20,6 +23,11 @@ def register_structure_routes(api):
 
     def _create_grid(doc, request):
         """Create grid lines in the Revit model."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -39,9 +47,10 @@ def register_structure_routes(api):
                     data={"error": "No grids provided"}, status=400
                 )
 
+            requested = len(grids)
             t = DB.Transaction(doc, "Create Grids via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 created = []
@@ -67,10 +76,14 @@ def register_structure_routes(api):
                     length = start.DistanceTo(end)
                     if length < 0.001:
                         logger.warning("Grid {} has zero length, skipping".format(i))
+                        failed.append({"item": i, "reason": "grid has zero length"})
                         continue
 
                     line = DB.Line.CreateBound(start, end)
                     grid = DB.Grid.Create(doc, line)
+                    # Read the id while the element is valid; after a rollback it is not.
+                    grid_id = get_element_id_value(grid)
+                    succeeded.append(grid_id)
 
                     if name:
                         try:
@@ -79,28 +92,29 @@ def register_structure_routes(api):
                             logger.warning("Could not set grid name '{}': {}".format(
                                 name, str(name_err)
                             ))
+                            failed.append({"item": "{}.name".format(i),
+                                           "reason": str(name_err)})
 
                     grid_name = get_element_name(grid)
                     created.append({
-                        "id": get_element_id_value(grid),
+                        "id": grid_id,
                         "name": grid_name,
                     })
 
-                t.Commit()
-
-                message = "Created {} grid line{}".format(
-                    len(created),
-                    "s" if len(created) != 1 else ""
-                )
-
-                return routes.make_response(
-                    data={
-                        "status": "success",
+                commit_result = commit_and_report(t, swallower)
+                reply = {}
+                if commit_result["committed"]:
+                    reply = {
                         "created": created,
                         "count": len(created),
-                        "message": message,
+                        "message": "Created {} grid line{}".format(
+                            len(created),
+                            "s" if len(created) != 1 else ""
+                        ),
                     }
-                )
+                payload, http = finalize_outcome(
+                    commit_result, reply, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -111,7 +125,9 @@ def register_structure_routes(api):
             logger.error("Failed to create grids: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/create_grid/", methods=["POST"])
@@ -126,6 +142,11 @@ def register_structure_routes(api):
 
     def _create_framing(doc, request):
         """Create structural framing (beams) in the Revit model."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -167,14 +188,15 @@ def register_structure_routes(api):
                 .ToElements()
             )
 
+            requested = len(elements)
             t = DB.Transaction(doc, "Create Structural Framing via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 created = []
 
-                for elem_def in elements:
+                for index, elem_def in enumerate(elements):
                     sp = elem_def.get("start_point", {})
                     ep = elem_def.get("end_point", {})
                     type_name = elem_def.get("type_name")
@@ -197,6 +219,7 @@ def register_structure_routes(api):
                     length = start.DistanceTo(end)
                     if length < 0.001:
                         logger.warning("Beam has zero length, skipping")
+                        failed.append({"item": index, "reason": "beam has zero length"})
                         continue
 
                     # Find the beam type
@@ -263,33 +286,35 @@ def register_structure_routes(api):
                     beam_type = get_element_name(target_symbol)
                     beam_level = get_element_name(target_level) if target_level else "Unknown"
 
+                    # Read the id while the element is valid; after a rollback it is not.
+                    beam_id = get_element_id_value(beam)
+                    succeeded.append(beam_id)
                     created.append({
-                        "id": get_element_id_value(beam),
+                        "id": beam_id,
                         "name": name,
                         "type": beam_type,
                         "level": beam_level,
                     })
 
-                t.Commit()
+                commit_result = commit_and_report(t, swallower)
+                reply = {}
+                if commit_result["committed"]:
+                    level_msg = ""
+                    if created and created[0].get("level"):
+                        level_msg = " on {}".format(created[0]["level"])
 
-                level_msg = ""
-                if created and created[0].get("level"):
-                    level_msg = " on {}".format(created[0]["level"])
-
-                message = "Created {} structural framing element{}{}".format(
-                    len(created),
-                    "s" if len(created) != 1 else "",
-                    level_msg,
-                )
-
-                return routes.make_response(
-                    data={
-                        "status": "success",
+                    reply = {
                         "created": created,
                         "count": len(created),
-                        "message": message,
+                        "message": "Created {} structural framing element{}{}".format(
+                            len(created),
+                            "s" if len(created) != 1 else "",
+                            level_msg,
+                        ),
                     }
-                )
+                payload, http = finalize_outcome(
+                    commit_result, reply, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -300,7 +325,9 @@ def register_structure_routes(api):
             logger.error("Failed to create framing: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/create_framing/", methods=["POST"])

@@ -4,7 +4,10 @@ Rooms Module for Revit MCP
 Handles room creation and room separation lines
 """
 
-from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings, parse_request_data
+from .utils import (
+    get_element_name, get_element_id_value, make_element_id, suppress_warnings,
+    parse_request_data, commit_and_report, finalize_outcome, exception_outcome,
+)
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 from System.Collections.Generic import List
@@ -16,11 +19,36 @@ logger = logging.getLogger(__name__)
 MM_TO_FEET = 1.0 / 304.8
 
 
+def _set_step(failed, item, lookup, make_value):
+    """Run one secondary Set() step and record why it did not happen (D-12).
+
+    A step the request asked for must never vanish silently: a parameter that is
+    missing, read-only, raises on Set or answers False becomes a `failed` entry named
+    after the step, which turns the reply into a partial. The room itself is already in
+    `succeeded` and stays there.
+    """
+    try:
+        param = lookup()
+        if not param:
+            failed.append({"item": item, "reason": "parameter not found"})
+        elif param.IsReadOnly:
+            failed.append({"item": item, "reason": "parameter is read-only"})
+        elif param.Set(make_value()) is False:
+            failed.append({"item": item, "reason": "Set() returned false"})
+    except Exception as step_err:
+        failed.append({"item": item, "reason": str(step_err)})
+
+
 def register_room_routes(api):
     """Register all room routes with the API"""
 
     def _create_room(doc, request):
         """Create a room at a specified level."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -67,9 +95,10 @@ def register_room_routes(api):
                 )
             phase = phases.get_Item(phases.Size - 1)
 
+            requested = 1
             t = DB.Transaction(doc, "Create Room via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 location = data.get("location")
@@ -85,24 +114,34 @@ def register_room_routes(api):
                 if not room:
                     t.RollBack()
                     return routes.make_response(
-                        data={"error": "Failed to create room — no enclosed area found at the specified location. Add walls or room separation lines first."},
+                        data={"error": "Failed to create room — no enclosed area found at the specified location. Add walls or room separation lines first.",
+                              "outcome": exception_outcome(t, requested, succeeded, failed)},
                         status=500,
                     )
 
-                # Set name and number if provided
+                # Read the id while the room is valid; after a rollback it is not.
+                room_id = get_element_id_value(room)
+                succeeded.append(room_id)
+
+                # Set name and number if provided; each is its own step (D-12)
                 room_name = data.get("name")
                 if room_name:
-                    name_param = room.LookupParameter("Name")
-                    if name_param and not name_param.IsReadOnly:
-                        name_param.Set(room_name)
+                    _set_step(failed, "name",
+                              lambda: room.LookupParameter("Name"),
+                              lambda: room_name)
 
                 room_number = data.get("number")
                 if room_number:
-                    number_param = room.LookupParameter("Number")
-                    if number_param and not number_param.IsReadOnly:
-                        number_param.Set(room_number)
+                    _set_step(failed, "number",
+                              lambda: room.LookupParameter("Number"),
+                              lambda: room_number)
 
-                t.Commit()
+                commit_result = commit_and_report(t, swallower)
+                if not commit_result["committed"]:
+                    # Nothing below may read the room: a rolled-back element is invalid.
+                    payload, http = finalize_outcome(
+                        commit_result, {}, requested, succeeded, failed)
+                    return routes.make_response(data=payload, status=http)
 
                 # Get area after commit
                 area = 0.0
@@ -129,19 +168,19 @@ def register_room_routes(api):
                 except Exception:
                     pass
 
-                return routes.make_response(
-                    data={
-                        "status": "success",
-                        "room_id": get_element_id_value(room),
-                        "name": actual_name,
-                        "number": actual_number,
-                        "level": level_name,
-                        "area": area,
-                        "message": "Room '{}' created on level '{}'".format(
-                            actual_name or actual_number or "Unnamed", level_name
-                        ),
-                    }
-                )
+                reply = {
+                    "room_id": room_id,
+                    "name": actual_name,
+                    "number": actual_number,
+                    "level": level_name,
+                    "area": area,
+                    "message": "Room '{}' created on level '{}'".format(
+                        actual_name or actual_number or "Unnamed", level_name
+                    ),
+                }
+                payload, http = finalize_outcome(
+                    commit_result, reply, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -152,7 +191,9 @@ def register_room_routes(api):
             logger.error("Failed to create room: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/create_room/", methods=["POST"])
@@ -167,6 +208,11 @@ def register_room_routes(api):
 
     def _create_room_separation(doc, request):
         """Create room separation lines."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -229,9 +275,10 @@ def register_room_routes(api):
                         sketch_plane = lv
                         break
 
+            requested = len(lines)
             t = DB.Transaction(doc, "Create Room Separation Lines via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 created_ids = []
@@ -271,12 +318,18 @@ def register_room_routes(api):
                 if separator:
                     for elem in separator:
                         created_ids.append(get_element_id_value(elem))
+                succeeded.extend(created_ids)
 
-                t.Commit()
+                if not created_ids:
+                    # Revit answered no line at all: every requested line failed.
+                    for index in range(len(lines)):
+                        failed.append({"item": index,
+                                       "reason": "NewRoomBoundaryLines created no line"})
 
-                return routes.make_response(
-                    data={
-                        "status": "success",
+                commit_result = commit_and_report(t, swallower)
+                reply = {}
+                if commit_result["committed"]:
+                    reply = {
                         "line_count": len(created_ids),
                         "line_ids": created_ids,
                         "message": "Created {} room separation line{}".format(
@@ -284,7 +337,9 @@ def register_room_routes(api):
                             "s" if len(created_ids) != 1 else ""
                         ),
                     }
-                )
+                payload, http = finalize_outcome(
+                    commit_result, reply, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -295,7 +350,9 @@ def register_room_routes(api):
             logger.error("Failed to create room separation: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/create_room_separation/", methods=["POST"])

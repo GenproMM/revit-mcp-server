@@ -186,7 +186,7 @@ Plans:
   3. A batch operation run against a mix of valid and invalid element ids returns the succeeded and skipped/failed ids alongside each other, not only a count.
   4. A batch operation's partial failure produces a status distinguishable both from full success and from full failure — exercised live against at least one batch route with an intentionally-invalid id mixed in.
 
-**Plans:** 5/11 plans executed
+**Plans:** 8/11 plans executed
 
 Plans:
 
@@ -203,9 +203,9 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-06-PLAN.md — documentation (sheet, schedule, export_document) and placement (place_family, load_family, edit_family never reloads after a rollback)
-- [ ] 04-07-PLAN.md — colors: per-element override failures as outcome.failed, colour routes pinned to the invariants
-- [ ] 04-10-PLAN.md — Live gate instrument: one-shot tests/test_phase4_live_outcomes.py with offline-tested classifier
+- [x] 04-06-PLAN.md — documentation (sheet, schedule, export_document) and placement (place_family, load_family, edit_family never reloads after a rollback)
+- [x] 04-07-PLAN.md — colors: per-element override failures as outcome.failed, colour routes pinned to the invariants
+- [x] 04-10-PLAN.md — Live gate instrument: one-shot tests/test_phase4_live_outcomes.py with offline-tested classifier
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -283,7 +283,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Serialization and configurable addressing | 7/7 | Complete    | 2026-10-14 |
 | 2. Live identity, ambiguity refusal, and multi-document addressing | 20/20 | Complete    | 2026-10-23 |
 | 3. Secret gate and payload integrity (unit-verified) | 9/9 | Complete    | 2026-10-23 |
-| 4. Honest outcomes on every mutating route | 5/11 | In Progress|  |
+| 4. Honest outcomes on every mutating route | 8/11 | In Progress|  |
 | 5. Live secret gate and integrity enforcement | 0/TBD | Not started | - |
 | 6. Structured audit log of true outcomes | 0/TBD | Not started | - |
 | 7. Repository-owned mutation safety and human approval | 0/TBD | Not planned | - |

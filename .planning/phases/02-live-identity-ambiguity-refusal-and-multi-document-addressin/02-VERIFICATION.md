@@ -1,8 +1,8 @@
 ---
 phase: 02-live-identity-ambiguity-refusal-and-multi-document-addressin
 verified: 2026-10-23T12:00:00Z
-status: gaps_found
-score: 8/9 must-haves verified
+status: passed
+score: 8/9 must-haves verified, 1 overridden
 covered_files:
   - .planning/REQUIREMENTS.md
   - .planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-01-PLAN.md
@@ -57,10 +57,16 @@ covered_files:
   - tools/utils.py
 covered_digest: "v1:sha256:18d6aa6f6055d4e6e5b5cb95c3df365873bef3d5a75b1edce8e94b95c3b92ecb"
 behavior_unverified: 0
-overrides_applied: 0
+overrides_applied: 1
+overrides:
+  - must_have: "С видимой идентичностью гипотеза «отвечал другой процесс» для param-write-rolls-back перепроверена вживую, и её исход записан"
+    reason: "Прогон G6 один раз, классификатор stop; wrong-process не подтверждена (одна идентичность), cross-wire внутри одного Revit закрывается backlog 999.1; AMBIG-04 остаётся открытым (Pending в REQUIREMENTS.md)"
+    accepted_by: "Evgenii (пользователь)"
+    accepted_at: "2026-10-23T07:32:13Z"
+    user_words: "Принять фазу как есть."
 gaps:
   - truth: "С видимой идентичностью гипотеза «отвечал другой процесс» для param-write-rolls-back перепроверена вживую, и её исход (подтверждена или опровергнута) записан (ROADMAP SC5 / AMBIG-04)"
-    status: failed
+    status: overridden
     reason: "Классификатор живой приёмки остался в verdict=stop (g6-listing-unusable). Последовательные записи не воспроизвели откат; параллельные ответы перепутались внутри одного Revit (один PID/порт/сессия во всех ответах), одна запись потеряна. Гипотеза «другой процесс» этим прогоном не подтверждена, но и исход G6 классификатором не присвоен. Собственный контракт плана 02-18 (D-14): фаза принимается, только когда каждый критерий observed. Пользователь на блокирующем чекпойнте ответил accept — это зафиксировано как принятие с AMBIG-04 как принятым открытым риском (backlog 999.1), а не как девять наблюдённых критериев."
     artifacts:
       - path: "C:\\Users\\Admin\\Documents\\revit-mcp-phase2-evidence-2026-10-23\\acc.json"
@@ -199,7 +205,11 @@ human_verification: []
 
 Существенный оттенок для решения: по тексту SC5 «исход (подтверждена или опровергнута) записан» прогон дал содержательные данные. Идентичность была постоянной, значит версия «другой процесс» не подтверждена; перепутывание внутри одного Revit совпадает со вторым кандидатом отладки (999.1). Но это вывод по одному одноразовому прогону, классификатор исход не присвоил, и AMBIG-04 в SUMMARY честно оставлен открытым. Я следую этому, а не смягчаю.
 
-### Предложение override (если пользователь хочет закрыть SC5 формально)
+### Override применён (2026-10-23T07:32:13Z)
+
+Пользователь явно выбрал вариант «Принять фазу как есть» после того, как ему были названы факты (SC5/AMBIG-04/G6 — stop, 8/9). Override записан в frontmatter; статус изменён с `gaps_found` на `passed` только по этому решению. AMBIG-04 в REQUIREMENTS.md остаётся `Pending`, G6 повторять после backlog 999.1.
+
+#### Исходное предложение override
 
 Только по явному решению пользователя добавить в frontmatter:
 

@@ -410,3 +410,33 @@ def finalize_outcome(commit_result, data, requested, succeeded, failed):
             "None of the {} requested item(s) succeeded; each item and its reason "
             "is in outcome.failed".format(count))
     return payload, http_status
+
+
+def transaction_status_of(transaction):
+    """Return str(transaction.GetStatus()), or None when there is no transaction or it cannot be read.
+
+    Used on the exception path (D-14): a route that raised after Commit() must say
+    what the transaction really is instead of hiding a model change behind a bare
+    500. GetStatus is read inside try/except because its behaviour after Commit is
+    an assumption (A2); if Revit refuses, null is the honest answer, not a guess.
+    """
+    if transaction is None:
+        return None
+    try:
+        return str(transaction.GetStatus())
+    except Exception:
+        return None
+
+
+def exception_outcome(transaction, requested=None, succeeded=None, failed=None):
+    """Return the `outcome` block for a reply built after an exception (D-14).
+
+    `transaction_status` is read from the transaction itself. `succeeded` is kept
+    only when that status is "Committed": a committed-then-raised call really did
+    change the model, so its items must show, while an uncommitted or unreadable
+    transaction changed nothing and reports an empty list. `failed` goes through
+    build_outcome's item-and-reason reduction like every other outcome.
+    """
+    status = transaction_status_of(transaction)
+    kept = list(succeeded or []) if status == "Committed" else []
+    return build_outcome(status, requested, kept, failed or [], [])

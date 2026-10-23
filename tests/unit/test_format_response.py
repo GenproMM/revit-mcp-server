@@ -190,6 +190,94 @@ def test_rolled_back_dict_is_not_yet_a_recognized_failure_signal():
     assert "ERROR DETAILS" not in out
 
 
+# --- the partial-outcome contract (phase 4: D-04, D-08, D-09) -----------------
+#
+# A mutating route that committed but could not do every item answers HTTP 200 with
+# status="partial" and an `outcome` block. Unlike 409 and 422, which _revit_call
+# collapses to an "Error: <code> - <body>" string that passes through verbatim, a 200
+# partial arrives here as a DICT. "partial" is deliberately NOT in the failure set
+# (that would hide the data that did succeed behind an ERROR DETAILS banner), so it
+# needs its own render branch that keeps every failed item and its reason visible.
+
+PARTIAL = {
+    "status": "partial",
+    "message": "Tagged 2 elements, 1 skipped",
+    "tagged_count": 2,
+    "outcome": {
+        "transaction_status": "Committed",
+        "requested": 3,
+        "succeeded": [1, 2],
+        "failed": [{"item": 7, "reason": "not found"}],
+        "revit_failures": [],
+    },
+}
+
+
+def _partial(failed_count):
+    reply = json.loads(json.dumps(PARTIAL))
+    reply["outcome"]["failed"] = [
+        {"item": 1000 + n, "reason": "reason {}".format(n)} for n in range(failed_count)]
+    return reply
+
+
+def test_partial_dict_shows_the_banner_the_counts_and_each_failed_item():
+    out = format_response(PARTIAL)
+    assert "=== PARTIAL SUCCESS ===" in out
+    assert "Tagged 2 elements, 1 skipped" in out
+    assert "Succeeded: 2 of 3" in out
+    assert "Failed 7: not found" in out
+    assert "ERROR DETAILS" not in out
+
+
+def test_partial_dict_without_requested_counts_succeeded_plus_failed():
+    reply = json.loads(json.dumps(PARTIAL))
+    reply["outcome"]["requested"] = None
+    reply["outcome"]["succeeded"] = [1]
+    assert "Succeeded: 1 of 2" in format_response(reply)
+
+
+def test_partial_dict_is_not_an_error_so_its_data_is_not_hidden():
+    """Alarm test (D-09): partial is deliberately outside the failure set.
+
+    A 200 partial carries valid data, so it must never render under ERROR DETAILS.
+    The branch that lists the failed items is what keeps the failures visible. If this
+    fails, an implicit error signal was added to format_response (the c1231f6 bug).
+    """
+    out = format_response({"status": "partial", "message": "m"})
+    assert "ERROR DETAILS" not in out
+    assert "=== PARTIAL SUCCESS ===" in out
+
+
+def test_partial_dict_without_an_outcome_block_still_renders_the_banner():
+    out = format_response({"status": "partial", "message": "m", "outcome": "garbled"})
+    assert "=== PARTIAL SUCCESS ===" in out and "Succeeded: 0 of 0" in out
+
+
+def test_partial_lists_exactly_100_failed_lines_for_100_failures():
+    out = format_response(_partial(100))
+    assert out.count("\nFailed ") == 100
+    assert "more in outcome.failed" not in out
+
+
+def test_partial_caps_failed_lines_at_100_and_counts_the_rest():
+    out = format_response(_partial(101))
+    assert out.count("\nFailed ") == 100
+    assert "... and 1 more in outcome.failed" in out
+    assert "Failed 1099: reason 99" in out
+    assert "Failed 1100:" not in out
+
+
+def test_422_all_failed_reaches_the_model_as_the_bridge_error_string_verbatim():
+    body = (
+        'Error: 422 - {"status": "failed", "error": "None of the 2 requested item(s) '
+        'succeeded", "outcome": {"failed": [{"item": 999999999, "reason": '
+        '"Element not found"}]}}'
+    )
+    out = format_response(body)
+    assert out == body
+    assert "999999999" in out and "Element not found" in out
+
+
 # --- the shared-secret 401 contract (Phase 3 logic, live from Phase 5) -------
 #
 # A mutation whose shared secret is missing, wrong, or unconfigured on the Revit

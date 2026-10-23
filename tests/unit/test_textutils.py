@@ -21,10 +21,15 @@ import re
 import pytest
 
 from revit_mcp.textutils import (
+    build_outcome,
+    classify_outcome,
+    exception_outcome,
+    finalize_outcome,
     normalize_string,
     parse_request_data,
     sanitize_string,
     sanitize_value,
+    transaction_status_of,
 )
 
 
@@ -289,3 +294,190 @@ def test_the_client_does_not_ask_pyrevit_to_parse_the_body():
         "POSTing application/json makes pyRevit parse the body itself, which "
         "raises TypeError under IronPython 3 before any route handler runs"
     )
+
+
+# --- honest outcomes (phase 4: D-03 schema, D-04 classifier, D-14 500 outcome) --
+#
+# classify_outcome is the single place that picks a mutating route's reply status and
+# HTTP code. build_outcome fixes the five-key schema and finalize_outcome assembles the
+# reply a route returns. They are pure so this truth table can pin them without Revit.
+
+@pytest.mark.parametrize("committed, n_ok, n_bad, expected", [
+    (False, 0, 0, ("rolled_back", 409)),
+    (False, 3, 0, ("rolled_back", 409)),
+    (False, 0, 2, ("rolled_back", 409)),
+    (False, 2, 2, ("rolled_back", 409)),
+    (True, 0, 0, ("success", 200)),
+    (True, 3, 0, ("success", 200)),
+    (True, 1, 1, ("partial", 200)),
+    (True, 5, 2, ("partial", 200)),
+    (True, 0, 1, ("failed", 422)),
+    (True, 0, 4, ("failed", 422)),
+])
+def test_classify_outcome_truth_table(committed, n_ok, n_bad, expected):
+    assert classify_outcome(committed, n_ok, n_bad) == expected
+
+
+def test_build_outcome_has_exactly_the_five_schema_keys():
+    outcome = build_outcome("Committed", 2, [1, 2], [], [])
+    assert sorted(outcome) == ["failed", "requested", "revit_failures", "succeeded",
+                               "transaction_status"]
+
+
+def test_build_outcome_returns_new_lists_in_input_order_and_keeps_duplicates():
+    succeeded = [5, 3, 5]
+    failures = [{"severity": "Warning"}]
+    outcome = build_outcome("Committed", 3, succeeded, [], failures)
+    assert outcome["succeeded"] == [5, 3, 5]
+    assert outcome["succeeded"] is not succeeded
+    assert outcome["revit_failures"] == failures
+    assert outcome["revit_failures"] is not failures
+
+
+def test_build_outcome_reduces_a_failed_entry_to_item_and_reason_only():
+    """A stray key (a body, a secret, a traceback) must not ride along (D-07)."""
+    outcome = build_outcome("Committed", 1, [], [
+        {"item": 3, "reason": None, "traceback": "x", "_mcp": "s"}], [])
+    assert outcome["failed"] == [{"item": 3, "reason": ""}]
+
+
+def test_build_outcome_keeps_item_types_and_requested_as_given():
+    outcome = build_outcome(None, 0, [7], [{"item": "0.name", "reason": "bad"},
+                                           {"item": 4, "reason": "worse"}], [])
+    assert outcome["failed"][0]["item"] == "0.name"
+    assert outcome["failed"][1]["item"] == 4 and isinstance(outcome["failed"][1]["item"], int)
+    assert outcome["requested"] == 0
+    assert build_outcome(None, None, [], [], [])["requested"] is None
+
+
+def test_build_outcome_never_sorts_failed_items():
+    outcome = build_outcome("Committed", 3, [], [
+        {"item": 9, "reason": "a"}, {"item": 2, "reason": "b"}, {"item": 9, "reason": "c"}], [])
+    assert [entry["item"] for entry in outcome["failed"]] == [9, 2, 9]
+
+
+COMMITTED = {"committed": True, "transaction_status": "Committed", "failures": []}
+
+
+def test_finalize_outcome_success_is_data_plus_status_and_outcome_and_data_is_not_mutated():
+    data = {"tagged_count": 2, "tag_ids": [10, 11]}
+    before = json.loads(json.dumps(data))
+    payload, http = finalize_outcome(COMMITTED, data, 2, [1, 2], [])
+    assert http == 200
+    assert data == before
+    assert payload["status"] == "success"
+    assert payload["tagged_count"] == 2 and payload["tag_ids"] == [10, 11]
+    assert payload["outcome"] == {"transaction_status": "Committed", "requested": 2,
+                                  "succeeded": [1, 2], "failed": [], "revit_failures": []}
+    assert "error" not in payload
+
+
+def test_finalize_outcome_overwrites_a_status_the_route_put_in_data():
+    payload, http = finalize_outcome(COMMITTED, {"status": "success"}, 1, [1], [
+        {"item": 2, "reason": "r"}])
+    assert (payload["status"], http) == ("partial", 200)
+
+
+def test_finalize_outcome_partial_is_200():
+    payload, http = finalize_outcome(COMMITTED, {"message": "m"}, 2, [1], [
+        {"item": 2, "reason": "Element not found"}])
+    assert http == 200 and payload["status"] == "partial"
+    assert payload["message"] == "m"
+    assert "error" not in payload
+
+
+def test_finalize_outcome_all_failed_is_422_with_a_truthy_error_naming_the_count():
+    payload, http = finalize_outcome(COMMITTED, {"tagged_count": 0}, 3, [], [
+        {"item": 1, "reason": "a"}, {"item": 2, "reason": "b"}, {"item": 3, "reason": "c"}])
+    assert http == 422 and payload["status"] == "failed"
+    assert payload["error"] and "3" in payload["error"]
+    assert payload["tagged_count"] == 0
+    assert len(payload["outcome"]["failed"]) == 3
+
+
+def test_finalize_outcome_422_error_counts_failed_items_when_requested_is_none():
+    payload, http = finalize_outcome(COMMITTED, {}, None, [], [{"item": 1, "reason": "a"}])
+    assert http == 422 and "1 requested" in payload["error"]
+
+
+def test_finalize_outcome_empty_call_is_an_honest_success():
+    payload, http = finalize_outcome(COMMITTED, {}, 0, [], [])
+    assert (payload["status"], http) == ("success", 200)
+    assert payload["outcome"]["requested"] == 0
+    assert payload["outcome"]["succeeded"] == [] and payload["outcome"]["failed"] == []
+
+
+@pytest.mark.parametrize("tx_status", ["RolledBack", "Pending", "Error"])
+def test_finalize_outcome_not_committed_is_409_rolled_back_with_the_status_verbatim(tx_status):
+    commit_result = {"committed": False, "transaction_status": tx_status,
+                     "failures": [{"severity": "Error", "description": "d"}]}
+    failed = [{"item": 9, "reason": "Element not found"}]
+    data = {"tagged_count": 1, "tag_ids": [10]}
+    payload, http = finalize_outcome(commit_result, data, 2, [1], failed)
+    assert http == 409
+    assert sorted(payload) == ["failures", "message", "outcome", "status", "transaction_status"]
+    assert payload["status"] == "rolled_back"
+    assert payload["transaction_status"] == tx_status
+    assert payload["failures"] == commit_result["failures"]
+    assert tx_status in payload["message"]
+    assert payload["outcome"]["transaction_status"] == tx_status
+    assert payload["outcome"]["succeeded"] == []
+    assert payload["outcome"]["failed"] == failed
+    assert payload["outcome"]["revit_failures"] == commit_result["failures"]
+
+
+def test_finalize_outcome_only_a_committed_flag_of_true_counts_as_committed():
+    for flag in (None, 0, "", "Committed"):
+        payload, http = finalize_outcome(
+            {"committed": flag, "transaction_status": "Committed", "failures": []},
+            {}, 1, [1], [])
+        assert http == 409 and payload["status"] == "rolled_back"
+
+
+class _Transaction(object):
+    def __init__(self, status=None, boom=False):
+        self._status = status
+        self._boom = boom
+
+    def GetStatus(self):
+        if self._boom:
+            raise RuntimeError("status unreadable")
+        return self._status
+
+
+def test_transaction_status_of_none_is_none():
+    assert transaction_status_of(None) is None
+
+
+def test_transaction_status_of_reads_the_status_as_text():
+    assert transaction_status_of(_Transaction("Committed")) == "Committed"
+
+
+def test_transaction_status_of_is_none_when_the_status_cannot_be_read():
+    assert transaction_status_of(_Transaction(boom=True)) is None
+
+
+def test_exception_outcome_keeps_succeeded_only_for_a_committed_transaction():
+    outcome = exception_outcome(_Transaction("Committed"), 2, [5], [{"item": 6, "reason": "r"}])
+    assert outcome == {"transaction_status": "Committed", "requested": 2, "succeeded": [5],
+                       "failed": [{"item": 6, "reason": "r"}], "revit_failures": []}
+
+
+@pytest.mark.parametrize("transaction", [
+    _Transaction("RolledBack"), _Transaction("Uninitialized"), _Transaction(boom=True), None])
+def test_exception_outcome_drops_succeeded_unless_committed(transaction):
+    outcome = exception_outcome(transaction, 2, [5], [])
+    assert outcome["succeeded"] == []
+    assert outcome["transaction_status"] == transaction_status_of(transaction)
+
+
+def test_exception_outcome_defaults_describe_a_call_that_died_before_any_item():
+    outcome = exception_outcome(None)
+    assert outcome == {"transaction_status": None, "requested": None, "succeeded": [],
+                       "failed": [], "revit_failures": []}
+
+
+def test_exception_outcome_failed_goes_through_the_reason_reduction():
+    outcome = exception_outcome(_Transaction("Committed"), 1, [],
+                                [{"item": 1, "reason": "r", "traceback": "secret"}])
+    assert outcome["failed"] == [{"item": 1, "reason": "r"}]

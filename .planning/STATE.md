@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v0.1
 current_phase: 04
 current_phase_name: Honest outcomes on every mutating route
-current_plan: 9
+current_plan: 11
 status: executing
-stopped_at: Completed 04-10-PLAN.md
-last_updated: "2026-10-23T18:39:41.570Z"
+stopped_at: Completed 04-09-PLAN.md
+last_updated: "2026-10-23T19:08:22.710Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 04 execution started
-state_head: 73de828e1402a259c85755174f6a34842ca4c453
+state_head: 05454bac851184438d9089257f8821e096720b97
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 47
-  completed_plans: 44
+  completed_plans: 46
 milestone_name: Доверенный мост
 ---
 
@@ -30,9 +30,9 @@ See: .planning/PROJECT.md (updated 2026-10-14)
 ## Current Position
 
 Phase: 04 (Honest outcomes on every mutating route) — EXECUTING
-Current Plan: 9
+Current Plan: 11
 Total Plans in Phase: 11
-Plan: 9 of 11
+Plan: 11 of 11
 Status: Ready to execute
 Last activity: 2026-10-23 — Phase 04 execution started
 
@@ -105,6 +105,8 @@ Progress: [████░░░░░░] 43% of phase 02 plans (19/20)
 | Phase 04 P06 | 11 min | 3 tasks | 3 files |
 | Phase 04 P07 | 25 min | 2 tasks | 2 files |
 | Phase 04 P10 | 9 min | 2 tasks | 2 files |
+| Phase 04 P08 | 6 min | 2 tasks | 6 files |
+| Phase 04 P09 | 20 min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -140,6 +142,8 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 04]: 04-06: edit_family never reloads after a rolled-back family commit (409) or when no item applied (422); family changed only if committed and an item succeeded
 - [Phase 04]: 04-07: colour routes keep their HTTP 200 error body on exception and gain outcome; world-wide 500 invariant branches to 200+status error for colour rows
 - [Phase 04]: 04-10: a preflight stop (POSTS_SENT=0) may be rerun to a fresh --out; any run that handed a POST to the bridge (a raising POST counts) consumes the one-shot live gate — Live write steps never repeat; posts_sent is counted before each revit_post call
+- [Phase 04]: 04-08: D-02 static rule enforced by scripts/conventions.py (no Commit outside module-level commit_and_report, no discarded swallower), wired into check_route_module; contributor kit zip must be rebuilt at release
+- [Phase 04]: 04-09: tool docstrings promise only the statuses their route can return (classes P/S/E/A/EXEMPT), pinned by tests/unit/test_outcome_docstrings.py
 
 ### Roadmap Evolution
 
@@ -172,7 +176,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T18:39:41.393Z
-Stopped at: Completed 04-10-PLAN.md
+Last session: 2026-10-23T19:08:22.518Z
+Stopped at: Completed 04-09-PLAN.md
 Resume file: None
 Next boundary: prepare bounded 02-02 recheck and require full Revit close/reopen before any live route; no G6 or broad rollout

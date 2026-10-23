@@ -186,7 +186,7 @@ Plans:
   3. A batch operation run against a mix of valid and invalid element ids returns the succeeded and skipped/failed ids alongside each other, not only a count.
   4. A batch operation's partial failure produces a status distinguishable both from full success and from full failure — exercised live against at least one batch route with an intentionally-invalid id mixed in.
 
-**Plans:** 8/11 plans executed
+**Plans:** 10/11 plans executed
 
 Plans:
 
@@ -209,8 +209,8 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 04-08-PLAN.md — D-02 lock-in: conventions checks (no Commit outside commit_and_report, swallower kept), scaffolds, CONTRIBUTING.md, CLAUDE.md
-- [ ] 04-09-PLAN.md — Tool docstrings state only the PARTIAL SUCCESS / 422 / 409 replies each route can return; docstring contract test (required and forbidden phrases) over all 31 mutation tools
+- [x] 04-08-PLAN.md — D-02 lock-in: conventions checks (no Commit outside commit_and_report, swallower kept), scaffolds, CONTRIBUTING.md, CLAUDE.md
+- [x] 04-09-PLAN.md — Tool docstrings state only the PARTIAL SUCCESS / 422 / 409 replies each route can return; docstring contract test (required and forbidden phrases) over all 31 mutation tools
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -283,7 +283,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Serialization and configurable addressing | 7/7 | Complete    | 2026-10-14 |
 | 2. Live identity, ambiguity refusal, and multi-document addressing | 20/20 | Complete    | 2026-10-23 |
 | 3. Secret gate and payload integrity (unit-verified) | 9/9 | Complete    | 2026-10-23 |
-| 4. Honest outcomes on every mutating route | 8/11 | In Progress|  |
+| 4. Honest outcomes on every mutating route | 10/11 | In Progress|  |
 | 5. Live secret gate and integrity enforcement | 0/TBD | Not started | - |
 | 6. Structured audit log of true outcomes | 0/TBD | Not started | - |
 | 7. Repository-owned mutation safety and human approval | 0/TBD | Not planned | - |

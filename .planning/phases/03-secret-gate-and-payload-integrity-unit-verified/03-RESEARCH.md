@@ -497,25 +497,32 @@ except Exception as exc:
 | A6 | `git` is available on whichever machine runs `publish-extension.cmd` and the working copy there is a git checkout (build-payload tolerates a missing `git` for the version stamp, `build-payload.cmd:66-67`) | Pattern 5 | Manifest step must fail loudly rather than skip; if the publisher has no checkout, INTG-01 cannot be met |
 | A7 | Running `publish-extension.cmd` against a scratch `MCP_SHARE_ROOT` (config.cmd allows environment overrides) is safe for an optional Windows-only smoke test | Validation | Only a test-design choice; run against `%TEMP%` only |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All five are settled by the Phase 3 plans; each carries its own RESOLVED line below.
 
 1. **Default location of `MCP_SECRET_FILE` (Claude's-discretion value, but it has a security flavour).**
+   - RESOLVED (plan 03-07, flagged assumption): the default is `%MCP_SHARE_ROOT%\_build\bridge_secret` with an environment override, documented in `deploy/config.cmd` and CLAUDE.md together with C5. The user may still prefer a build-server-local path; that is a one-line `config.cmd` change (D-07 rated reversible).
    - What we know: D-07 wants it outside `ext\` and `payload\`; `config.cmd` defaults `MCP_SHARE_ROOT` to `\\srv-dfs\BIM\06_RevitMCP`; both scripts are documented as "RUN ON THE BUILD SERVER".
    - What's unclear: whether the build operator share is more restricted than the fleet-readable share.
    - Recommendation: default to a sibling folder under the share that is not mirrored (for example `%MCP_SHARE_ROOT%\_build\bridge_secret`) with an environment override, and document in `deploy/SETUP-RUNBOOK.md` that the file is readable by whoever can read it, and that anyone who can read `ext\` or the installed payload holds the secret anyway (C5). Ask the user at plan review if a build-server-local path is preferred.
 
 2. **Phase 5 mechanism for D-02 ("handler receives a cleaned payload") given C2.**
+   - RESOLVED (plan 03-01, reconciliation C2): Phase 3 ships composable pure functions and no decorator, builds `split_envelope` exactly as D-02 locks it, and records whether a guard may rewrite `request.data` as a Phase 5 discuss item.
    - What we know: handlers re-parse `request.data` themselves; startup wrapper is test-forbidden.
    - What's unclear: whether the guard may rewrite `request.data` on pyRevit's `Request` object.
    - Recommendation: not a Phase 3 task; record in the Phase 5 discuss agenda. Phase 3 keeps `split_envelope` per D-02.
 
 3. **Should the IronPython dialect guard be generalised in `scripts/conventions.py`?**
+   - RESOLVED (plan 03-06): `scripts/conventions.py` is not touched (no contrib-kit drift); a trust-specific AST dialect guard over `revit_mcp/trust.py` and `revit_mcp/integrity.py` is added in `tests/unit/test_trust_dialect.py`.
    - What we know: it misses `{**a}`, `[*a]`, `bytes.hex()`. `scripts/conventions.py` is copied into `contrib-kit/` by `scripts/build_contrib_kit.py` ("Rebuild whenever scripts/conventions.py changes").
    - Recommendation: do **not** touch `conventions.py` in Phase 3 (kit drift); add a trust-specific AST test instead. D-17's "conventions must accept the new files" is already true: `test_conventions.py` enumerates `revit_mcp/*.py` automatically (`REVIT_MCP_FILES`, line 53), and a pure helper with no registrar passes `check_route_registrar`.
 
 4. **Edge: should `unexpected` cover `*.py` in subdirectories of `revit_mcp/`?** Currently none exist (`git ls-files revit_mcp` is flat). Recommendation: top-level listing only plus manifest-listed paths (matches `startup._domain_modules`, which lists only the package directory).
+   - RESOLVED (plan 03-04): `observe_tree` lists only the top level of `revit_mcp/` plus the manifest-listed paths; every unlisted top-level `*.py`, underscore-prefixed names included, is `unexpected`.
 
 5. **Does Phase 3 need a Phase 7-aware envelope?** 07-CONTEXT.md (staged) says secret/approval must not be model-visible arguments and reuses "Phase 3/5 trust boundary". Recommendation: nothing to change; return the full envelope dict from `split_envelope` and reject client-supplied `_mcp` in `with_envelope`.
+   - RESOLVED (plan 03-01, reconciliation C1): `split_envelope` returns the whole `_mcp` dict, so `call_id` and a Phase 7 approval token can ride it without a schema change, and `bridge.with_envelope` raises on data that already carries `_mcp`.
 
 ## Environment Availability
 

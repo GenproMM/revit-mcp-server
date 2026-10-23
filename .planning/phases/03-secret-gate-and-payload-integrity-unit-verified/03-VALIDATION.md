@@ -22,7 +22,7 @@ created: "2026-10-23"
 |----------|-------|
 | **Framework** | pytest >=8 (dev group; 9.1.1 observed), Python 3.13.7 via `uv run` |
 | **Config file** | `pyproject.toml` `[tool.pytest.ini_options] testpaths = ["tests/unit"]`; shared setup `tests/unit/conftest.py` |
-| **Quick run command** | `uv run pytest tests/unit/test_trust_secret.py tests/unit/test_trust_envelope.py tests/unit/test_trust_integrity.py tests/unit/test_trust_listeners.py tests/unit/test_integrity_reader.py tests/unit/test_make_manifest.py tests/unit/test_secret_pipeline.py tests/unit/test_bridge_secret_client.py tests/unit/test_trust_dialect.py -q` |
+| **Quick run command** | `uv run pytest tests/unit/test_secret_gate_e2e.py tests/unit/test_trust_secret.py tests/unit/test_trust_envelope.py tests/unit/test_integrity_e2e.py tests/unit/test_trust_integrity.py tests/unit/test_trust_listeners.py tests/unit/test_integrity_reader.py tests/unit/test_make_manifest.py tests/unit/test_secret_pipeline.py tests/unit/test_bridge_secret_client.py tests/unit/test_trust_dialect.py tests/unit/test_probe_ipy_trust.py -q` (only the files that exist so far) |
 | **Full suite command** | `uv run pytest tests/unit -q` |
 | **Estimated runtime** | ~25 seconds (baseline 4054 passed, 3 skipped, 22 s) |
 
@@ -62,6 +62,8 @@ Task IDs are filled in by the planner; rows below are keyed by requirement / suc
 | Regression | `trust`/`integrity` classified as helpers; conventions pass | unit | `uv run pytest tests/unit/test_registration.py tests/unit/test_conventions.py tests/unit/test_phase2_inventory.py -q` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+
+**Planner task mapping (2026-10-23):** SC1/SEC-01/SEC-02 → 03-01 T1-T2, 03-03 T1; SC1 IronPython-targeted → 03-06 T2; SC2/SEC-04 → 03-01 T2; SC2 live → 03-08 T1-T3; SC3/SEC-03 → 03-03 T2; SC4/SEC-06 → 03-01 T2, 03-02 T1, 03-03 T1; SEC-05 → 03-01 T2; SEC-07 → 03-06 T1; SEC-08/SC7 → 03-02 T1-T2, 03-07 T1-T2; INTG-01/SC5 → 03-04 T1, 03-05 T2; INTG-02/05/06 → 03-04 T1-T2; INTG-07/SC6 → 03-04 T2, 03-05 T1; INTG-03/SC6 → 03-05 T1; INTG-04 → 03-04 T1-T2; INTG-08/SC8 → 03-05 T1; D-10 client half → 03-01 T1, 03-03 T1; regression (helpers, conventions) → 03-01 T2, 03-04 T2. Added files beyond the research list: `test_secret_gate_e2e.py` and `test_integrity_e2e.py` (the two tracers), `test_probe_ipy_trust.py` (offline tests of the live probe).
 
 ---
 

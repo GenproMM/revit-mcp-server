@@ -36,7 +36,7 @@ instead of one, and the `startup.py` chokepoint is touched twice.
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Serialization and configurable addressing** - Every call from this server except `/status/` queues instead of racing, `/status/` stays responsive throughout, and the Revit port this server talks to is a deployment setting instead of a hardcoded constant — one server process per Revit instance; choosing a Revit per call is Phase 2 (completed 2026-10-14)
-- [ ] **Phase 2: Live identity, ambiguity refusal, and multi-document addressing** - Every response names the document and process that handled it, two listeners on one port produce an explicit refusal instead of a coin-flip, and an engineer can list, address, and switch between documents open in one Revit session
+- [x] **Phase 2: Live identity, ambiguity refusal, and multi-document addressing** - Every response names the document and process that handled it, two listeners on one port produce an explicit refusal instead of a coin-flip, and an engineer can list, address, and switch between documents open in one Revit session (completed 2026-10-23)
 - [ ] **Phase 3: Secret gate and payload integrity (unit-verified)** - The shared-secret compare and the file-manifest integrity check are built and unit-tested on both runtimes, plus the build pipeline that generates the secret and the manifest, ready to wire in
 - [ ] **Phase 4: Honest outcomes on every mutating route** - Every mutating route, including the two known stragglers, reports what actually happened in Revit rather than an assumed success
 - [ ] **Phase 5: Live secret gate and integrity enforcement** - The Phase 3 secret gate and integrity check are wired into the live chokepoint and binding
@@ -106,6 +106,27 @@ Plans:
   9. Addressing a document that was closed after being listed produces a clear, named error rather than the call silently operating on a different, currently-open document.
 
 **Plans**: TBD
+
+- [x] 02-01-PLAN.md
+- [x] 02-02-PLAN.md
+- [x] 02-03-PLAN.md
+- [x] 02-04-PLAN.md
+- [x] 02-05-PLAN.md
+- [x] 02-06-PLAN.md
+- [x] 02-07-PLAN.md
+- [x] 02-08-PLAN.md
+- [x] 02-09-PLAN.md
+- [x] 02-10-PLAN.md
+- [x] 02-11-PLAN.md
+- [x] 02-12-PLAN.md
+- [x] 02-13-PLAN.md
+- [x] 02-14-PLAN.md
+- [x] 02-15-PLAN.md
+- [x] 02-16-PLAN.md
+- [x] 02-17-PLAN.md
+- [x] 02-18-PLAN.md
+- [x] 02-19-PLAN.md
+- [x] 02-20-PLAN.md
 
 ### Phase 3: Secret gate and payload integrity (unit-verified)
 
@@ -206,7 +227,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Serialization and configurable addressing | 7/7 | Complete    | 2026-10-14 |
-| 2. Live identity, ambiguity refusal, and multi-document addressing | 0/TBD | Not started | - |
+| 2. Live identity, ambiguity refusal, and multi-document addressing | 20/20 | Complete    | 2026-10-23 |
 | 3. Secret gate and payload integrity (unit-verified) | 0/TBD | Not started | - |
 | 4. Honest outcomes on every mutating route | 0/TBD | Not started | - |
 | 5. Live secret gate and integrity enforcement | 0/TBD | Not started | - |

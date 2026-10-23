@@ -279,7 +279,7 @@ except Exception as e:
     }, status=503)
 ```
 
-This helper is an IronPython-3.4 file: UTF-8 encoding cookie on line 1; no f-strings, `async`, `pathlib`, `typing`, `dataclasses`, or `secrets`; relative sibling imports only. Build opaque process/document descriptors through allowed Revit/.NET facilities only after G1/G2 establish what is stable. `title` and `path` are presentation fields, never the unique key. Avoid caching `revit.doc` or a `Document` object between requests.
+This helper is an IronPython-3.4 file: UTF-8 encoding cookie on line 1; no f-strings, `async`, `pathlib`, `typing`, `dataclasses`, or `secrets`; relative sibling imports only. Build opaque process/document descriptors through allowed Revit/.NET facilities only after G1/G2 establish what is stable. `title` and `path` are presentation fields, never the unique key. Never cache `revit.doc` or assume a previous active document remains active. A registry may retain a lifetime `Document` reference only under a measured, checkpoint-approved binding mechanism: recheck `IsValidObject` and exactly one `Equals` match against request-time enumeration, retire invalid/missing lifetimes and tombstone their tokens, and refuse ambiguity. The 2026-10-16 retained-reference candidate is not yet checkpoint-approved; wrapper hashes are diagnostics, not identity or native handles.
 
 **No exact analog:** the codebase has no session-token/document-token registry. Keep the new module a small pure-ish descriptor/resolution provider invoked in the API context; do not import one route domain from another. `startup.py` discovery treats helpers without a registrar as helpers, which is acceptable.
 

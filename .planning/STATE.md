@@ -1,20 +1,21 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.1
-current_phase: 02
-current_phase_name: Live identity, ambiguity refusal, and multi-document addressing
-current_plan: 20
-status: executing
-stopped_at: Completed 02-17-PLAN.md
-last_updated: "2026-10-22T20:08:12.400Z"
-last_activity: 2026-10-22
-last_activity_desc: 02-17 complete (exhaustive offline tool/route regression inventory; no production change); next 02-18 (live acceptance)
-state_head: f7514c5319218ffb617b7ca2757b3aad0a8cee08
+current_phase: 04
+current_phase_name: Honest outcomes on every mutating route
+current_plan: Not started
+status: planning
+stopped_at: Phase 03 complete, ready to plan Phase 04
+last_updated: "2026-10-23T12:36:55.890Z"
+last_activity: 2026-10-23
+last_activity_desc: Phase 03 complete, transitioned to Phase 04
+state_head: 4ed1ea468989211a6acd9033020a398f8d85de1a
 progress:
   total_phases: 7
-  completed_phases: 1
-  total_plans: 27
-  completed_plans: 26
+  completed_phases: 3
+  total_plans: 36
+  completed_plans: 36
+  percent: 43
 milestone_name: Доверенный мост
 ---
 
@@ -25,24 +26,24 @@ milestone_name: Доверенный мост
 See: .planning/PROJECT.md (updated 2026-10-14)
 
 **Core value:** Ассистент может достоверно читать и изменять модель Revit — и инженер может доверять тому, что ответ сервера описывает то, что действительно произошло.
-**Current focus:** Phase 02 — Live identity, ambiguity refusal, and multi-document addressing
+**Current focus:** Phase 03 — Secret gate and payload integrity (unit-verified)
 
 ## Current Position
 
-Phase: 02 (Live identity, ambiguity refusal, and multi-document addressing) — EXECUTING
-Current Plan: 20
-Total Plans in Phase: 20
-Plan: 02-17 complete (exhaustive offline regression inventory: every registered tool and every route handler is derived from the real registrars/@api.route source, classified by what it does, and checked against the phase contract; an unclassified tool or route, a handler without its guard or without uiapp/uidoc/doc, a read that reaches a transaction, a wrapper in startup.py, a domain-to-domain import or a growing exception list all fail; selector, netstat, listener-ordering, stale-selector and concurrency property tables added; no production file changed, no omission found; true counts 59 tools / 56 routes / 24 route domains / 25 tool domains / 31 guarded mutations; offline, 3752 unit tests passed, 3 skipped). Done in phase 02 (19/20, counted from SUMMARY files on disk): 02-20, 02-01, 02-02, 02-03, 02-19, 02-04, 02-05, 02-06, 02-07, 02-08, 02-09, 02-10, 02-11, 02-12, 02-13, 02-14, 02-15, 02-16, 02-17; remaining 02-18 (live acceptance)
-Status: WAVE 11 COMPLETE (02-17 done, offline inventory; next 02-18, the live acceptance plan, needs separate user authorization). Still required live in 02-18: G2-production same-title pair and close-then-replacement, G5-production duplicate-listener refusal, saved-workshared activation, behavior of the two HTTP-thread routes (/model_info/ and /status/, deliberately unchanged); G6 not authorized. 02-07 live checkpoint RESOLVED observed (Revit 2024 PID 57588, g34-production-3.json, machine-local): G3 summary/levels reads observed A/B and B/A with ui_switched=false; G4 observed for the saved existing-path class only (allow 200 activated; unsaved and detached 422, no dialog); saved-workshared not-run. RULE: every route handler MUST declare uiapp, uidoc or doc (now pinned by test_phase2_inventory.py with an exact two-route allow-list); revit_mcp/ edits need a full Revit restart before live runs (never Reload). Follow-up concern: /model_info/ and /status/ handlers run on the HTTP thread (not changed). 02-12..02-15 revit_mcp/ edits (identity, annotation, building, colors, detail, document, documentation, editing, interop, placement, mep, parameters, rooms, structure, tags, transforms, view_management, worksharing, code_execution) need a full Revit close/reopen before any live run; route behavior not observed live. 02-17 changed no revit_mcp/ or production file. CLAUDE.md counts (54 tools / 51 routes / 23 domains) are stale: true values 59 / 56 / 24. execute_code enabled (D-15). workflow.use_worktrees=false in .planning/config.json (dirty tree)
-Last activity: 2026-10-22 - 02-17 complete (exhaustive tool/route inventory and edge-shape/concurrency tables; offline, no production change); SUMMARY committed f7514c5
+Phase: 04 — Honest outcomes on every mutating route
+Current Plan: Not started
+Total Plans in Phase: 8
+Plan: 8 of 8
+Status: Ready to plan
+Last activity: 2026-10-23 — Phase 03 complete, transitioned to Phase 04
 
-Progress: [█████████▌] 95% of phase 02 plans (19/20)
+Progress: [████░░░░░░] 43% of phase 02 plans (19/20)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 7
+- Total plans completed: 36
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -51,6 +52,8 @@ Progress: [█████████▌] 95% of phase 02 plans (19/20)
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 7 | - | - |
+| 02 | 20 | - | - |
+| 03 | 9 | - | - |
 
 **Recent Trend:**
 
@@ -86,6 +89,15 @@ Progress: [█████████▌] 95% of phase 02 plans (19/20)
 | Phase 02 P15 | 35min | 2 tasks | 6 files |
 | Phase 02 P16 | n/a | 2 tasks | 6 files |
 | Phase 02 P17 | not timed | 2 tasks | 6 files |
+| Phase 03 P01 | 12 min | 2 tasks | 6 files |
+| Phase 03 P02 | 3 min | 2 tasks | 4 files |
+| Phase 03 P03 | 3 min | 2 tasks | 3 files |
+| Phase 03 P04 | 4 min | 2 tasks | 6 files |
+| Phase 03 P05 | 20 min | 2 tasks | 2 files |
+| Phase 03 P06 | 5 min | 2 tasks | 3 files |
+| Phase 03 P07 | 25 min | 2 tasks | 6 files |
+| Phase 03 P08 | 8 min (continuation only) | 3 tasks | 6 files |
+| Phase 03 P09 | 22 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -110,6 +122,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 02]: 02-06: addressed summary/levels reads resolve via resolve_document (never the mutation guard), report ui_switched as an observation (null when unreadable), exactly two inactive-capable read routes; live recheck is 02-07 — G3 document-only-path measured only the diagnostic button; production routes unproven until live recheck
 - [Phase 02]: 02-14: guard MEP, parameter, room, structure and tag mutations as thin shells over unchanged bodies; set_parameter 409 rolled_back stays an error and gains document/process attribution
 - [Phase 02]: 02-17: exhaustive inventory by discovery plus hand classification; no production omission found; counts 59 tools / 56 routes / 24 route domains / 31 guarded mutations
+- [Phase 03]: 03-04: underscore-prefixed unlisted revit_mcp/*.py count as unexpected in the integrity manifest (D-12) — startup discovery skips them as domains, but they are shipped code any module can import
 
 ### Roadmap Evolution
 
@@ -142,7 +155,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-22T20:08:12.343Z
-Stopped at: Completed 02-17-PLAN.md
+Last session: 2026-10-23T12:31:13.440Z
+Stopped at: Phase 03 complete, ready to plan Phase 04
 Resume file: None
 Next boundary: prepare bounded 02-02 recheck and require full Revit close/reopen before any live route; no G6 or broad rollout

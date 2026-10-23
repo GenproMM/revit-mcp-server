@@ -25,7 +25,6 @@ instead of one, and the `startup.py` chokepoint is touched twice.
 
 ## Phases
 
-
 **Releases:** Phases 3–7 each carry a **Release checkpoint**. When a phase closes, offer the release before routing to the next phase — protocol, checklist and ledger in `.planning/RELEASES.md`.
 
 **Phase Numbering:**
@@ -37,7 +36,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Serialization and configurable addressing** - Every call from this server except `/status/` queues instead of racing, `/status/` stays responsive throughout, and the Revit port this server talks to is a deployment setting instead of a hardcoded constant — one server process per Revit instance; choosing a Revit per call is Phase 2 (completed 2026-10-14)
 - [x] **Phase 2: Live identity, ambiguity refusal, and multi-document addressing** - Every response names the document and process that handled it, two listeners on one port produce an explicit refusal instead of a coin-flip, and an engineer can list, address, and switch between documents open in one Revit session (completed 2026-10-23)
-- [ ] **Phase 3: Secret gate and payload integrity (unit-verified)** - The shared-secret compare and the file-manifest integrity check are built and unit-tested on both runtimes, plus the build pipeline that generates the secret and the manifest, ready to wire in
+- [x] **Phase 3: Secret gate and payload integrity (unit-verified)** - The shared-secret compare and the file-manifest integrity check are built and unit-tested on both runtimes, plus the build pipeline that generates the secret and the manifest, ready to wire in (completed 2026-10-23)
 - [ ] **Phase 4: Honest outcomes on every mutating route** - Every mutating route, including the two known stragglers, reports what actually happened in Revit rather than an assumed success
 - [ ] **Phase 5: Live secret gate and integrity enforcement** - The Phase 3 secret gate and integrity check are wired into the live chokepoint and binding
 - [ ] **Phase 6: Structured audit log of true outcomes** - Every mutation lands in a local, rotation-capped JSONL log carrying the same honest outcome the client saw, without leaking the secret
@@ -145,7 +144,34 @@ Plans:
   7. The build pipeline (`deploy/config.cmd` or equivalent) generates one shared secret and one file-hash manifest per build, consumed identically by both the payload and the extension side, immediately after the `revit_mcp` copy step so the manifest cannot describe a different tree than what shipped.
   8. On the dev machine's junction layout, running the integrity check against the live working tree reports `verified_match` (or an explicit, non-blocking `unverifiable`) — never a spurious mismatch that would (once wired in Phase 5) block mutations for every developer.
 
-**Plans**: TBD
+**Plans:** 9/9 plans complete
+
+Plans:
+
+- [x] 03-09-PLAN.md
+
+**Wave 1**
+
+- [x] 03-01-PLAN.md — Tracer: secret envelope end to end (with_envelope -> unchanged _send -> split_envelope/check_secret -> visible 401) plus compare, leak and method hardening in revit_mcp/trust.py
+- [x] 03-02-PLAN.md — deploy/secret_tool.py (create once, stage, verify), scripts/dev_secret.py, .gitignore entries
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 03-03-PLAN.md — bridge.load_secret with parity to trust.py, inert send-path pin, the 401 format_response pair
+- [x] 03-04-PLAN.md — Integrity slice end to end: make_manifest.py (git ls-files), integrity.py reader, evaluate_integrity, visible 423
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 03-05-PLAN.md — Hardening: check never writes, unreachable is never mismatch, dev junction quiet, generator build guards
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [x] 03-06-PLAN.md — classify_listeners (SEC-07) and the IronPython 3 engine simulation / 3.5+ construct guard
+- [x] 03-07-PLAN.md — Build wiring: config.cmd MCP_SECRET_FILE, publish-extension.cmd and build-payload.cmd staging and manifest, gate.py pair check, CLAUDE.md
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [x] 03-08-PLAN.md — Live D-04 check (human-run): hashlib and the new modules in pyRevit's engine, recorded in code and validation
 
 ### Phase 4: Honest outcomes on every mutating route
 
@@ -228,7 +254,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Serialization and configurable addressing | 7/7 | Complete    | 2026-10-14 |
 | 2. Live identity, ambiguity refusal, and multi-document addressing | 20/20 | Complete    | 2026-10-23 |
-| 3. Secret gate and payload integrity (unit-verified) | 0/TBD | Not started | - |
+| 3. Secret gate and payload integrity (unit-verified) | 9/9 | Complete    | 2026-10-23 |
 | 4. Honest outcomes on every mutating route | 0/TBD | Not started | - |
 | 5. Live secret gate and integrity enforcement | 0/TBD | Not started | - |
 | 6. Structured audit log of true outcomes | 0/TBD | Not started | - |

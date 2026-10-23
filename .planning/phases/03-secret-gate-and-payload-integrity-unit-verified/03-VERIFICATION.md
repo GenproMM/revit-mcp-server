@@ -1,11 +1,29 @@
 ---
 phase: 03-secret-gate-and-payload-integrity-unit-verified
 verified: 2026-10-23T00:00:00Z
-status: human_needed
-score: 8/8 roadmap success criteria verified (SC6 verified as written; one D-13 residual needs a developer decision)
+status: passed
+score: 8/8 roadmap success criteria verified
 covered_files:
   - .gitignore
   - .planning/REQUIREMENTS.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-01-PLAN.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-01-SUMMARY.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-02-PLAN.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-02-SUMMARY.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-03-PLAN.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-03-SUMMARY.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-04-PLAN.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-04-SUMMARY.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-05-PLAN.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-05-SUMMARY.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-06-PLAN.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-06-SUMMARY.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-07-PLAN.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-07-SUMMARY.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-08-PLAN.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-08-SUMMARY.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-09-PLAN.md
+  - .planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-09-SUMMARY.md
   - CLAUDE.md
   - bridge.py
   - deploy/build-payload.cmd
@@ -18,21 +36,56 @@ covered_files:
   - revit_mcp/trust.py
   - scripts/dev_secret.py
   - scripts/probe_ipy_trust.py
-covered_digest: "v1:sha256:5f06008181b49387e0d8d4583681bf0fd6999fba40d500af0fe1f0fc28de44b6"
+  - tests/unit/test_integrity_reader.py
+  - tests/unit/test_trust_dialect.py
+  - tests/unit/test_trust_integrity.py
+covered_digest: "v1:sha256:26f89dd52727185d0ffffa96d20a3ee73d7a591def312939e439ba4fc8cae920"
 behavior_unverified: 0
 overrides_applied: 0
-human_verification:
-  - test: "Decide on WR-01: fix now, carry into Phase 5 scope, or accept as documented residual"
-    expected: "A decision recorded. If fix: integrity.check_integrity corroborates absence (root and _manifest.json still reachable after observe_tree) before reporting missing files, or treats scope-dir ENOENT / all-listed-files-absent as read_error."
-    why_human: "A dropped UNC share mid-scan maps to ENOENT and yields verified_mismatch (423 once wired) instead of unverifiable. Whether this narrow window is acceptable is a risk decision, not something a test can settle."
+re_verification:
+  previous_status: human_needed
+  previous_score: 8/8 (one open item)
+  gaps_closed:
+    - "WR-01: a network share dropped mid-scan reported verified_mismatch instead of unverifiable (D-13 / SC6 residual). Closed by gap-closure plan 03-09 (commits f54d3cd, af65ad2, 4ed1ea4)."
+  gaps_remaining: []
+  regressions: []
 ---
 
 # Phase 3: Secret gate and payload integrity (unit-verified) Verification Report
 
 **Phase Goal:** The logic that will reject an unauthenticated mutation and detect a tampered `revit_mcp/` payload exists, is correct on both runtimes per the unit-test suite, and is generated consistently by the build pipeline, but is not yet wired into a live route (inert by design; live enforcement is Phase 5).
 **Verified:** 2026-10-23
-**Status:** human_needed (all code-level criteria verified; one warning needs a developer decision)
-**Re-verification:** No, initial verification
+**Status:** passed
+**Re-verification:** Yes, after gap closure. The previous report (status `human_needed`) had one open item, WR-01. The user chose to fix it; plan 03-09 executed.
+
+## Re-verification focus: WR-01 is closed
+
+I read the code and ran the checks myself, not from the SUMMARY.
+
+**Mechanism (read in `revit_mcp/integrity.py` and `revit_mcp/trust.py`):**
+
+- `integrity._list_names` is the listing twin of `_read_bytes`: ENOENT gives `absent`, any other error gives `error`.
+- `observe_tree` now returns a fourth key, `absent` (sorted): every listed path that read as ENOENT, plus `revit_mcp/` when the scope listing read as ENOENT. Previously the scope-listing ENOENT was swallowed.
+- `unconfirmed_absences(root, manifest, absent)` first re-reads the manifest, which must parse and equal the first read. If it does not, every absent entry stays unconfirmed and nothing else is touched. Only then does it re-read each absent entry (the listing for `revit_mcp/`, `_read_bytes` for a file), and an entry counts as confirmed only if it is absent again.
+- `check_integrity` calls it only when `absent` is non-empty, so a matching tree costs no extra I/O (pinned by `test_matching_tree_reads_the_manifest_once`).
+- `trust.evaluate_integrity` accepts the optional `unconfirmed` key. A non-empty list gives `unverifiable/absence_unconfirmed`. A non-list gives `read_error`. An absent or empty key changes nothing. Precedence is manifest_missing, manifest_unreadable, read_error (shape or unreadable), absence_unconfirmed, then mismatch or match. `REASON_ABSENCE_UNCONFIRMED = "absence_unconfirmed"` is the new reason, the one the user approved.
+- The reader still opens only in `"rb"`; the only `open(` matches in `integrity.py` are `"rb"` and a docstring. `check_integrity` still wraps everything and returns `unverifiable/read_error` on any exception.
+
+**Experiment (CPython, temp dir outside the repo, script in the scratchpad; the tree was built there and removed afterward):**
+
+| Scenario | Result |
+|----------|--------|
+| Intact tree | `verified_match` |
+| One file genuinely deleted, tree reachable | `verified_mismatch`, `missing == ['revit_mcp/b.py']` |
+| Whole `revit_mcp/` genuinely deleted, root reachable | `verified_mismatch`, all three files listed missing |
+| Share drop: manifest read once, then every `open` and `os.listdir` raises `OSError(ENOENT, msg, None, 53)` | `unverifiable / absence_unconfirmed`, `missing == []` |
+| Everything raising ENOENT from the first open | `unverifiable / manifest_missing` (the pre-existing D-13 path, still non-blocking) |
+| One file modified, tree reachable | `verified_mismatch`, `modified == ['revit_mcp/a.py']` |
+| Real repo tree (dev-junction layout) | `unverifiable / manifest_missing`, nothing written (no `_manifest.json`, `__pycache__` or `_bridge_secret` in `git status`) |
+
+SC6 therefore holds in both directions: a dropped share never reads as tampering, and a real single-file deletion on a reachable tree still reads as a mismatch with the file named. My first run of this script gave a spurious `unverifiable` on the tamper case. That was my own harness leaking a patched `open` into the module and not the code under test. I removed the leak and the rerun is the table above.
+
+**Test evidence:** `uv run pytest tests/unit -q` gives **4692 passed, 3 skipped** in 26 s. That matches what the orchestrator saw. The earlier verification had 4667 passed, so there are 25 new tests and no loss. The focused files `test_trust_dialect`, `test_integrity_reader`, `test_trust_integrity` and `test_registration` give 216 passed. New tests cover the share drop after the manifest read, a drop after some files were read, a blip that recovers before corroboration, a manifest changed between reads, genuine-deletion confirmation, one manifest read on a matching tree, `observe_tree` reporting `absent`, a raising corroboration, no path or error text in the result, an IronPython-3 engine simulation of a genuine deletion, the pinned reason value, precedence, wrong-type `unconfirmed`, and a property test that `unconfirmed` never yields a mismatch. `test_integrity_423_is_never_built_from_an_unconfirmed_result` is also present.
 
 ## Goal Achievement
 
@@ -40,125 +93,52 @@ human_verification:
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| SC1 | Secret-compare rejects wrong or missing secret and accepts correct one, on CPython and IronPython-targeted logic, secret read from the `text/plain` body via `parse_request_data()` | VERIFIED | `revit_mcp/trust.py` `split_envelope` goes only through `textutils.parse_request_data`; `check_secret` returns ok/missing/mismatch/server_not_configured. Tests: `test_trust_envelope.py`, `test_trust_secret.py`, `test_trust_dialect.py` (IPY dialect simulation + 3.5+ construct guard), `test_secret_gate_e2e.py` (through the real `_send`). All pass. |
-| SC2 | Constant-time compare using a primitive confirmed on pyRevit's CLR, with documented fallback reason, after a live CLR check | VERIFIED | `_same_digest` XORs all 32 digest bytes, no early exit. Docstring of `secret_matches` records the fallback reason (no `FixedTimeEquals` on .NET Framework) and the live result. `test_constant_time_*` (visits every position, no early exit, no direct compare, docstring records reason and live check). Live half: `03-VALIDATION.md` records the engineer's probe output (py=3.4.2, clr 4.0.30319.42000, `FixedTimeEquals_type_present=False`, `trust_ok=True`, `integrity_ok=True`, `D04_VERDICT=PASS`, `MODULES_VERDICT=PASS`). I cannot re-run it (needs live Revit). Revit version, pyRevit version, exact listener count and run date were not reported by the engineer and are recorded as such in VALIDATION.md; no success criterion demands them, so this is stated, not a gap. |
-| SC3 | Auth failure is a non-200 distinct from 409, passes through `_revit_call`'s string contract, paired regression test in the style of `rolled_back` | VERIFIED | `trust.auth_failure` returns `(body, 401)`; `INTEGRITY_FAILURE_STATUS=423`. `tests/unit/test_format_response.py` lines ~193-230: `test_auth_401_reaches_the_model_as_a_visible_error`, `test_auth_failure_dict_renders_as_an_error`, alarm test `test_auth_key_alone_is_not_an_error_signal`. `bridge._send` unchanged, so non-200 collapses to `Error: 401 - ...`. |
-| SC4 | Secret never in an exception message or log line from the compare helper | VERIFIED | `secret_matches` and `check_secret` swallow exceptions without keeping text; `auth_failure` clamps reason to a fixed set; `trust.py` has no logging or print. Tests: `test_secret_never_leaks_when_hashing_fails` (caplog), `test_secret_never_in_an_auth_failure_body`, `test_leak_*`, `test_leak_trust_module_has_no_logging_or_print`. |
-| SC5 | Manifest list comes from `git ls-files`, not a filesystem walk | VERIFIED | `deploy/make_manifest.py` `tracked_files` runs `git -C repo ls-files -z`; no `os.walk`/`scandir`/`glob` in the module. Tests: `test_ls_files_only_list_with_walkers_banned`, `test_ls_files_untracked_noise_in_dest_never_becomes_an_entry`, `test_grammar_the_generator_never_walks_the_filesystem`. CRLF equivalence in `integrity.hash_normalized` (single hashing function shared with the generator). |
-| SC6 | Three-state model never collapses "reference unreachable" into "mismatched"; the check never writes | VERIFIED as written, with WR-01 residual (see below) | Unreachable or unreadable manifest gives `unverifiable` (manifest_missing / read_error / manifest_unreadable). Any non-ENOENT failure on a listed file or on the scope listing gives `unverifiable/read_error` even when other files differ (`test_unreachable_*`). `integrity.py` opens only in `"rb"`; `test_never_writes` family and `test_real_repo_check_leaves_no_manifest_behind` pass. |
-| SC7 | Build pipeline generates one secret and one manifest per build, consumed identically by payload and extension, right after the `revit_mcp` copy | VERIFIED | `config.cmd` defines `MCP_SECRET_FILE`. `publish-extension.cmd`: robocopy of `revit_mcp` excludes `_bridge_secret`/`_manifest.json`, then `secret_tool.py stage` to `%DEST%\revit_mcp\_bridge_secret`, then `make_manifest.py --dest %DEST%` as the last write. `build-payload.cmd` stages the same file to `app\_bridge_secret` before `gate.py`, whose `_secret_pair_status` fails on byte inequality. Tests: `test_publish_order_*` (strictly increasing, nothing copied after manifest), `test_build_payload_order_*`, `test_gate_pair_*`, `test_publish_smoke_scratch_share`. Interpretation note: the secret is created once and reused (D-07, user decision, ROADMAP wording "per build" is satisfied as "staged each build from one stable file"); the manifest goes only to the extension side because the payload does not ship `revit_mcp/`. |
-| SC8 | On the dev junction layout the integrity check reports `verified_match` or non-blocking `unverifiable`, never a spurious mismatch | VERIFIED | I ran `check_integrity` against the real working tree: `{'state': 'unverifiable', 'reason': 'manifest_missing', ...}` (no `_manifest.json` in the repo, gitignored). Tests `test_real_repo_*` and `test_dev_junction_layout_*` (copy with own manifest matches; stale manifest is the negative control; no manifest is unverifiable) pass. No `__pycache__` or manifest was created by the run. |
+| SC1 | Secret compare rejects wrong or missing secret and accepts the correct one, secret read from the `text/plain` body via `parse_request_data()` | VERIFIED | `trust.split_envelope` uses only `textutils.parse_request_data`. Suites `test_trust_envelope`, `test_trust_secret`, `test_trust_dialect` and `test_secret_gate_e2e` pass in the 4692. Source unchanged by 03-09 apart from the integrity section of `trust.py`. |
+| SC2 | Constant-time compare using a primitive confirmed on pyRevit's CLR, with documented fallback reason | VERIFIED | `_same_digest` XORs all 32 digest bytes, no early exit. The fallback reason and live result are in the `secret_matches` docstring and in `03-VALIDATION.md`. I did not re-run the live probe (needs Revit). |
+| SC3 | Auth failure is a non-200 distinct from 409 and passes through `_revit_call`'s string contract, with a regression test in the `rolled_back` style | VERIFIED | `auth_failure` returns 401, `INTEGRITY_FAILURE_STATUS = 423`; the pairing tests in `test_format_response.py` pass; `bridge._send` is unchanged. |
+| SC4 | Secret never in an exception message or log line from the compare helper | VERIFIED | The leak tests pass. `trust.py` has no logging or print. The 03-09 change adds no secret-bearing path. A test pins that the share-drop result carries no path or error text. |
+| SC5 | Manifest list comes from `git ls-files`, not a filesystem walk | VERIFIED | `deploy/make_manifest.py` is unchanged by 03-09, and the walker-banned tests pass. |
+| SC6 | Three-state model never collapses "reference unreachable" into "mismatched"; the check never writes | VERIFIED, WR-01 residual closed | See the re-verification section above. The unreachable manifest and non-ENOENT errors were already unverifiable. A dropped share now gives `absence_unconfirmed`. A genuine deletion still gives `verified_mismatch`. `integrity.py` opens only in `"rb"`, and the `test_never_writes` family passes. |
+| SC7 | Build pipeline generates one secret and one manifest per build, consumed identically, right after the `revit_mcp` copy | VERIFIED | `deploy/*.cmd` and `deploy/*.py` are untouched since the previous verification (`git diff 169d360 HEAD` over `deploy`, `bridge.py`, `main.py`, `startup.py`, `tools` is empty). The publish-order, build-payload-order and gate-pair tests pass. |
+| SC8 | On the dev junction layout the check reports `verified_match` or a non-blocking `unverifiable`, never a spurious mismatch | VERIFIED | I ran `check_integrity` on the real tree: `unverifiable / manifest_missing`, nothing written. `test_real_repo_*` and `test_dev_junction_layout_*` pass. |
 
 **Score:** 8/8 truths verified.
 
-### Inertness (explicit check)
+### Inertness (re-checked)
 
 | Check | Result |
 |-------|--------|
-| `main.py`, `startup.py`, `tools/*.py`, other `revit_mcp/*.py` import or reference trust/integrity | None. Case-insensitive grep over `trust|integrity|with_envelope|load_secret|_bridge_secret|_manifest` hits only the new files, docstrings, and unrelated words (e.g. "trusted arbitrary-code"). The uncommitted `startup.py` diff (47 lines, another session) contains zero trust/integrity/secret/manifest references. |
-| `bridge.with_envelope` / `load_secret` production caller | None. Repo-wide grep (excluding tests, planning, venv) finds only the definitions in `bridge.py` and docstring mentions. |
-| `bridge._send` unchanged | `git diff 55699f5 HEAD -- bridge.py` shows 92 additions and zero removed lines; `_send` still posts `json.dumps(data).encode("utf-8")` unchanged. Pinned by `test_bridge_secret_client.py` inert-send tests. |
-| `trust` / `integrity` classified as helpers (no `register_*_routes`) | Yes; live `/status/` probe output lists both under `STATUS_SKIPPED` as helpers; `test_registration.py` passes. |
+| Any reference to trust or integrity from `main.py`, `startup.py`, `tools/` or other `revit_mcp/` modules | None. A case-insensitive search for `trust\|integrity\|with_envelope\|load_secret\|_bridge_secret\|_manifest\|absence_unconfirmed` hits only the two new files and unrelated words ("trusted arbitrary-code", "do not trust the UI state", "trustworthy reply", "Never trust a route's own status"). There is no `from .trust` or `import integrity` anywhere except `integrity.py` importing `.trust` (a within-phase import). |
+| `bridge._send` unchanged | `git diff 169d360 HEAD -- bridge.py` is empty. The prior check showed `_send` byte-identical to the baseline. |
+| `startup.py` working-copy diff (another session) | Zero trust, integrity, secret or manifest lines. |
+| `trust` and `integrity` still helpers (no `register_*_routes`) | `test_registration.py` passes. |
 
-### Required Artifacts
+### Dialect guards
 
-| Artifact | Status | Details |
-|----------|--------|---------|
-| `revit_mcp/trust.py` (518 lines) | VERIFIED | Substantive: split_envelope, check_secret, secret_matches, auth_failure, secret_from_bytes, read_secret_file, gate_applies, evaluate_integrity, integrity_failure, classify_listeners. Intentionally not wired (inert by design). |
-| `revit_mcp/integrity.py` (137 lines) | VERIFIED | read-only reader, `hash_normalized`, `check_integrity`. Intentionally not wired. |
-| `bridge.py` envelope client (`with_envelope`, `load_secret`) | VERIFIED | Intentionally uncalled. |
-| `deploy/make_manifest.py`, `deploy/secret_tool.py`, `deploy/gate.py`, `scripts/dev_secret.py`, `scripts/probe_ipy_trust.py` | VERIFIED | Present, tested, wired into `.cmd` pipeline (make_manifest, secret_tool, gate). |
-| `deploy/config.cmd`, `publish-extension.cmd`, `build-payload.cmd`, `.gitignore`, `CLAUDE.md` | VERIFIED | `.gitignore` HEAD contains `_bridge_secret` and `_manifest.json` (lines 36-37). `publish-extension.cmd` has one unrelated uncommitted line change (install-folder robocopy file list), not phase-3 related. |
-
-### Key Link Verification
-
-| From | To | Status | Details |
-|------|----|--------|---------|
-| `bridge.with_envelope` | `trust.split_envelope` | WIRED in tests only | `test_secret_gate_e2e.py` goes with_envelope -> real `_send` -> split_envelope/check_secret -> visible 401. `ENVELOPE_KEY`/`SECRET_KEY`/`SECRET_FILE_NAME`/`MIN_SECRET_LENGTH` pinned equal across halves. |
-| `bridge._secret_from_bytes` | `trust.secret_from_bytes` | WIRED (parity test) | Intentional duplication, parity pinned. |
-| `make_manifest.hash_normalized` | `integrity.hash_normalized` | WIRED | Generator imports the reader's hash function. |
-| `publish-extension.cmd` | `secret_tool.py stage`, `make_manifest.py` | WIRED | Ordering tested. |
-| `build-payload.cmd` | `secret_tool.py stage`, `gate.py` pair check | WIRED | Ordering tested. |
-
-### Data-Flow Trace (Level 4)
-
-Not applicable: the phase renders no dynamic data and is inert; the e2e tests exercise the real `_send` and real `format_response` paths.
-
-### Behavioral Spot-Checks
-
-| Behavior | Command | Result | Status |
-|----------|---------|--------|--------|
-| Full unit suite | `uv run pytest tests/unit -q` | 4667 passed, 3 skipped, 53 s (baseline before phase: 4054 passed, 3 skipped) | PASS |
-| Phase-3 test files | `pytest test_trust_secret/dialect, test_make_manifest, test_integrity_reader, test_trust_integrity` | 291 passed | PASS |
-| SC8 on real tree | `check_integrity('.')` | `unverifiable / manifest_missing`, no files written | PASS |
-| SC6/INTG-03/INTG-08 subset | `-k "dev_junction or real_repo or never_writes"` | 16 passed | PASS |
-| WR-01 mechanism, CPython on this Windows host | `open(r'\\localhost\nosuchshare_zz\...','rb')` and `os.listdir` on the same | `errno == 2 (ENOENT)` for both opens (winerror not preserved) and for listdir (winerror 3) | CONFIRMED |
-
-### Probe Execution
-
-Step 7c: no `probe-*.sh` declared by the phase. `scripts/probe_ipy_trust.py` is a human-run live probe; its recorded output is in `03-VALIDATION.md` and its offline parser is covered by `test_probe_ipy_trust.py` (passes).
+`tests/unit/test_trust_dialect.py` passes. It was extended for the new key: the simulated-engine integrity matrix now expects 4 mismatch and 8 unverifiable rows including `absence_unconfirmed`, and an IronPython-3 engine test confirms a genuine deletion is still a mismatch. The new code uses no f-strings and no 3.5+ constructs, and the 3.5+ construct guard is green.
 
 ### Requirements Coverage
 
-Union of PLAN frontmatter `requirements` (03-01: SEC-01,02,04,05,06; 03-02: SEC-08; 03-03: SEC-02,03,06,08; 03-04: INTG-01,02,04,05,06; 03-05: INTG-01,03,06,07,08; 03-06: SEC-07,04,INTG-02; 03-07: SEC-08,INTG-01; 03-08: SEC-04) equals the 16 phase IDs. No orphaned IDs; REQUIREMENTS.md maps no other ID to Phase 3.
+The 16 IDs are SEC-01..08 and INTG-01..08. They are all `[x]` in `.planning/REQUIREMENTS.md` (lines 39-57) and `Complete` in the traceability table (lines 141-156). The union of PLAN frontmatter requirements still equals this set, with no orphans. 03-09's gap closure maps to INTG-07 (an unreachable reference is not tampering) and INTG-03 (never writes), both now satisfied without the earlier WR-01 caveat. The earlier caveat still applies: SEC-01, SEC-03, SEC-05, INTG-02, INTG-04 and INTG-05 describe live behaviour. `Complete` means "logic built and unit-verified", and live enforcement is Phase 5 per the ROADMAP.
 
-| Requirement | Plans | Status | Evidence |
-|-------------|-------|--------|----------|
-| SEC-01 | 03-01 | SATISFIED (logic; live in Phase 5) | `check_secret`, e2e 401 before any handler |
-| SEC-02 | 03-01, 03-03 | SATISFIED | body envelope via `parse_request_data` only |
-| SEC-03 | 03-03 | SATISFIED | 401 pair in `test_format_response.py` |
-| SEC-04 | 03-01, 03-06, 03-08 | SATISFIED | fixed-length XOR over SHA-256; live probe recorded |
-| SEC-05 | 03-01 | SATISFIED (logic) | `gate_applies`, `test_method_*`, `/status/` and GET ungated |
-| SEC-06 | 03-01, 03-03 | SATISFIED | leak tests |
-| SEC-07 | 03-06 | SATISFIED (classifier; collection in Phase 5) | `classify_listeners`, `test_trust_listeners.py` |
-| SEC-08 | 03-02, 03-03, 03-07 | SATISFIED | secret_tool, config.cmd, gate pair check |
-| INTG-01 | 03-04, 03-05, 03-07 | SATISFIED | `git ls-files` generator wired after copy |
-| INTG-02 | 03-04, 03-06 | SATISFIED (logic; load-time call in Phase 5) | `check_integrity`, `evaluate_integrity` |
-| INTG-03 | 03-05 | SATISFIED | `"rb"` only, never-writes tests |
-| INTG-04 | 03-04 | SATISFIED (logic) | `integrity_failure` 423 |
-| INTG-05 | 03-04 | SATISFIED (logic) | result names modified/missing/unexpected; `mismatch_files` |
-| INTG-06 | 03-04, 03-05 | SATISFIED | CRLF normalized, pycache/.pyc not in scope |
-| INTG-07 | 03-05 | SATISFIED with WR-01 residual | see below |
-| INTG-08 | 03-05 | SATISFIED | real tree gives `unverifiable/manifest_missing` |
+### Anti-Patterns
 
-Checkbox consistency: all 16 IDs are `[x]` in REQUIREMENTS.md and `Complete` in the traceability table (lines 141-156), consistent with the evidence. Caveat: SEC-01, SEC-03 (user-observable), SEC-05, INTG-02, INTG-04 and INTG-05 describe live behavior. ROADMAP Phase 5 states they "become user-observably true" there and that they are traced to Phase 3 "where the logic is built", so the Complete mark means "logic built and unit-verified", not "enforced live". A reader of REQUIREMENTS.md alone could over-read it.
+No `TBD`, `FIXME` or `XXX` in the changed files. The WR-01 warning from the prior report (`integrity.py` treating ENOENT as legitimate absence) is resolved.
 
-### Anti-Patterns Found
+## Known residuals (stated honestly; none is a success-criterion gap)
 
-| File | Pattern | Severity | Impact |
-|------|---------|----------|--------|
-| `revit_mcp/integrity.py:54-61, 103-108` | ENOENT treated as legitimate absence | Warning | WR-01 (below) |
-| `deploy/publish-extension.cmd:61-83` | Fallible stage/manifest steps run after `rmdir` of the live DEST | Warning | WR-02: operator error in `make_manifest` (untracked `.py`, git failure) leaves the shared extension re-populated without a manifest/secret. Fails closed once Phase 5 lands; today it is an outage risk on a shared path. Not a phase-3 success criterion; recommend carrying into Phase 5 / a follow-up. |
-| `trust.py:146-159` vs `secret_from_bytes` | Strip sets differ (IN-02) | Info | Real `token_urlsafe` secrets unaffected |
-| `integrity.py`, `make_manifest.py` | Scope is `*.py` directly in `revit_mcp/`, case-sensitive (IN-03) | Info | Documented scope; drift check, not tamper defence |
-| `deploy/gate.py` | `unchecked` passes; uses `assert` (IN-04) | Info | Config.cmd always sets the variable |
-| `deploy/secret_tool.py`, `make_manifest.py` | IN-01, IN-05 | Info | Fail closed / cosmetic |
+1. **IronPython 3.4 errno mapping for a dropped network path is not observed live.** Only CPython on Windows was observed (ENOENT for `open` and for `os.listdir`). The verdict is `unverifiable` either way: an ENOENT goes through the corroboration, and any other errno or a non-`OSError` becomes `read_error`. That claim rests on reasoning plus CPython unit tests, not on a live gate. The `unconfirmed_absences` docstring records this.
+2. **Two separate outages can still give a false mismatch.** One outage must cover the first scan and a second must cover the re-read of the absent entries, with the share reachable for the manifest re-read in between. The docstring discloses this. There are no retries or sleeps by design.
+3. **Live probe metadata not reported.** The engineer-run live probe (`D04_VERDICT=PASS`, `MODULES_VERDICT=PASS`) did not report Revit or pyRevit versions, listener count or run date. This is recorded in `03-VALIDATION.md`. No success criterion demands those fields.
+4. **Non-blocking review items left open and out of scope for 03-09:**
+   - **WR-02:** `deploy/publish-extension.cmd` removes the live extension before the fallible stage and manifest steps. An error there leaves the shared extension re-populated without a manifest or secret. It fails closed once Phase 5 lands.
+   - **IN-01 to IN-05** from `03-REVIEW.md`: strip-set difference, scope limited to `*.py` directly in `revit_mcp/`, `deploy/gate.py` letting `unchecked` pass and using `assert`, and cosmetic items.
+   - Track WR-02 as a deploy hazard for Phase 5 or a follow-up. It is not a phase gap.
+5. **Bookkeeping:** `03-VALIDATION.md` frontmatter still reads `status: draft` and `nyquist_compliant: false` with unchecked sign-off boxes, and the working tree has uncommitted work from another session (`startup.py`, `tests/unit/test_parallel_installation.py`, graphify-out) that does not touch this phase.
 
-No `TBD`, `FIXME` or `XXX` in the phase's files without reference (grep of changed implementation files found none).
+## Gaps Summary
 
-### WR-01 assessment (SC6 and the three-state model)
-
-I read `revit_mcp/integrity.py` and reproduced the mechanism:
-
-- `_read_bytes` returns `absent` for `errno == ENOENT`; `observe_tree` omits such files from `hashes`; `evaluate_integrity` then lists them as `missing` and returns `verified_mismatch`. The scope `os.listdir` ENOENT is swallowed (`names = []`, nothing added to `unreadable`).
-- On this Windows host, CPython raises `errno 2 (ENOENT)` for an open under a nonexistent UNC share name, and for `os.listdir` of the same. So a share that vanishes after `_manifest.json` was read makes every listed file `absent` and the verdict `verified_mismatch` with all files `missing`.
-- `deploy/install.cmd` sets `EXTPATH=%SHARE%\ext`, so the extension is registered with pyRevit from the share itself; the UNC scenario is the real deployment, not a hypothetical.
-- Existing tests pin the ENOENT-is-missing behavior (`test_unreachable_enoent_on_a_listed_file_is_missing`, `test_unreachable_absent_scope_directory_lists_its_files_as_missing`) and test unreachability only through injected non-ENOENT errors or an unreadable manifest. No test or docstring discloses the share-drop residual.
-- What I did not verify: whether IronPython 3.4 on the real engine maps a bad network path to ENOENT. The CPython mapping is confirmed; the IronPython one is unknown.
-
-Judgment: SC6 as literally written ("reference unreachable", where the reference is the manifest) is satisfied and tested: an unreachable or unreadable manifest, and every non-ENOENT file error, give `unverifiable`. But the D-13 intent stated in `trust.py` ("an unreachable share can never be reported as tampering") has a narrow, real, undisclosed hole: a drop after the manifest read. The window is milliseconds at load, and Phase 5 caches the verdict, so a single hit would produce 423 on every mutation until Revit restarts. This is a documented-by-review residual rather than a failed success criterion, but it contradicts a stated invariant and has a small fix, so it is raised as a developer decision rather than silently passed.
-
-### Human Verification Required
-
-#### 1. WR-01 decision
-
-**Test/decision:** Choose one: (a) fix before Phase 5 (after `observe_tree`, re-check that `root` is a directory and `_manifest.json` is still a file, else return `unverifiable(read_error)`; or treat scope-dir ENOENT and "all listed files absent" as `read_error`), plus a test that simulates the share vanishing mid-scan; (b) add the fix to Phase 5 scope explicitly; (c) accept and record the residual in the `integrity.py` docstring and CLAUDE.md.
-**Expected:** A recorded decision; if (a) or (b), a test that a mid-scan ENOENT on all files does not yield `verified_mismatch`.
-**Why human:** Risk acceptance for a narrow window against a fleet-wide blocked-mutations failure mode; not decidable by tests.
-
-### Gaps Summary
-
-No success criterion failed. The phase delivered inert, unit-tested logic: 4667 tests pass, nothing in the live path imports or calls it, `_send` is byte-identical, the build pipeline stages one secret and a git-ls-files manifest in the right order, and the real working tree reports a non-blocking `unverifiable`. The single open item is the WR-01 residual (a share dropped mid-scan reads as tampering), which needs a developer decision before Phase 5 caches the verdict. WR-02 (publish wipes DEST before the fallible steps) is a non-blocking deploy hazard worth tracking. The live-probe metadata gaps (Revit/pyRevit versions, listener count, run date) are recorded as unreported in `03-VALIDATION.md` and are not required by any success criterion. `03-VALIDATION.md` frontmatter still reads `status: draft`, `nyquist_compliant: false` with unchecked sign-off boxes, a bookkeeping item for `/gsd-validate-phase`, not a goal gap.
+None. WR-01 is verifiably closed and nothing regressed. The phase delivers inert, unit-verified secret-gate and integrity logic that is correct on both runtimes per the suite, with the build pipeline staging one secret and one `git ls-files` manifest in the right order. The unit suite (4692 passed, 3 skipped) is green, nothing in the live path references the new modules, `_send` is unchanged, and the dev junction reports a non-blocking `unverifiable`.
 
 ---
 

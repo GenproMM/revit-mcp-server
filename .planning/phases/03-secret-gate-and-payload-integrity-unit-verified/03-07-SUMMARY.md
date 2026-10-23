@@ -154,7 +154,7 @@ None. The new surface (secret and manifest files on the share) is the planned T-
 ## Verification
 
 - `uv run pytest tests/unit -q`: 4630 passed, 3 skipped (baseline before this plan 4602 passed, 3 skipped; the 3 skips are pre-existing and unrelated).
-- `-k "config or publish"`: 12 passed, 0 skipped. `-k "build_payload or gate or claude_md"`: 14 passed.
+- `-k "config or publish"`: 12 passed, 0 skipped. `-k "build_payload or gate or claude_md"`: 16 passed.
 - `tests/unit/test_payload_ships_root_modules.py` and `tests/unit/test_serialization_scope_docs.py` pass.
 - CRLF check on `deploy/publish-extension.cmd` passes; `config.cmd`, `build-payload.cmd`, `gate.py`, `CLAUDE.md` remain LF. `GATE_GUARD_OK` printed. `tests/test_init_latency.py`: `INIT_LATENCY_S=0.372`.
 - No `_manifest.json` was created in the repository by the smoke test.

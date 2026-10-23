@@ -42,6 +42,7 @@ import httpx
 import pytest
 
 from revit_mcp import identity
+from revit_mcp.textutils import classify_outcome
 
 IDENT = {"pid": 4242, "actual_port": 48885, "session_token": "tok-abc", "revit_version": "2024"}
 
@@ -293,6 +294,7 @@ class World(object):
         self.hooks = {}
         self.collector_items = []
         self.commit_status = "Committed"
+        self.transactions = []
         self.break_start = set()
         self.open_calls = []
         self.open_error = None
@@ -361,25 +363,35 @@ def make_db(world):
             world.record("transaction", doc, name)
             self.doc = doc
             self.started = False
+            self.status = "Uninitialized"
+            world.transactions.append(self)
 
         def Start(self):
             if world.explode or getattr(self.doc, "label", None) in world.break_start:
                 raise RuntimeError("transaction could not start")
             self.started = True
+            self.status = "Started"
             world.record("start", self.doc)
 
         def Commit(self):
             world.record("commit", self.doc)
+            self.status = world.commit_status
             return world.commit_status
 
         def RollBack(self):
             world.record("rollback", self.doc)
+            self.status = "RolledBack"
+
+        def GetStatus(self):
+            # A real method, not __getattr__, so no "txattr" event is recorded and
+            # test_suppress_warnings_comes_immediately_after_start is unaffected.
+            return self.status
 
         def HasStarted(self):
             return self.started
 
         def HasEnded(self):
-            return False
+            return self.status in ("Committed", "RolledBack")
 
         def __getattr__(self, name):
             if name.startswith("_"):
@@ -820,9 +832,11 @@ def test_a_guarded_transaction_that_cannot_start_changes_nothing_and_names_the_d
 
 
 EXPECTED_KEYS = {
-    ("transforms", "/transform_elements/"): ["count", "message", "operation", "status"],
-    ("view_management", "/create_view/"): ["message", "name", "status", "view_id", "view_type"],
-    ("view_management", "/set_active_view/"): ["message", "name", "status", "view_id", "view_type"],
+    ("transforms", "/transform_elements/"): ["count", "message", "operation", "outcome", "status"],
+    ("view_management", "/create_view/"): ["message", "name", "outcome", "status", "view_id",
+                                           "view_type"],
+    ("view_management", "/set_active_view/"): ["message", "name", "outcome", "status", "view_id",
+                                               "view_type"],
 }
 
 
@@ -952,6 +966,262 @@ def test_transform_missing_vector_still_rolls_back_with_a_400(world):
                  {"element_ids": [1], "operation": "move"})
     assert reply.status == 400 and "vector is required" in reply.data["error"]
     assert world.kinds("rollback") and world.kinds("commit") == []
+
+
+# ------------------------------------------------- outcomes (phase 4, TRUTH-01, D-01, D-06, D-12)
+
+TRANSFORM = ("transforms", "/transform_elements/")
+CREATE = ("view_management", "/create_view/")
+
+
+def only_document(world):
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+
+
+def reach(world, key):
+    """Arm the fake so the row's route reaches a real success on the one open document."""
+    items, body = TRANSACTING[key]
+    arm(world, items)
+    only_document(world)
+    return body
+
+
+@pytest.mark.parametrize("key", list(TRANSACTING), ids=TRANSACTING_IDS)
+def test_every_transacting_success_carries_an_outcome_that_agrees_with_its_status(world, key):
+    reply = call(world, handler_of(world, *key), reach(world, key))
+    assert reply.status in (200, 422), reply.data
+    outcome = reply.data["outcome"]
+    assert outcome["transaction_status"] == "Committed"
+    expected = classify_outcome(True, len(outcome["succeeded"]), len(outcome["failed"]))
+    assert (reply.data["status"], reply.status) == expected
+    assert reply.status == 200, "the armed row must reach a real success: {}".format(reply.data)
+
+
+@pytest.mark.parametrize("key", list(TRANSACTING), ids=TRANSACTING_IDS)
+def test_every_transacting_rollback_is_a_409_with_nothing_succeeded(world, key):
+    body = reach(world, key)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, *key), body)
+    assert reply.status == 409, reply.data
+    assert reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == []
+
+
+@pytest.mark.parametrize("key", list(TRANSACTING), ids=TRANSACTING_IDS)
+def test_every_transacting_500_carries_the_real_transaction_status(world, key):
+    body = reach(world, key)
+    world.break_start.add("Only")
+    reply = call(world, handler_of(world, *key), body)
+    assert reply.status == 500, reply.data
+    assert world.transactions, "the route never built a transaction"
+    assert reply.data["outcome"]["transaction_status"] == world.transactions[-1].status
+    assert reply.data["outcome"]["succeeded"] == []
+
+
+# --- transform_elements (all or nothing)
+
+
+def test_a_committed_transform_reports_every_requested_id_as_succeeded(world):
+    arm(world)
+    only_document(world)
+    reply = call(world, handler_of(world, *TRANSFORM),
+                 {"element_ids": [1, 2], "operation": "move", "vector": {"x": 10, "y": 0, "z": 0}})
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"] == {"transaction_status": "Committed", "requested": 2,
+                                     "succeeded": [1, 2], "failed": [], "revit_failures": []}
+    assert reply.data["count"] == 2 and reply.data["message"] == "Moved 2 elements"
+
+
+def test_a_committed_copy_keeps_new_element_ids_beside_the_outcome(world):
+    arm(world)
+    world.db.ElementTransformUtils = types.SimpleNamespace(
+        CopyElement=lambda doc, eid, translation: [types.SimpleNamespace(Value=9)])
+    only_document(world)
+    reply = call(world, handler_of(world, *TRANSFORM),
+                 {"element_ids": [1], "operation": "copy", "vector": {"x": 10, "y": 0, "z": 0}})
+    assert reply.status == 200, reply.data
+    assert reply.data["new_element_ids"] == [9]
+    assert reply.data["outcome"]["succeeded"] == [1]
+
+
+def test_a_rolled_back_transform_is_a_409_that_names_no_count_or_operation(world):
+    arm(world)
+    only_document(world)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, *TRANSFORM), MUTATIONS[TRANSFORM])
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert "count" not in reply.data and "operation" not in reply.data
+    assert reply.data["outcome"]["requested"] == 1 and reply.data["outcome"]["succeeded"] == []
+
+
+def test_a_transform_that_raises_mid_way_rolls_back_and_says_so(world):
+    arm(world)
+
+    def explode(doc, eid, translation):
+        raise RuntimeError("element is pinned by a constraint")
+
+    world.db.ElementTransformUtils = types.SimpleNamespace(MoveElement=explode)
+    only_document(world)
+    reply = call(world, handler_of(world, *TRANSFORM), MUTATIONS[TRANSFORM])
+    assert reply.status == 500 and "pinned by a constraint" in reply.data["error"]
+    assert reply.data["outcome"] == {"transaction_status": "RolledBack", "requested": 1,
+                                     "succeeded": [], "failed": [], "revit_failures": []}
+    assert world.kinds("commit") == []
+
+
+def test_transform_refusals_before_the_commit_carry_no_outcome(world):
+    world.hooks[(None, "GetElement")] = lambda doc, eid: None
+    only_document(world)
+    missing = call(world, handler_of(world, *TRANSFORM), MUTATIONS[TRANSFORM])
+    assert missing.status == 404 and "outcome" not in missing.data
+    arm(world)
+    novector = call(world, handler_of(world, *TRANSFORM), {"element_ids": [1], "operation": "move"})
+    assert novector.status == 400 and "outcome" not in novector.data
+
+
+# --- create_view (D-12: the name is a step; the view is read only after a committed commit)
+
+
+def tracked_view(world, name_error=None):
+    """The view the fake creation call returns. Every public read is logged as a viewread
+    event, so a test can prove nothing was read from it after the commit event."""
+
+    class TrackedView(object):
+        Id = types.SimpleNamespace(Value=77)
+        ViewType = "ThreeD"
+        _name = "Default"
+
+        @property
+        def Name(self):
+            return self._name
+
+        @Name.setter
+        def Name(self, value):
+            if name_error:
+                raise RuntimeError(name_error)
+            self._name = value
+
+        def __getattribute__(self, attribute):
+            if not attribute.startswith("_"):
+                world.events.append(("viewread", "VIEW", attribute))
+            return object.__getattribute__(self, attribute)
+
+    view = TrackedView()
+    world.db.View3D = types.SimpleNamespace(CreateIsometric=lambda doc, type_id: view)
+    return view
+
+
+def create_3d(world, name="V1"):
+    arm(world, [_family("ThreeDimensional")])
+    only_document(world)
+    return call(world, handler_of(world, *CREATE), {"view_type": "3d", "name": name})
+
+
+def test_a_created_view_is_reported_with_its_id_as_succeeded(world):
+    view = tracked_view(world)
+    reply = create_3d(world)
+    assert reply.status == 200 and reply.data["status"] == "success", reply.data
+    assert reply.data["outcome"] == {"transaction_status": "Committed", "requested": 1,
+                                     "succeeded": [77], "failed": [], "revit_failures": []}
+    assert reply.data["view_id"] == 77 and reply.data["view_type"] == "ThreeD"
+    assert reply.data["name"] == "V1" and view.Name == "V1"
+
+
+def test_a_view_that_cannot_take_the_requested_name_is_a_partial(world):
+    tracked_view(world, name_error="dup")
+    reply = create_3d(world)
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"]["succeeded"] == [77]
+    assert reply.data["outcome"]["failed"] == [{"item": "name", "reason": "dup"}]
+    assert reply.data["view_id"] == 77
+    assert "error" not in reply.data
+    assert reply.data["name"] == "Default", "the reply must name the view Revit actually made"
+    assert "V1" in reply.data["message"] and "dup" in reply.data["message"]
+
+
+def test_no_view_created_at_all_is_a_422_that_names_no_view(world):
+    world.db.View3D = types.SimpleNamespace(CreateIsometric=lambda doc, type_id: None)
+    reply = create_3d(world)
+    assert reply.status == 422 and reply.data["status"] == "failed", reply.data
+    assert reply.data["outcome"]["succeeded"] == []
+    (entry,) = reply.data["outcome"]["failed"]
+    assert entry["item"] == "view" and "3d" in entry["reason"]
+    assert "view_id" not in reply.data and "view_type" not in reply.data
+    assert reply.data["error"]
+
+
+def test_a_rolled_back_view_creation_is_a_409_and_the_view_is_never_read_after_the_commit(world):
+    tracked_view(world)
+    world.commit_status = "RolledBack"
+    reply = create_3d(world)
+    assert reply.status == 409 and reply.data["status"] == "rolled_back", reply.data
+    assert "view_id" not in reply.data and "name" not in reply.data
+    assert reply.data["outcome"]["succeeded"] == []
+    commit = [i for i, event in enumerate(world.events) if event[0] == "commit"][0]
+    assert [e for e in world.events[commit:] if e[0] == "viewread"] == []
+
+
+def test_a_committed_view_is_not_read_for_its_id_before_the_commit(world):
+    tracked_view(world)
+    reply = create_3d(world)
+    assert reply.status == 200
+    commit = [i for i, event in enumerate(world.events) if event[0] == "commit"][0]
+    before = [e[2] for e in world.events[:commit] if e[0] == "viewread"]
+    assert "Id" not in before and "ViewType" not in before
+
+
+def test_create_view_refusals_inside_the_transaction_carry_no_outcome(world):
+    arm(world, [_family("Section")])
+    only_document(world)
+    reply = call(world, handler_of(world, *CREATE), {"view_type": "section", "name": "S1"})
+    assert reply.status == 400 and "outcome" not in reply.data
+
+
+# --- set_active_view (D-06: no transaction, null status)
+
+
+def test_set_active_view_reports_the_switched_view_with_a_null_transaction_status(world):
+    arm(world, [_named("Plan A")])
+    only_document(world)
+    reply = call(world, handler_of(world, *SET_VIEW), MUTATIONS[SET_VIEW])
+    assert reply.status == 200
+    assert reply.data["outcome"] == {"transaction_status": None, "requested": 1,
+                                     "succeeded": ["Plan A"], "failed": [], "revit_failures": []}
+    assert world.kinds("transaction") == []
+
+
+def test_set_active_view_refusals_carry_no_outcome(world):
+    arm(world, [_named("Other")])
+    only_document(world)
+    unknown = call(world, handler_of(world, *SET_VIEW), MUTATIONS[SET_VIEW])
+    assert unknown.status == 404 and "outcome" not in unknown.data
+    missing = call(world, handler_of(world, *SET_VIEW), {})
+    assert missing.status == 400 and "outcome" not in missing.data
+    refused = call(world, handler_of(world, *SET_VIEW), MUTATIONS[SET_VIEW], uidoc=None)
+    assert refused.status == 412 and "outcome" not in refused.data
+
+
+def test_set_active_view_that_cannot_switch_is_a_500_that_names_the_view_and_the_reason(world):
+    arm(world, [_named("Plan A")])
+    only_document(world)
+
+    class RefusingUIDocument(FakeUIDocument):
+        @property
+        def ActiveView(self):
+            return None
+
+        @ActiveView.setter
+        def ActiveView(self, view):
+            raise RuntimeError("switch refused")
+
+    uidoc = RefusingUIDocument(world, world.uiapp.active._lifetime)
+    reply = call(world, handler_of(world, *SET_VIEW), MUTATIONS[SET_VIEW], uidoc=uidoc)
+    assert reply.status == 500 and "switch refused" in reply.data["error"]
+    assert reply.data["outcome"] == {
+        "transaction_status": None, "requested": 1, "succeeded": [],
+        "failed": [{"item": "Plan A", "reason": "switch refused"}], "revit_failures": []}
 
 
 # ====================================================================== open_model

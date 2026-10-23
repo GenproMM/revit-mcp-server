@@ -4,7 +4,7 @@ View Management Module for Revit MCP
 Handles view creation and active view switching
 """
 
-from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
+from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, build_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
@@ -28,6 +28,11 @@ def register_view_management_routes(api):
 
     def _create_view(doc, request):
         """Create a new view in the Revit model."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = 1
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -53,7 +58,7 @@ def register_view_management_routes(api):
 
             t = DB.Transaction(doc, "Create View via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 new_view = None
@@ -291,26 +296,61 @@ def register_view_management_routes(api):
                         status=400,
                     )
 
-                if new_view:
-                    new_view.Name = name
+                name_error = None
+                if new_view is None:
+                    # Revit handed back no view: nothing was created, and no id exists
+                    # to report (D-12).
+                    failed.append({
+                        "item": "view",
+                        "reason": "Revit created no {} view".format(view_type),
+                    })
+                else:
+                    # The name is its own step: a view that exists but cannot take the
+                    # requested name (a duplicate, say) is a partial, not a failure.
+                    try:
+                        new_view.Name = name
+                    except Exception as name_exc:
+                        name_error = str(name_exc)
+                        failed.append({"item": "name", "reason": name_error})
 
-                t.Commit()
+                commit_result = commit_and_report(t, swallower)
+                if not commit_result["committed"]:
+                    # Rolled back: the view never existed, so it is never read here.
+                    payload, http = finalize_outcome(
+                        commit_result, {}, requested, succeeded, failed)
+                    return routes.make_response(data=payload, status=http)
 
-                actual_type = ""
-                try:
-                    actual_type = str(new_view.ViewType)
-                except Exception:
-                    actual_type = view_type
+                reply_data = {}
+                if new_view is None:
+                    reply_data["message"] = "No {} view was created".format(view_type)
+                else:
+                    # Read the view only now that the commit is known to have kept it.
+                    view_id = get_element_id_value(new_view)
+                    succeeded.append(view_id)
+                    actual_type = ""
+                    try:
+                        actual_type = str(new_view.ViewType)
+                    except Exception:
+                        actual_type = view_type
+                    reply_data["view_id"] = view_id
+                    reply_data["view_type"] = actual_type
+                    if name_error is None:
+                        reply_data["name"] = name
+                        reply_data["message"] = "Created {} view '{}'".format(view_type, name)
+                    else:
+                        actual_name = name
+                        try:
+                            actual_name = new_view.Name
+                        except Exception:
+                            pass
+                        reply_data["name"] = actual_name
+                        reply_data["message"] = (
+                            "Created {} view but could not name it '{}': {}".format(
+                                view_type, name, name_error))
 
-                return routes.make_response(
-                    data={
-                        "status": "success",
-                        "view_id": get_element_id_value(new_view),
-                        "name": name,
-                        "view_type": actual_type,
-                        "message": "Created {} view '{}'".format(view_type, name),
-                    }
-                )
+                payload, http = finalize_outcome(
+                    commit_result, reply_data, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -321,11 +361,15 @@ def register_view_management_routes(api):
             logger.error("Failed to create view: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     def _set_active_view(doc, uidoc, request):
         """Set the active view in Revit UI."""
+        # Read defensively in the 500 reply: None when the body never parsed (D-06).
+        view_name = None
         try:
             if not doc:
                 return routes.make_response(
@@ -392,6 +436,8 @@ def register_view_management_routes(api):
                     "name": view_name,
                     "view_type": str(target_view.ViewType),
                     "message": "Switched to view '{}'".format(view_name),
+                    # No transaction is opened, so the status is null (D-06).
+                    "outcome": build_outcome(None, 1, [view_name], [], []),
                 }
             )
 
@@ -399,7 +445,10 @@ def register_view_management_routes(api):
             logger.error("Failed to set active view: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": build_outcome(
+                          None, 1, [], [{"item": view_name, "reason": str(e)}], [])},
+                status=500
             )
 
     @api.route("/create_view/", methods=["POST"])

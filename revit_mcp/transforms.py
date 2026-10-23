@@ -4,7 +4,7 @@ Transforms Module for Revit MCP
 Handles move, copy, rotate, and mirror operations on elements
 """
 
-from .utils import get_element_id_value, make_element_id, suppress_warnings, parse_request_data
+from .utils import get_element_id_value, make_element_id, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 from System.Collections.Generic import List
@@ -22,6 +22,11 @@ def register_transform_routes(api):
 
     def _transform_elements(doc, request):
         """Move, copy, rotate, or mirror elements."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -38,6 +43,7 @@ def register_transform_routes(api):
                     data={"error": "element_ids is required and must not be empty"},
                     status=400,
                 )
+            requested = len(element_ids)
             if not operation:
                 return routes.make_response(
                     data={"error": "operation is required (move, copy, rotate, mirror)"},
@@ -69,7 +75,7 @@ def register_transform_routes(api):
 
             t = DB.Transaction(doc, "Transform Elements via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 new_element_ids = []
@@ -171,10 +177,14 @@ def register_transform_routes(api):
                     for eid in elem_id_list:
                         DB.ElementTransformUtils.MirrorElement(doc, eid, plane)
 
-                t.Commit()
+                # A transform is all or nothing: every requested element was moved,
+                # copied, rotated or mirrored, or Revit threw (rolled back below).
+                # So a kept commit succeeded every requested id (D-01, D-05).
+                commit_result = commit_and_report(t, swallower)
+                if commit_result["committed"]:
+                    succeeded.extend(element_ids)
 
                 result = {
-                    "status": "success",
                     "operation": operation,
                     "count": len(elem_id_list),
                     "message": "{} {} element{}".format(
@@ -186,7 +196,9 @@ def register_transform_routes(api):
                 if operation == "copy" and new_element_ids:
                     result["new_element_ids"] = new_element_ids
 
-                return routes.make_response(data=result)
+                payload, http = finalize_outcome(
+                    commit_result, result, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -197,7 +209,9 @@ def register_transform_routes(api):
             logger.error("Failed to transform elements: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/transform_elements/", methods=["POST"])

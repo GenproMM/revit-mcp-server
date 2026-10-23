@@ -46,7 +46,7 @@ Task IDs are filled in by the planner; rows below are keyed by requirement / suc
 | SC1, SEC-01, SEC-02 | `check_secret` → ok/missing/mismatch/server_not_configured; secret read from `text/plain` body via `split_envelope` + `parse_request_data` | unit | `uv run pytest tests/unit/test_trust_envelope.py tests/unit/test_trust_secret.py -q` | ❌ W0 | ⬜ pending |
 | SC1 (IronPython-targeted) | Same table under simulated IPY dialect (`builtins.unicode = str`, reloaded module) | unit | `uv run pytest tests/unit/test_trust_dialect.py -q` | ❌ W0 | ⬜ pending |
 | SC2, SEC-04 | No early exit in digest compare; documented fallback reason (no `FixedTimeEquals` on .NET Framework 4.8) | unit | `uv run pytest tests/unit/test_trust_secret.py -k constant -q` | ❌ W0 | ⬜ pending |
-| SC2 (live) | `hashlib.sha256` works under IPY342 | manual | `/execute_code/` snippet from RESEARCH "Code Examples" | n/a | ⬜ pending |
+| SC2 (live) | `hashlib.sha256` works under IPY342 | manual | `uv run python scripts/probe_ipy_trust.py --port 48884` (human-run) | n/a | ✅ green |
 | SC3, SEC-03 | `auth_failure` → 401, distinct from 409/423/503; `Error: 401 - ...` passthrough; three-assertion pair | unit | `uv run pytest tests/unit/test_format_response.py -k "401 or auth" -q` | extend | ⬜ pending |
 | SC4, SEC-06 | Secret never in exception text, logs, result or failure body | unit | `uv run pytest tests/unit/test_trust_secret.py tests/unit/test_bridge_secret_client.py -k "leak or secret_never" -q` | ❌ W0 | ⬜ pending |
 | SEC-05 | Gate is POST-only; GET and `/status/` stay open | unit | `uv run pytest tests/unit/test_trust_secret.py -k method -q` | ❌ W0 | ⬜ pending |
@@ -86,6 +86,32 @@ Task IDs are filled in by the planner; rows below are keyed by requirement / suc
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
 | `hashlib.sha256` produces a 32-byte digest under IronPython 3 (IPY342); informational `FixedTimeEquals` type probe | SC2, SEC-04 (D-04) | Needs live Revit + pyRevit Routes; cannot run under CPython | POST the RESEARCH "Code Examples" snippet to `/execute_code/` (one listener on 48884 confirmed first); expect `abc_ok=True`, `digest_type=bytes len=32 first4=[227, 79, 109, 236]`; record the engine version |
+
+**Recorded result (plan 03-08, human-run, recorded 2026-10-23):** `scripts/probe_ipy_trust.py` run by the engineer against `127.0.0.1:48884`; output pasted verbatim, both verdicts PASS (re-parsed offline with `parse_output`, `d04_verdict`, `modules_verdict`: `('PASS', [])` each).
+
+```
+STATUS_SKIPPED={"identity": "no register_*_routes callable", "integrity": "no register_*_routes callable", "registry": "no register_*_routes callable", "textutils": "no register_*_routes callable", "trust": "no register_*_routes callable", "utils": "no register_*_routes callable"}
+STATUS_FAILED={}
+py=3.4.2
+digest_type=bytes len=32 first4=[227, 79, 109, 236]
+abc_ok=True
+lf_ok=True
+hmac_compare_digest=True
+clr_version=4.0.30319.42000
+FixedTimeEquals_type_present=False
+trust_loaded=True
+trust_ok=True
+integrity_loaded=True
+integrity_ok=True
+D04_VERDICT=PASS
+MODULES_VERDICT=PASS
+```
+
+- Engine: `py=3.4.2` (IronPython 3.4 level), `clr_version=4.0.30319.42000` (.NET Framework 4). `FixedTimeEquals_type_present=False` confirms Conflict C3 on this host; `hmac_compare_digest=True` is informational (the implementation uses neither).
+- Revit version: not reported by the engineer. pyRevit version: not reported by the engineer.
+- Listener count on port 48884: not reported by the engineer. The probe answered on `127.0.0.1:48884`, which is consistent with a single responding Revit but does not prove exactly one listener.
+- Run date: not reported by the engineer; the output was received and recorded on 2026-10-23.
+- Not observed here: the engineer's step 1 (full Revit close and reopen) and the throwaway-model step are procedural and were not confirmed in the pasted output.
 
 ---
 

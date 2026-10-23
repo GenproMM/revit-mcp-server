@@ -126,7 +126,12 @@ def secret_matches(provided, expected):
     2024 runs .NET Framework 4.8; hmac.compare_digest is unverified on
     IronPython 3.4. So one CLR-free implementation serves both halves.
 
-    Live check of hashlib.sha256 under the IPY342 routes engine: pending, plan 03-08.
+    Live-verified 2026-10-23 (plan 03-08): pyRevit routes engine py=3.4.2 (.NET
+    Framework 4, clr_version 4.0.30319.42000); Revit and pyRevit versions were not
+    reported. hashlib.sha256 digests equal CPython's (abc_ok, first4 [227, 79, 109,
+    236]); trust loads as a helper (/status/ skipped_modules) and check_secret gave
+    ok and mismatch as expected (trust_ok). FixedTimeEquals type present: False and
+    hmac.compare_digest present: True (both informational; neither is used).
     """
     try:
         left = _digest(provided)

@@ -205,6 +205,12 @@ def test_constant_time_docstring_records_fallback_reason():
     assert "compare_digest" in doc
 
 
+def test_constant_time_docstring_records_live_check():
+    doc = trust.secret_matches.__doc__
+    assert "Live-verified" in doc
+    assert "pending" not in doc
+
+
 def test_constant_time_lengths_do_not_matter():
     assert trust.secret_matches("a" * 16, "a" * 4096) is False
     assert trust.secret_matches("a" * 4096, "a" * 16) is False

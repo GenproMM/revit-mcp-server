@@ -43,7 +43,11 @@ _ERROR = "error"
 
 
 def hash_normalized(data):
-    """SHA-256 hex digest of bytes with CRLF replaced by LF and nothing else changed."""
+    """SHA-256 hex digest of bytes with CRLF replaced by LF and nothing else changed.
+
+    Live-verified 2026-10-23 (plan 03-08): the same CRLF-normalized hash in pyRevit's
+    routes engine, py=3.4.2 (lf_ok, integrity_ok).
+    """
     return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
 
 

@@ -1,20 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.1
-current_phase: 4
+current_phase: 04
 current_phase_name: Honest outcomes on every mutating route
-current_plan: Not started
+current_plan: 2
 status: executing
-stopped_at: Phase 03 complete, ready to plan Phase 04
-last_updated: "2026-10-23T15:50:00.123Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-10-23T17:28:38.995Z"
 last_activity: 2026-10-23
-last_activity_desc: Phase 03 complete, transitioned to Phase 04
-state_head: 0d822056a5f4f637c17500e901a460366b527afa
+last_activity_desc: Phase 04 execution started
+state_head: e98d598f365e34ec3392e60599fb998b21da24c8
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 47
-  completed_plans: 36
+  completed_plans: 37
 milestone_name: Доверенный мост
 ---
 
@@ -25,16 +25,16 @@ milestone_name: Доверенный мост
 See: .planning/PROJECT.md (updated 2026-10-14)
 
 **Core value:** Ассистент может достоверно читать и изменять модель Revit — и инженер может доверять тому, что ответ сервера описывает то, что действительно произошло.
-**Current focus:** Phase 03 — Secret gate and payload integrity (unit-verified)
+**Current focus:** Phase 04 — Honest outcomes on every mutating route
 
 ## Current Position
 
-Phase: 4 (Honest outcomes on every mutating route) — READY TO EXECUTE
-Current Plan: Not started
+Phase: 04 (Honest outcomes on every mutating route) — EXECUTING
+Current Plan: 2
 Total Plans in Phase: 11
-Plan: 8 of 8
+Plan: 2 of 11
 Status: Ready to execute
-Last activity: 2026-10-23 — Phase 03 complete, transitioned to Phase 04
+Last activity: 2026-10-23 — Phase 04 execution started
 
 Progress: [████░░░░░░] 43% of phase 02 plans (19/20)
 
@@ -97,6 +97,7 @@ Progress: [████░░░░░░] 43% of phase 02 plans (19/20)
 | Phase 03 P07 | 25 min | 2 tasks | 6 files |
 | Phase 03 P08 | 8 min (continuation only) | 3 tasks | 6 files |
 | Phase 03 P09 | 22 min | 2 tasks | 5 files |
+| Phase 04 P01 | 25 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -122,6 +123,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 02]: 02-14: guard MEP, parameter, room, structure and tag mutations as thin shells over unchanged bodies; set_parameter 409 rolled_back stays an error and gains document/process attribution
 - [Phase 02]: 02-17: exhaustive inventory by discovery plus hand classification; no production omission found; counts 59 tools / 56 routes / 24 route domains / 31 guarded mutations
 - [Phase 03]: 03-04: underscore-prefixed unlisted revit_mcp/*.py count as unexpected in the integrity manifest (D-12) — startup discovery skips them as domains, but they are shipped code any module can import
+- [Phase 04]: 04-01: outcome schema added alongside legacy keys; classify_outcome is the single classifier (rolled_back 409, success/partial 200, failed 422); partial gets its own format_response branch outside the failure set; /activate_document/ deliberately carries no outcome block (Phase 6 audit reader handles it by route name)
 
 ### Roadmap Evolution
 
@@ -154,7 +156,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T12:31:13.440Z
-Stopped at: Phase 03 complete, ready to plan Phase 04
+Last session: 2026-10-23T17:28:38.823Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None
 Next boundary: prepare bounded 02-02 recheck and require full Revit close/reopen before any live route; no G6 or broad rollout

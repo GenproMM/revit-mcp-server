@@ -186,13 +186,13 @@ Plans:
   3. A batch operation run against a mix of valid and invalid element ids returns the succeeded and skipped/failed ids alongside each other, not only a count.
   4. A batch operation's partial failure produces a status distinguishable both from full success and from full failure — exercised live against at least one batch route with an intentionally-invalid id mixed in.
 
-**Plans:** 11 plans
+**Plans:** 1/11 plans executed
 
 Plans:
 
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — Tracer: tag_elements mixed batch end to end (pure outcome helpers in textutils, commit_and_report, finalize_outcome, PARTIAL SUCCESS in format_response), helper contract and renderer tests, rollback/422/500 outcome
+- [x] 04-01-PLAN.md — Tracer: tag_elements mixed batch end to end (pure outcome helpers in textutils, commit_and_report, finalize_outcome, PARTIAL SUCCESS in format_response), helper contract and renderer tests, rollback/422/500 outcome
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -283,7 +283,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Serialization and configurable addressing | 7/7 | Complete    | 2026-10-14 |
 | 2. Live identity, ambiguity refusal, and multi-document addressing | 20/20 | Complete    | 2026-10-23 |
 | 3. Secret gate and payload integrity (unit-verified) | 9/9 | Complete    | 2026-10-23 |
-| 4. Honest outcomes on every mutating route | 0/TBD | Not started | - |
+| 4. Honest outcomes on every mutating route | 1/11 | In Progress|  |
 | 5. Live secret gate and integrity enforcement | 0/TBD | Not started | - |
 | 6. Structured audit log of true outcomes | 0/TBD | Not started | - |
 | 7. Repository-owned mutation safety and human approval | 0/TBD | Not planned | - |

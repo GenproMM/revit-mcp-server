@@ -396,3 +396,118 @@ def integrity_failure(files):
         "files": _text_items(files),
     }
     return body, INTEGRITY_FAILURE_STATUS
+
+
+# ------------------------------------------------------------------ bind classification
+#
+# SEC-07 (D-16). classify_listeners() is the pure half: it names a Routes listener
+# set as loopback_only, exposed or unknown. It never blocks a mutation and collects
+# nothing; Phase 5 builds the (host, port) pairs from the .NET active TCP listener
+# table and reports the result on /status/.
+
+BIND_LOOPBACK_ONLY = "loopback_only"
+BIND_EXPOSED = "exposed"
+BIND_UNKNOWN = "unknown"
+
+_ASCII_DIGITS = "0123456789"
+
+
+def _as_port(value):
+    """An int port for an int (never a bool) or digit-only text, else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, _TEXT_TYPE):
+        text = value.strip()
+        if not text:
+            return None
+        for char in text:
+            if char not in _ASCII_DIGITS:
+                return None
+        return int(text)
+    return None
+
+
+def _is_loopback_ipv4(text):
+    """True only for a dotted quad of four plain decimal parts (0-255) starting with 127.
+
+    A part with a leading zero is refused: some stacks read it as octal, so it is not
+    provably the address it looks like.
+    """
+    parts = text.split(".")
+    if len(parts) != 4:
+        return False
+    numbers = []
+    for part in parts:
+        if not part or (len(part) > 1 and part[0] == "0"):
+            return False
+        for char in part:
+            if char not in _ASCII_DIGITS:
+                return False
+        number = int(part)
+        if number > 255:
+            return False
+        numbers.append(number)
+    return numbers[0] == 127
+
+
+def _is_loopback_host(host):
+    """True only for a literal loopback address; text that is not one is False.
+
+    Accepts 127.0.0.0/8, ::1, 0:0:0:0:0:0:0:1 and ::ffff:127.x.x.x, lower-cased,
+    stripped, with one pair of surrounding brackets and a %scope suffix removed. A
+    wildcard, a LAN or public address, a hostname and anything malformed is False.
+    """
+    if not isinstance(host, _TEXT_TYPE):
+        return False
+    text = host.strip().lower()
+    if len(text) >= 2 and text[0] == "[" and text[-1] == "]":
+        text = text[1:-1]
+    cut = text.find("%")
+    if cut >= 0:
+        text = text[:cut]
+    if text in ("::1", "0:0:0:0:0:0:0:1"):
+        return True
+    if text.startswith("::ffff:"):
+        text = text[len("::ffff:"):]
+    return _is_loopback_ipv4(text)
+
+
+def classify_listeners(endpoints, port):
+    """BIND_LOOPBACK_ONLY, BIND_EXPOSED or BIND_UNKNOWN for the listeners on ``port``; never raises.
+
+    endpoints is an iterable of (host text, port) pairs, which the Phase 5 wrapper
+    builds from .NET IPGlobalProperties.GetActiveTcpListeners(). Only pairs on
+    ``port`` count. Every such host a literal loopback address gives
+    "loopback_only"; any wildcard (0.0.0.0, ::), LAN or public address, or non-IP
+    text such as a hostname gives "exposed". None, a non-iterable, a malformed
+    entry, an unreadable port or no listener on the port gives "unknown". Two
+    loopback listeners stay "loopback_only": this is not an ambiguity detector.
+
+    "exposed" is reported by /status/ as bind: exposed with health: degraded, but it
+    never blocks a mutation: the shared secret is the network barrier, and pyRevit
+    offers no way to choose the bind host. A forced 127.0.0.1 bind is deferred.
+    """
+    try:
+        wanted = _as_port(port)
+        if wanted is None or endpoints is None:
+            return BIND_UNKNOWN
+        hosts = []
+        for entry in endpoints:
+            if not isinstance(entry, (tuple, list)) or len(entry) != 2:
+                return BIND_UNKNOWN
+            host, entry_port = entry
+            entry_port = _as_port(entry_port)
+            if not isinstance(host, _TEXT_TYPE) or entry_port is None:
+                return BIND_UNKNOWN
+            if entry_port == wanted:
+                hosts.append(host)
+        if not hosts:
+            return BIND_UNKNOWN
+        for host in hosts:
+            if not _is_loopback_host(host):
+                return BIND_EXPOSED
+        return BIND_LOOPBACK_ONLY
+    except Exception:
+        return BIND_UNKNOWN

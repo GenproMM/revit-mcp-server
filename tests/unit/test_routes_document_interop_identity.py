@@ -194,10 +194,44 @@ class RouteDocument(_Touchable):
         self._world.record("attr", self, name)
         if self._world.explode:
             raise RuntimeError("document access failed: " + name)
+        value = self._world.values.get((self.label, name))
+        if value is not None:
+            return value
         hook = self._world.hooks.get((self.label, name)) or self._world.hooks.get((None, name))
         if hook is not None:
             return lambda *args, **kwargs: hook(self, *args, **kwargs)
         return MagicMock(name=name)
+
+
+class FakeFamParam(object):
+    """A family parameter edit_family can write (or, read-only, cannot)."""
+
+    StorageType = "String"
+
+    def __init__(self, read_only=False):
+        self.IsReadOnly = read_only
+
+
+class FakeFamilyManager(object):
+    """A FamilyManager with one writable parameter, Width, and one type, Default.
+    ``params`` is the table get_Parameter answers from; tests add or replace entries."""
+
+    def __init__(self):
+        self.params = {"Width": FakeFamParam()}
+        self.Types = [types.SimpleNamespace(Name="Default")]
+        self.CurrentType = self.Types[0]
+        self.set_calls = []
+
+    def get_Parameter(self, name):
+        return self.params.get(name)
+
+    def Set(self, param, value):
+        self.set_calls.append(value)
+
+    def NewType(self, name):
+        created = types.SimpleNamespace(Name=name)
+        self.Types.append(created)
+        return created
 
 
 class FamilyDoc(_Touchable):
@@ -209,7 +243,7 @@ class FamilyDoc(_Touchable):
         self._world = world
         self._title = title
         self._path = path
-        self.FamilyManager = MagicMock(name="FamilyManager")
+        self.FamilyManager = FakeFamilyManager()
 
     @property
     def label(self):
@@ -298,6 +332,9 @@ class World(object):
         self.events = []
         self.explode = False
         self.hooks = {}
+        # (label, name) -> an object handed back as that attribute (a hook answers a call;
+        # a value answers an attribute that is itself used as an object, like doc.Create).
+        self.values = {}
         self.collector_items = []
         self.commit_status = "Committed"
         self.break_start = set()
@@ -904,7 +941,7 @@ def test_a_transaction_error_still_rolls_back_and_names_the_document(world):
 
 # The world-wide invariants cover the rows whose modules report an outcome. Plan 04-06
 # migrates documentation and placement and widens this set until it is the whole table.
-OUTCOME_MODULES = {"editing", "interop", "documentation"}
+OUTCOME_MODULES = {"editing", "interop", "documentation", "placement"}
 OUTCOME_ROWS = [key for key in TRANSACTING if key[0] in OUTCOME_MODULES]
 OUTCOME_ROW_IDS = ["{}:{}".format(module, route) for module, route in OUTCOME_ROWS]
 
@@ -1887,6 +1924,206 @@ def test_a_rolled_back_export_is_a_409_with_nothing_succeeded(world):
                  dict(EXPORT_VIEW, format="dwg"))
     assert reply.status == 409 and reply.data["status"] == "rolled_back"
     assert reply.data["outcome"]["succeeded"] == [] and "exported" not in reply.data
+
+
+# --------------------------------------------- placement outcomes (04-06, D-12, D-06)
+
+PLACE_BODY = {"family_name": "F", "type_name": "T", "location": {"x": 0, "y": 0, "z": 0}}
+
+
+class TrackedInstance(object):
+    """A placed family instance. Reading Location is logged so a test can prove it was not
+    read after the commit event. ``params`` answers LookupParameter."""
+
+    def __init__(self, world, params=None, rotate_result=True, rotate_error=None,
+                 location_error=None, can_rotate=True):
+        self._world = world
+        self.Id = types.SimpleNamespace(Value=900)
+        self._params = {"Mark": FakeParam(world)} if params is None else params
+        self._location_error = location_error
+        self.rotations = []
+
+        def rotate(axis, radians):
+            self.rotations.append(radians)
+            if rotate_error is not None:
+                raise rotate_error
+            return rotate_result
+
+        point = types.SimpleNamespace(X=1.0, Y=2.0, Z=3.0)
+        self._location = types.SimpleNamespace(Point=point)
+        if can_rotate:
+            self._location.Rotate = rotate
+
+    @property
+    def Location(self):
+        self._world.events.append(("locread", "INSTANCE", "Location"))
+        if self._location_error is not None:
+            raise self._location_error
+        return self._location
+
+    def LookupParameter(self, name):
+        return self._params.get(name)
+
+
+def arm_placement(world, instance=None, **kwargs):
+    """A symbol in the collector and a doc.Create that places the given instance."""
+    world.collector_items = [_symbol]
+    instance = instance or TrackedInstance(world, **kwargs)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    world.values[("Only", "Create")] = types.SimpleNamespace(
+        NewFamilyInstance=lambda *args: instance)
+    return instance
+
+
+def test_place_family_success_reports_the_instance_and_every_legacy_key(world):
+    arm_placement(world)
+    reply = call(world, handler_of(world, "placement", "/place_family/"),
+                 dict(PLACE_BODY, properties={"Mark": "A"}))
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"] == {"transaction_status": "Committed", "requested": 1,
+                                     "succeeded": [900], "failed": [], "revit_failures": []}
+    assert reply.data["element_id"] == 900
+    assert reply.data["properties_set"] == ["Mark"] and reply.data["properties_failed"] == []
+    assert reply.data["actual_location"] == pytest.approx({"x": 304.8, "y": 609.6, "z": 914.4})
+    for key in ("family_name", "type_name", "requested_location", "rotation_degrees", "level"):
+        assert key in reply.data
+
+
+def test_place_family_reports_every_property_it_could_not_set_as_a_failed_step(world):
+    arm_placement(world, params={"Mark": FakeParam(world), "Fixed": FakeParam(world, read_only=True)})
+    reply = call(world, handler_of(world, "placement", "/place_family/"),
+                 dict(PLACE_BODY, properties={"Mark": "A", "Fixed": "x", "Ghost": "y"}))
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    assert reply.data["outcome"]["succeeded"] == [900]
+    assert reply.data["outcome"]["failed"] == [{"item": "Fixed", "reason": "read-only"},
+                                               {"item": "Ghost", "reason": "not found"}]
+    assert reply.data["properties_set"] == ["Mark"]
+    assert reply.data["properties_failed"] == ["Fixed (read-only)", "Ghost (not found)"]
+
+
+def test_place_family_names_an_unsupported_parameter_type_and_a_set_that_raises(world):
+    odd = FakeParam(world)
+    odd.StorageType = "ElementId"
+    boom = FakeParam(world)
+
+    def refuses(value):
+        raise RuntimeError("bad value")
+
+    boom.Set = refuses
+    arm_placement(world, params={"Odd": odd, "Boom": boom})
+    reply = call(world, handler_of(world, "placement", "/place_family/"),
+                 dict(PLACE_BODY, properties={"Odd": "1", "Boom": "x"}))
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    assert reply.data["outcome"]["failed"] == [{"item": "Odd", "reason": "unsupported type"},
+                                               {"item": "Boom", "reason": "bad value"}]
+    assert reply.data["properties_failed"] == ["Odd (unsupported type)", "Boom (error: bad value)"]
+
+
+def test_place_family_with_a_rotation_that_returns_false_is_a_partial(world):
+    instance = arm_placement(world, rotate_result=False)
+    reply = call(world, handler_of(world, "placement", "/place_family/"),
+                 dict(PLACE_BODY, rotation=90))
+    assert instance.rotations, "the rotation was never attempted"
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    assert reply.data["outcome"]["failed"] == [
+        {"item": "rotation", "reason": "RotateElement returned False"}]
+    assert reply.data["outcome"]["succeeded"] == [900]
+
+
+def test_place_family_with_a_rotation_that_raises_names_the_error(world):
+    arm_placement(world, rotate_error=RuntimeError("cannot rotate"))
+    reply = call(world, handler_of(world, "placement", "/place_family/"),
+                 dict(PLACE_BODY, rotation=45))
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    assert reply.data["outcome"]["failed"] == [{"item": "rotation", "reason": "cannot rotate"}]
+
+
+def test_place_family_with_a_rotation_on_an_element_that_cannot_rotate_is_a_partial(world):
+    arm_placement(world, can_rotate=False)
+    reply = call(world, handler_of(world, "placement", "/place_family/"),
+                 dict(PLACE_BODY, rotation=45))
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    assert reply.data["outcome"]["failed"][0]["item"] == "rotation"
+
+
+def test_place_family_with_a_rotation_that_works_is_a_plain_success(world):
+    instance = arm_placement(world, rotate_result=True)
+    reply = call(world, handler_of(world, "placement", "/place_family/"),
+                 dict(PLACE_BODY, rotation=90))
+    assert instance.rotations and reply.data["status"] == "success"
+    assert reply.data["outcome"]["failed"] == []
+
+
+def test_a_rolled_back_place_family_is_a_409_and_the_instance_location_is_never_read_after_the_commit(world):
+    arm_placement(world)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, "placement", "/place_family/"),
+                 dict(PLACE_BODY, properties={"Mark": "A"}))
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["outcome"]["requested"] == 1
+    for key in ("element_id", "actual_location", "requested_location", "properties_set"):
+        assert key not in reply.data, key
+    assert events_after_commit(world, "locread") == []
+
+
+def test_place_family_falls_back_to_the_requested_point_only_for_a_committed_instance(world):
+    db_of().XYZ = lambda x, y, z: types.SimpleNamespace(X=x, Y=y, Z=z)
+    arm_placement(world, location_error=RuntimeError("no location"))
+    reply = call(world, handler_of(world, "placement", "/place_family/"),
+                 dict(PLACE_BODY, location={"x": 304.8, "y": 0, "z": 0}))
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["actual_location"] == reply.data["requested_location"]
+    assert reply.data["actual_location"]["x"] == 304.8
+
+
+def test_load_family_success_carries_an_outcome_with_a_null_transaction_status(world):
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    path = (world.tmp / "Door.rfa").as_posix()
+    world.hooks[("Only", "LoadFamily")] = lambda document, file_path: True
+    reply = call(world, handler_of(world, "placement", "/load_family/"), {"file_path": path})
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"] == {"transaction_status": None, "requested": 1,
+                                     "succeeded": [path], "failed": [], "revit_failures": []}
+    assert world.kinds("transaction") == []
+
+
+def test_load_family_already_loaded_keeps_its_status_and_empties_both_lists(world):
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    path = (world.tmp / "Door.rfa").as_posix()
+    world.hooks[("Only", "LoadFamily")] = lambda document, file_path: False
+    reply = call(world, handler_of(world, "placement", "/load_family/"), {"file_path": path})
+    assert reply.status == 200 and reply.data["status"] == "already_loaded"
+    assert reply.data["outcome"] == {"transaction_status": None, "requested": 1,
+                                     "succeeded": [], "failed": [], "revit_failures": []}
+
+
+def test_load_family_that_raises_is_a_500_naming_the_file(world):
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    path = (world.tmp / "Door.rfa").as_posix()
+
+    def refuses(document, file_path):
+        raise RuntimeError("corrupt family")
+
+    world.hooks[("Only", "LoadFamily")] = refuses
+    reply = call(world, handler_of(world, "placement", "/load_family/"), {"file_path": path})
+    assert reply.status == 500 and "corrupt family" in reply.data["error"]
+    assert reply.data["outcome"] == {
+        "transaction_status": None, "requested": 1, "succeeded": [],
+        "failed": [{"item": path, "reason": "corrupt family"}], "revit_failures": []}
+
+
+def test_load_family_validation_replies_carry_no_outcome(world):
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    handler = handler_of(world, "placement", "/load_family/")
+    missing = call(world, handler, {})
+    assert missing.status == 400 and "outcome" not in missing.data
+    absent = call(world, handler, {"file_path": (world.tmp / "Nope.rfa").as_posix()})
+    assert absent.status == 404 and "outcome" not in absent.data
 
 
 # ------------------------------------------------------------------- helper contracts

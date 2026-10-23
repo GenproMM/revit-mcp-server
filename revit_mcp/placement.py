@@ -11,6 +11,10 @@ from .utils import (
     make_element_id,
     suppress_warnings,
     parse_request_data,
+    commit_and_report,
+    finalize_outcome,
+    build_outcome,
+    exception_outcome,
 )
 from .identity import (
     mutation_document_or_response,
@@ -143,6 +147,11 @@ def register_placement_routes(api):
             }
         }
         """
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -279,10 +288,11 @@ def register_placement_routes(api):
                 )
 
             # Start a transaction
+            requested = 1
             transaction_name = "Place Family Instance via MCP"
             t = DB.Transaction(doc, transaction_name)
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 # Ensure the symbol is activated
@@ -378,13 +388,10 @@ def register_placement_routes(api):
                         point, target_symbol, DB.Structure.StructuralType.NonStructural
                     )
 
-                logger.info(
-                    "Family instance created with ID: {}".format(
-                        get_element_id_value(new_instance)
-                    )
-                )
+                logger.info("Family instance created")
 
-                # Apply rotation if specified
+                # Apply rotation if specified. A rotation that did not happen is a
+                # failed step beside the placed instance, never a silent success.
                 if rotation != 0:
                     try:
                         rotation_radians = float(rotation) * (3.14159265359 / 180.0)
@@ -402,10 +409,19 @@ def register_placement_routes(api):
                                 logger.warning(
                                     "Rotation failed - element may not support rotation"
                                 )
+                                failed.append({"item": "rotation",
+                                               "reason": "RotateElement returned False"})
+                        else:
+                            logger.warning(
+                                "Rotation skipped - the element location cannot rotate"
+                            )
+                            failed.append({"item": "rotation",
+                                           "reason": "element location does not support rotation"})
                     except Exception as rotate_err:
                         logger.warning(
                             "Could not rotate element: {}".format(str(rotate_err))
                         )
+                        failed.append({"item": "rotation", "reason": str(rotate_err)})
 
                 # Set custom properties
                 properties_set = []
@@ -429,51 +445,29 @@ def register_placement_routes(api):
                                 properties_failed.append(
                                     "{} (unsupported type)".format(param_name)
                                 )
+                                failed.append({"item": param_name,
+                                               "reason": "unsupported type"})
                         else:
                             if param:
                                 properties_failed.append(
                                     "{} (read-only)".format(param_name)
                                 )
+                                failed.append({"item": param_name, "reason": "read-only"})
                             else:
                                 properties_failed.append(
                                     "{} (not found)".format(param_name)
                                 )
+                                failed.append({"item": param_name, "reason": "not found"})
                     except Exception as param_error:
                         properties_failed.append(
                             "{} (error: {})".format(param_name, str(param_error))
                         )
+                        failed.append({"item": param_name, "reason": str(param_error)})
 
-                t.Commit()
-                logger.info("Transaction committed successfully")
-
-                # Get actual placed location (may differ due to level constraints).
-                # Report in millimeters to match the input units.
-                FEET_TO_MM = 304.8
-                try:
-                    actual_location = new_instance.Location.Point
-                    actual_coords = {
-                        "x": actual_location.X * FEET_TO_MM,
-                        "y": actual_location.Y * FEET_TO_MM,
-                        "z": actual_location.Z * FEET_TO_MM,
-                    }
-                except:
-                    actual_coords = {"x": point.X * FEET_TO_MM, "y": point.Y * FEET_TO_MM, "z": point.Z * FEET_TO_MM}
-
-                # Return information about the placed instance
-                response_data = {
-                    "status": "success",
-                    "element_id": get_element_id_value(new_instance),
-                    "family_name": family_name,
-                    "type_name": type_name,
-                    "requested_location": {"x": point.X * FEET_TO_MM, "y": point.Y * FEET_TO_MM, "z": point.Z * FEET_TO_MM},
-                    "actual_location": actual_coords,
-                    "rotation_degrees": rotation,
-                    "level": level_name if target_level else None,
-                    "properties_set": properties_set,
-                    "properties_failed": properties_failed,
-                }
-
-                return routes.make_response(data=response_data)
+                commit_result = commit_and_report(t, swallower)
+                logger.info(
+                    "Transaction finished: {}".format(commit_result["transaction_status"])
+                )
 
             except Exception as tx_error:
                 # Roll back the transaction if something went wrong
@@ -482,11 +476,56 @@ def register_placement_routes(api):
                     logger.error("Transaction rolled back due to error")
                 raise tx_error
 
+            if not commit_result["committed"]:
+                # A rolled-back instance never existed: read nothing from it, and never
+                # report the requested point as where it landed (Pitfall 2).
+                payload, http = finalize_outcome(commit_result, {}, requested, [], failed)
+                return routes.make_response(data=payload, status=http)
+
+            succeeded.append(get_element_id_value(new_instance))
+
+            # Get actual placed location (may differ due to level constraints).
+            # Report in millimeters to match the input units.
+            FEET_TO_MM = 304.8
+            try:
+                actual_location = new_instance.Location.Point
+                actual_coords = {
+                    "x": actual_location.X * FEET_TO_MM,
+                    "y": actual_location.Y * FEET_TO_MM,
+                    "z": actual_location.Z * FEET_TO_MM,
+                }
+            except Exception as location_err:
+                # Only a committed instance whose Location cannot be read gets here.
+                logger.warning(
+                    "Could not read the placed location, reporting the requested point: {}".format(
+                        str(location_err))
+                )
+                actual_coords = {"x": point.X * FEET_TO_MM, "y": point.Y * FEET_TO_MM, "z": point.Z * FEET_TO_MM}
+
+            # Return information about the placed instance
+            response_data = {
+                "element_id": succeeded[0],
+                "family_name": family_name,
+                "type_name": type_name,
+                "requested_location": {"x": point.X * FEET_TO_MM, "y": point.Y * FEET_TO_MM, "z": point.Z * FEET_TO_MM},
+                "actual_location": actual_coords,
+                "rotation_degrees": rotation,
+                "level": level_name if target_level else None,
+                "properties_set": properties_set,
+                "properties_failed": properties_failed,
+            }
+
+            payload, http = finalize_outcome(
+                commit_result, response_data, requested, succeeded, failed)
+            return routes.make_response(data=payload, status=http)
+
         except Exception as e:
             logger.error("Failed to place family: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/place_family/", methods=["POST"])
@@ -507,6 +546,7 @@ def register_placement_routes(api):
 
         Payload: { "file_path": "C:\\\\path\\\\to\\\\Family.rfa" }
         """
+        file_path = None
         try:
             if not doc:
                 return routes.make_response(
@@ -531,7 +571,9 @@ def register_placement_routes(api):
                 ok = result[0] if isinstance(result, tuple) else result
             except Exception as le:
                 return routes.make_response(
-                    data={"error": "LoadFamily failed: {}".format(str(le))},
+                    data={"error": "LoadFamily failed: {}".format(str(le)),
+                          "outcome": build_outcome(
+                              None, 1, [], [{"item": file_path, "reason": str(le)}], [])},
                     status=500,
                 )
 
@@ -542,16 +584,23 @@ def register_placement_routes(api):
                     "family_name": fam_name,
                     "file_path": file_path,
                     "message": "Family '{}' was already loaded (or no new types added)".format(fam_name),
+                    "outcome": build_outcome(None, 1, [], [], []),
                 })
             return routes.make_response(data={
                 "status": "success",
                 "family_name": fam_name,
                 "file_path": file_path,
                 "message": "Loaded family '{}'. Its types are now available to place_family.".format(fam_name),
+                "outcome": build_outcome(None, 1, [file_path], [], []),
             })
         except Exception as e:
             logger.error("load_family failed: {}".format(str(e)))
-            return routes.make_response(data={"error": str(e)}, status=500)
+            reply = {"error": str(e)}
+            if file_path:
+                # Past validation: the file was named, so say which one failed.
+                reply["outcome"] = build_outcome(
+                    None, 1, [], [{"item": file_path, "reason": str(e)}], [])
+            return routes.make_response(data=reply, status=500)
 
     @api.route("/load_family/", methods=["POST"])
     def load_family(uiapp, doc, request):

@@ -83,6 +83,7 @@ anyway. Override with `MCP_BUILD_DIR` if `%TEMP%` is unsuitable; a leftover
 `payload.build\` on the share is a relic of an older build.
 
 **First-time setup and pilot rollout: follow [SETUP-RUNBOOK.md](SETUP-RUNBOOK.md).**
+**Cutting a release (tag, pilot share, pilot acceptance, promotion, rollback): [RELEASE-RUNBOOK.md](RELEASE-RUNBOOK.md).**
 
 ## The interpreter: pyRevit's, not ours
 

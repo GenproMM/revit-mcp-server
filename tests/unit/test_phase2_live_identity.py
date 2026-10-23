@@ -3854,6 +3854,24 @@ def test_two_status_and_two_list_name_the_process_each_selector_chose(tmp_path, 
     assert {n for n, _a in bench.tool_calls} <= {"discover_revit_targets", "get_revit_status", "list_documents"}
 
 
+def test_the_two_unit_accepts_the_localized_default_unsaved_title_and_nothing_else(tmp_path, monkeypatch):
+    """A Russian Revit names its first unsaved project 'Проект1'; that is the same default as 'Project1'."""
+    rec = good_acc_record()
+    assert acc_result(rec)["units"]["two"]["status"] == "observed"
+    for which in ("1", "2"):
+        for d in rec["two"]["list"][which]["documents"]:
+            if d["title"] == "Project1":
+                d["title"] = "Проект1"
+    localized = acc_result(rec)["units"]["two"]
+    assert localized["status"] == "observed", localized["reasons"]
+    saved = copy.deepcopy(rec)  # a saved document is never the unsaved default, whatever its title
+    saved["two"]["list"]["1"]["documents"][0]["path"] = "C:/bench/Saved.rvt"
+    assert has_code(acc_result(saved)["units"]["two"], "two-no-project1")
+    other = copy.deepcopy(rec)  # an arbitrary title is still not the default
+    other["two"]["list"]["2"]["documents"][0]["title"] = "Alpha"
+    assert has_code(acc_result(other)["units"]["two"], "two-no-project1")
+
+
 def test_the_two_overlap_is_informational_and_a_cross_wired_answer_is_stop(tmp_path, monkeypatch):
     raw = acc_start(str(tmp_path))
     flow_two(raw, monkeypatch)

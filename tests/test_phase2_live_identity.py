@@ -2208,6 +2208,8 @@ def _cmd_g34_classify(path):
 # lock covers one server process only), always with the selector built from a
 # verified identity. They never write the engineer fields or an authorization flag.
 
+# The title Revit gives a first unsaved project: English, then the Russian-localized default of the bench.
+UNSAVED_DEFAULT_TITLES = ("Project1", "Проект1")
 ACC_SCHEMA = "phase2-acceptance-v1"
 ACCEPT_ELIGIBLE = "accept-eligible"
 SLOT_OBSERVED = "observed"
@@ -2879,8 +2881,9 @@ def _unit_two(record, unit):
                                                  and got.get("session_token") == expected.get("session_token")):
                     add("two-status-identity-mismatch", "the document list of process {} was answered by another "
                         "process".format(which))
-                if not any(d.get("title") == "Project1" and not d.get("path") for d in _titles(listing)):
-                    add("two-no-project1", "process {} lists no unsaved document titled Project1".format(which))
+                if not any(d.get("title") in UNSAVED_DEFAULT_TITLES and not d.get("path") for d in _titles(listing)):
+                    add("two-no-project1", "process {} lists no unsaved document titled Project1 (or its localized "
+                        "default {})".format(which, UNSAVED_DEFAULT_TITLES[1]))
         if isinstance(inventory, dict) and expected is not None:
             if not (inventory.get("owners") == [expected.get("pid")] and inventory.get("port") == expected.get("port")):
                 add("two-listener-not-sole", "the port of process {} is not held by its PID alone".format(which))

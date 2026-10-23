@@ -35,6 +35,10 @@ AUTH_MISMATCH = "mismatch"
 AUTH_SERVER_NOT_CONFIGURED = "server_not_configured"
 AUTH_FAILURE_STATUS = 401
 
+# Reads are exempt from the gate (D-03). Any other verb, an unknown one included,
+# is gated, so a route added with a new verb is closed rather than silently open.
+UNGATED_METHODS = ("GET", "HEAD")
+
 _AUTH_HINTS = {
     AUTH_MISSING: (
         "The MCP server sent no shared secret. Update the payload so _bridge_secret "
@@ -184,3 +188,57 @@ def auth_failure(reason):
         "hint": _AUTH_HINTS[reason],
     }
     return body, AUTH_FAILURE_STATUS
+
+
+def secret_from_bytes(raw):
+    """The secret text held by the bytes of a secret file, or None; never raises.
+
+    Strips a UTF-8 BOM, then surrounding space, tab, CR and LF (a trailing CRLF
+    is the usual editor artifact). Returns None for anything that is not bytes,
+    for undecodable input (UTF-16 included), for text holding a NUL, and for a
+    value shorter than MIN_SECRET_LENGTH. The same rule is duplicated, on purpose,
+    in bridge.py (plan 03-03): keep the two identical.
+    """
+    if not isinstance(raw, _BYTES_TYPE):
+        return None
+    try:
+        text = raw.decode("utf-8-sig")
+    except ValueError:  # UnicodeDecodeError subclasses ValueError on every runtime
+        return None
+    text = text.strip(" \t\r\n")
+    if "\x00" in text or len(text) < MIN_SECRET_LENGTH:
+        return None
+    return text
+
+
+def read_secret_file(path):
+    """The secret held by the file at ``path``, or None; never raises, never logs.
+
+    The only file access in this module, and read-only. A missing, unreadable or
+    directory path gives None, which check_secret reads as "server_not_configured".
+    """
+    try:
+        handle = open(path, "rb")
+    except (IOError, OSError, TypeError, ValueError):
+        return None
+    try:
+        return secret_from_bytes(handle.read())
+    except (IOError, OSError):
+        return None
+    finally:
+        handle.close()
+
+
+def gate_applies(method):
+    """False for GET and HEAD (any case), True for every other or unknown method.
+
+    Fails closed: None, a non-text value and an unrecognized verb are all gated.
+    """
+    if isinstance(method, _BYTES_TYPE):
+        try:
+            method = method.decode("ascii")
+        except ValueError:
+            return True
+    if isinstance(method, _TEXT_TYPE):
+        return method.strip().upper() not in UNGATED_METHODS
+    return True

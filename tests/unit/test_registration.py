@@ -235,7 +235,7 @@ def test_every_route_domain_has_a_matching_tool_module():
 
 def test_revit_mcp_helpers_define_no_routes():
     """Helpers must stay helpers -- otherwise discovery would need to load them."""
-    for name in ("utils", "textutils", "registry", "identity"):
+    for name in ("utils", "textutils", "registry", "identity", "trust"):
         assert not ROUTE_DECORATOR.search(_source_of(name)), (
             "revit_mcp/{}.py defines routes but is a helper module".format(name)
         )
@@ -253,7 +253,7 @@ def test_no_revit_mcp_module_imports_another_revit_mcp_module():
     relative import is therefore no longer evidence of a violation on its own,
     and this checks the import's *target* instead.
     """
-    helpers = {"utils", "textutils", "registry", "identity"}
+    helpers = {"utils", "textutils", "registry", "identity", "trust"}
     targets = re.compile(
         r"^from \.(\w+) import|^from revit_mcp\.(\w+) import|^\s*from \. import (\w+)",
         re.MULTILINE,

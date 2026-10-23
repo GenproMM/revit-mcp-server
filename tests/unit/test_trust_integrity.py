@@ -243,6 +243,94 @@ def test_unverifiable_unconfirmed_absence_is_absence_unconfirmed():
     assert trust.mismatch_files(result) == []
 
 
+def _missing_b():
+    observed = _observed(present_py=[A])
+    del observed["hashes"][B]
+    return observed
+
+
+def test_unverifiable_unconfirmed_absence_wins_over_a_modified_file():
+    observed = _missing_b()
+    observed["hashes"][A] = _digest("tampered")
+    observed["present_py"].append("revit_mcp/rogue.py")
+    result = trust.evaluate_integrity(_manifest(), dict(observed, unconfirmed=[B]))
+    assert result["state"] == trust.INTEGRITY_UNVERIFIABLE
+    assert result["reason"] == trust.REASON_ABSENCE_UNCONFIRMED
+    assert _lists(result) == ([], [], [])
+
+
+def test_unverifiable_read_error_wins_over_an_unconfirmed_absence():
+    result = trust.evaluate_integrity(
+        _manifest(), dict(_missing_b(), unreadable=[A], unconfirmed=[B]))
+    assert result["state"] == trust.INTEGRITY_UNVERIFIABLE
+    assert result["reason"] == trust.REASON_READ_ERROR
+    assert _lists(result) == ([], [], [])
+
+
+def test_unconfirmed_empty_or_absent_key_changes_nothing():
+    without_key = trust.evaluate_integrity(_manifest(), _missing_b())
+    empty_key = trust.evaluate_integrity(_manifest(), dict(_missing_b(), unconfirmed=[]))
+    assert without_key == empty_key
+    assert empty_key["state"] == trust.INTEGRITY_MISMATCH
+    assert _lists(empty_key) == ([], [B], [])
+    clean = trust.evaluate_integrity(_manifest(), dict(_observed(), unconfirmed=[]))
+    assert clean["state"] == trust.INTEGRITY_MATCH
+
+
+@pytest.mark.parametrize("value", [None, "x", {}, ("x",)], ids=["none", "text", "dict", "tuple"])
+def test_unverifiable_unconfirmed_of_the_wrong_type_is_read_error(value):
+    result = trust.evaluate_integrity(_manifest(), dict(_missing_b(), unconfirmed=value))
+    assert result["state"] == trust.INTEGRITY_UNVERIFIABLE
+    assert result["reason"] == trust.REASON_READ_ERROR
+    assert _lists(result) == ([], [], [])
+
+
+def test_unverifiable_property_unconfirmed_never_mismatch():
+    def tampered():
+        observed = _missing_b()
+        observed["hashes"][A] = _digest("tampered")
+        return observed
+
+    def gone_startup():
+        observed = _missing_b()
+        del observed["hashes"][S]
+        return observed
+
+    def rogue():
+        observed = _missing_b()
+        observed["present_py"].append("revit_mcp/rogue.py")
+        return observed
+
+    def everything():
+        observed = tampered()
+        del observed["hashes"][S]
+        observed["present_py"].append("revit_mcp/rogue.py")
+        return observed
+
+    cases = []
+    for unconfirmed in ([B], ["revit_mcp/"], [B, "revit_mcp/"]):
+        for build in (_missing_b, tampered, gone_startup, rogue, everything):
+            cases.append(dict(build(), unconfirmed=list(unconfirmed)))
+    assert len(cases) >= 10
+    for observed in cases:
+        result = trust.evaluate_integrity(_manifest(), observed)
+        assert result["state"] == trust.INTEGRITY_UNVERIFIABLE
+        assert result["state"] != trust.INTEGRITY_MISMATCH
+        assert result["reason"] == trust.REASON_ABSENCE_UNCONFIRMED
+        assert _lists(result) == ([], [], [])
+
+
+def test_integrity_423_is_never_built_from_an_unconfirmed_result():
+    result = trust.evaluate_integrity(_manifest(), dict(_missing_b(), unconfirmed=[B]))
+    assert result["reason"] == trust.REASON_ABSENCE_UNCONFIRMED
+    assert trust.mismatch_files(result) == []
+    body, status = trust.integrity_failure(trust.mismatch_files(result))
+    assert status == 423
+    assert body["integrity"] == "verified_mismatch"
+    assert body["files"] == []
+    assert trust.integrity_failure([])[1] == 423
+
+
 # ---------------------------------------------------------------- ordering and encoding
 
 def test_result_does_not_depend_on_input_ordering():

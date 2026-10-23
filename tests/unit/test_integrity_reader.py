@@ -434,6 +434,159 @@ def test_share_drop_after_manifest_read_is_unverifiable_absence_unconfirmed(
     assert _snapshot(root) == before
 
 
+LISTED = sorted(FILES)  # the order the reader opens the listed files in
+LISTED_MANIFEST = "_manifest.json"
+
+
+def _normalized(paths):
+    return [os.fspath(p).replace("\\", "/") for p in paths]
+
+
+def _tree_path(root, relpath):
+    return os.fspath(os.path.join(root, *relpath.split("/"))).replace("\\", "/")
+
+
+@pytest.mark.parametrize("label,winerror", SHARE_DROP, ids=[s[0] for s in SHARE_DROP])
+def test_share_drop_mid_scan_after_some_files_were_read_is_unverifiable(
+        tmp_path, monkeypatch, label, winerror):
+    """Alpha is modified and read before the drop: a partial read is not evidence of tampering."""
+    root = str(tmp_path / "tree")
+    _build_tree(root)
+    _tamper(root)
+    before = _snapshot(root)
+    assert LISTED == ["extension.json", "revit_mcp/__init__.py", "revit_mcp/alpha.py",
+                      "revit_mcp/beta.py", "startup.py"]
+    # open 1 is the manifest, 2-4 are extension.json, __init__.py and alpha.py
+    with _share_outage(monkeypatch, lambda: _network_enoent(winerror),
+                       lambda n: n >= 5, lambda n: True):
+        result = integrity.check_integrity(root)
+    assert result["state"] == trust.INTEGRITY_UNVERIFIABLE, result
+    assert result["reason"] == "absence_unconfirmed", result
+    assert result["modified"] == [] and result["missing"] == [] and result["unexpected"] == []
+    assert _snapshot(root) == before
+
+
+def test_share_blip_that_recovers_before_corroboration_is_unverifiable(tmp_path, monkeypatch):
+    """The outage covers the first scan and is over before the re-read: files reappear."""
+    root = str(tmp_path / "tree")
+    _build_tree(root)
+    before = _snapshot(root)
+    seen = []
+    # open 1 is the manifest, 2-6 are the five listed files; the first listing fails too
+    with _share_outage(monkeypatch, lambda: _network_enoent(53),
+                       lambda n: 2 <= n <= 6, lambda n: n == 1, record=seen):
+        result = integrity.check_integrity(root)
+    assert result["state"] == trust.INTEGRITY_UNVERIFIABLE, result
+    assert result["reason"] == "absence_unconfirmed", result
+    assert result["modified"] == [] and result["missing"] == [] and result["unexpected"] == []
+    recorded = _normalized(seen)
+    assert recorded.count(_tree_path(root, LISTED_MANIFEST)) == 2
+    for relpath in LISTED:
+        assert recorded.count(_tree_path(root, relpath)) == 2, relpath
+    assert recorded[0] == _tree_path(root, LISTED_MANIFEST)
+    assert recorded[6] == _tree_path(root, LISTED_MANIFEST), "the manifest re-read comes first"
+    assert _snapshot(root) == before
+
+
+def test_share_drop_manifest_changed_between_reads_is_unverifiable(tmp_path, monkeypatch):
+    """A republish between the two manifest reads: the absence cannot be confirmed."""
+    import copy
+    root = str(tmp_path / "tree")
+    _build_tree(root)
+    os.remove(os.path.join(root, "revit_mcp", "beta.py"))
+    real_read_manifest = integrity.read_manifest
+    calls = []
+
+    def republished(path):
+        manifest, reason = real_read_manifest(path)
+        calls.append(path)
+        if len(calls) == 2 and manifest is not None:
+            manifest = copy.deepcopy(manifest)
+            manifest["files"]["startup.py"] = "0" * 64
+        return manifest, reason
+
+    monkeypatch.setattr(integrity, "read_manifest", republished)
+    result = _check(root, monkeypatch)
+    assert len(calls) == 2
+    assert result["state"] == trust.INTEGRITY_UNVERIFIABLE, result
+    assert result["reason"] == "absence_unconfirmed", result
+    assert result["modified"] == [] and result["missing"] == [] and result["unexpected"] == []
+
+
+def test_genuine_deletion_is_confirmed_by_a_second_read(tmp_path, monkeypatch):
+    """A real deletion on a reachable tree is still a mismatch, and the second read ran."""
+    root = str(tmp_path / "tree")
+    _build_tree(root)
+    os.remove(os.path.join(root, "revit_mcp", "beta.py"))
+    seen = []
+    result = _check(root, monkeypatch, record=seen)
+    assert result["state"] == trust.INTEGRITY_MISMATCH, result
+    assert result["missing"] == ["revit_mcp/beta.py"]
+    assert result["modified"] == [] and result["unexpected"] == []
+    recorded = _normalized(seen)
+    first_pass = [_tree_path(root, r) for r in [LISTED_MANIFEST] + LISTED]
+    assert recorded.count(_tree_path(root, LISTED_MANIFEST)) == 2
+    assert recorded.count(_tree_path(root, "revit_mcp/beta.py")) == 2
+    for relpath in LISTED:
+        if relpath != "revit_mcp/beta.py":
+            assert recorded.count(_tree_path(root, relpath)) == 1, relpath
+    assert set(recorded) == set(first_pass), "no path outside the first pass is opened"
+
+
+def test_matching_tree_reads_the_manifest_once(tmp_path, monkeypatch):
+    root = str(tmp_path / "tree")
+    _build_tree(root)
+    seen = []
+    result = _check(root, monkeypatch, record=seen)
+    assert result["state"] == trust.INTEGRITY_MATCH, result
+    recorded = _normalized(seen)
+    assert recorded.count(_tree_path(root, LISTED_MANIFEST)) == 1
+    for relpath in LISTED:
+        assert recorded.count(_tree_path(root, relpath)) == 1, relpath
+    assert len(recorded) == 1 + len(LISTED)
+
+
+def test_observe_tree_reports_absent_files_and_scope(tmp_path):
+    matching = str(tmp_path / "matching")
+    _build_tree(matching)
+    assert integrity.observe_tree(matching, LISTED)["absent"] == []
+    stripped = str(tmp_path / "stripped")
+    _build_tree(stripped)
+    shutil.rmtree(os.path.join(stripped, "revit_mcp"))
+    observed = integrity.observe_tree(stripped, LISTED)
+    assert observed["absent"] == ["revit_mcp/", "revit_mcp/__init__.py", "revit_mcp/alpha.py",
+                                  "revit_mcp/beta.py"]
+    assert observed["unreadable"] == []
+    assert sorted(observed["hashes"]) == ["extension.json", "startup.py"]
+
+
+def test_unverifiable_when_the_corroboration_itself_raises(tmp_path, monkeypatch):
+    root = str(tmp_path / "tree")
+    _build_tree(root)
+    os.remove(os.path.join(root, "revit_mcp", "beta.py"))
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(integrity, "unconfirmed_absences", boom)
+    result = integrity.check_integrity(root)
+    assert (result["state"], result["reason"]) == (
+        trust.INTEGRITY_UNVERIFIABLE, trust.REASON_READ_ERROR)
+
+
+def test_share_drop_result_carries_no_path_or_error_text(tmp_path, monkeypatch):
+    root = str(tmp_path / "tree")
+    _build_tree(root)
+    with _share_outage(monkeypatch, lambda: _network_enoent(53),
+                       lambda n: n >= 2, lambda n: True):
+        result = integrity.check_integrity(root)
+    assert sorted(result) == ["missing", "modified", "reason", "state", "unexpected"]
+    assert result["reason"] == "absence_unconfirmed"
+    text = repr(result)
+    assert root not in text and root.replace("\\", "/") not in text
+    assert "network path" not in text
+
+
 # ---------------------------------------------------------------- dev junction
 
 

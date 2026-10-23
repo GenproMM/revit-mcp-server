@@ -138,6 +138,8 @@ def _integrity_rows(trust):
         (manifest(), observed(hashes={a: _digest("x"), b: _digest("b"), s: _digest("s")})),
         (manifest(), observed(hashes={b: _digest("b"), s: _digest("s")})),
         (manifest(), observed(present_py=[a, b, "revit_mcp/_extra.py"])),
+        (manifest(), observed(hashes={a: _digest("a"), s: _digest("s")}, unconfirmed=[b])),
+        (manifest(), observed(hashes={a: _digest("a"), s: _digest("s")}, unconfirmed=[])),
         (manifest(), observed(unreadable=[a])),
         (manifest(), None),
         (None, observed()),
@@ -222,8 +224,9 @@ def test_ironpython3_engine_results_are_not_vacuous(tmp_path):
     assert result["check_integrity"]["state"] == "verified_match"
     states = [row["state"] for row in result["integrity_rows"]]
     assert states.count("verified_match") == 1
-    assert states.count("verified_mismatch") == 3
-    assert states.count("unverifiable") == 7
+    assert states.count("verified_mismatch") == 4
+    assert states.count("unverifiable") == 8
+    assert "absence_unconfirmed" in [row["reason"] for row in result["integrity_rows"]]
     assert result["gate"] == [False, True, False, True, True, True]
     assert result["secret_file"] == [SECRET, None, None]
 
@@ -241,6 +244,19 @@ def test_ironpython3_engine_check_integrity_on_a_changed_tree(tmp_path):
     assert simulated["state"] == "verified_mismatch"
     assert simulated["modified"] == ["revit_mcp/alpha.py"]
     assert simulated["unexpected"] == ["revit_mcp/gamma.py"]
+
+
+def test_ironpython3_engine_check_integrity_confirms_a_deleted_file(tmp_path):
+    """A really deleted file is confirmed by the second read and stays a mismatch in the engine too."""
+    root = str(tmp_path)
+    _build_extension_tree(root, _integrity_module)
+    os.remove(os.path.join(root, "revit_mcp", "beta.py"))
+    plain = _integrity_module.check_integrity(root)
+    with _ironpython3_engine() as (_, _, integrity):
+        simulated = integrity.check_integrity(root)
+    assert simulated == plain
+    assert simulated["state"] == "verified_mismatch"
+    assert simulated["missing"] == ["revit_mcp/beta.py"]
 
 
 def test_ironpython3_engine_bytes_body_survives_the_json_stand_in():

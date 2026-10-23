@@ -50,6 +50,14 @@ def register_annotation_tools(mcp, revit_get, revit_post, revit_image=None):
         nothing is activated: use activate_document, then retry with the same
         selector.
 
+        Outcome: the reply reports what Revit actually did. If some items or
+        follow-up steps (such as setting a name, a parameter or a line style)
+        fail, the reply starts with PARTIAL SUCCESS and lists each failure with
+        its reason; everything else was applied. If nothing succeeds the reply
+        is an error (HTTP 422, status failed). If Revit rolls the transaction
+        back the reply is an error (HTTP 409, rolled_back) and nothing was
+        changed.
+
         Args:
             element_ids: List of element IDs to dimension
             dimension_type: Type of dimension — "linear", "aligned", or "angular"
@@ -88,6 +96,14 @@ def register_annotation_tools(mcp, revit_get, revit_post, revit_image=None):
         assumed. A document that is open but not active is refused (HTTP 412) and
         nothing is activated: use activate_document, then retry with the same
         selector.
+
+        Outcome: the reply reports what Revit actually did. If some items or
+        follow-up steps (such as setting a name, a parameter or a line style)
+        fail, the reply starts with PARTIAL SUCCESS and lists each failure with
+        its reason; everything else was applied. If nothing succeeds the reply
+        is an error (HTTP 422, status failed). If Revit rolls the transaction
+        back the reply is an error (HTTP 409, rolled_back) and nothing was
+        changed.
 
         Args:
             use_leader: Whether to show leader lines (defaults to False)

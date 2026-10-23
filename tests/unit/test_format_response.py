@@ -13,8 +13,11 @@ data. Adding a new implicit error signal must break these tests.
 Needs no Revit.
 """
 
+import json
+
 import pytest
 
+from revit_mcp.trust import auth_failure
 from tools.utils import format_response
 
 
@@ -185,3 +188,60 @@ def test_rolled_back_dict_is_not_yet_a_recognized_failure_signal():
     """
     out = format_response({"status": "rolled_back", "transaction_status": "RolledBack"})
     assert "ERROR DETAILS" not in out
+
+
+# --- the shared-secret 401 contract (Phase 3 logic, live from Phase 5) -------
+#
+# A mutation whose shared secret is missing, wrong, or unconfigured on the Revit
+# side is answered with HTTP 401. _revit_call (bridge.py) collapses EVERY non-200
+# to an "Error: <code> - <body>" string, so the refusal reaches format_response as
+# a string and passes through verbatim: the model sees an error, never a success.
+#
+# Unlike the rolled_back body, the auth body carries a truthy "error" key, so it
+# would ALSO render as an error if a future transport parsed non-200 bodies into
+# dicts (test_auth_failure_dict_renders_as_an_error). The alarm test below pins
+# that the "auth" key on its own is NOT an error signal: the 401 status is what
+# carries it. If that test fails, format_response gained an implicit error signal,
+# which CLAUDE.md forbids -- re-verify before relaxing it.
+
+_AUTH_REASONS = ["missing", "mismatch", "server_not_configured"]
+_OTHER_REFUSAL_STATUSES = {200, 409, 412, 422, 423, 503}
+
+
+def test_auth_401_reaches_the_model_as_a_visible_error():
+    body = "Error: 401 - " + json.dumps(auth_failure("mismatch")[0])
+    out = format_response(body)
+    assert out == body
+    assert "mismatch" in out
+
+
+@pytest.mark.parametrize("reason", _AUTH_REASONS)
+def test_auth_failure_dict_renders_as_an_error(reason):
+    out = format_response(auth_failure(reason)[0])
+    assert "ERROR DETAILS" in out
+    assert reason in out
+
+
+def test_auth_key_alone_is_not_an_error_signal():
+    """Alarm test: documents why the 401 status, not the auth key, carries the signal."""
+    out = format_response({"auth": "mismatch"})
+    assert "ERROR DETAILS" not in out
+
+
+@pytest.mark.parametrize("reason", _AUTH_REASONS)
+def test_auth_401_is_distinct_from_other_refusal_statuses(reason):
+    status = auth_failure(reason)[1]
+    assert status == 401
+    assert status not in _OTHER_REFUSAL_STATUSES
+
+
+def test_auth_failure_rendering_never_contains_the_secret():
+    secret = "render-secret-0123456789-abcXYZ"
+    body, status = auth_failure(secret)  # a secret passed as the reason must not be echoed
+    assert status == 401
+    rendered = [
+        format_response("Error: 401 - " + json.dumps(body)),
+        format_response(body),
+    ]
+    for out in rendered:
+        assert secret not in out

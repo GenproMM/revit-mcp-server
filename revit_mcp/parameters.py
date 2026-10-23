@@ -9,6 +9,8 @@ from .utils import (
     parse_request_data,
     sanitize_value,
     commit_and_report,
+    build_outcome,
+    exception_outcome,
 )
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
@@ -405,6 +407,8 @@ def register_parameter_routes(api):
 
     def _set_parameter(doc, request):
         """Set a single parameter value on an element."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
         try:
             if not doc:
                 return routes.make_response(
@@ -489,6 +493,16 @@ def register_parameter_routes(api):
                     param.Set(float(value))
                 elif param.StorageType == DB.StorageType.ElementId:
                     param.Set(make_element_id(value))
+                else:
+                    # Nothing was written: committing would report a change that
+                    # never happened. Undo and say why (in-transaction validation).
+                    t.RollBack()
+                    return routes.make_response(
+                        data={"error": "Parameter '{}' has unsupported storage type '{}'; "
+                                       "nothing was changed.".format(
+                                           parameter_name, param.StorageType)},
+                        status=400,
+                    )
 
                 # t.Commit() can return TransactionStatus.RolledBack silently
                 # when _FailureSwallower vetoes an error-severity failure on
@@ -513,6 +527,9 @@ def register_parameter_routes(api):
                             "attempted_value": str(value),
                             "transaction_status": commit_result["transaction_status"],
                             "failures": commit_result["failures"],
+                            "outcome": build_outcome(
+                                commit_result["transaction_status"], 1, [], [],
+                                commit_result["failures"]),
                             "message": (
                                 "Set() succeeded in-transaction, but Revit rolled "
                                 "the transaction back at Commit() because of the "
@@ -533,6 +550,9 @@ def register_parameter_routes(api):
                         "old_value": old_value,
                         "new_value": str(value),
                         "transaction_status": commit_result["transaction_status"],
+                        "outcome": build_outcome(
+                            commit_result["transaction_status"], 1, [parameter_name], [],
+                            commit_result["failures"]),
                         "message": "Set '{}' from '{}' to '{}' on element {}".format(
                             parameter_name, old_value, value, element_id
                         ),
@@ -548,7 +568,10 @@ def register_parameter_routes(api):
             logger.error("Failed to set parameter: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(
+                          t, 1 if t is not None else None, [], [])},
+                status=500
             )
 
     @api.route("/set_parameter/", methods=["POST"])

@@ -30,6 +30,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from revit_mcp import identity
+from revit_mcp.textutils import classify_outcome
 from tools.utils import format_response
 
 IDENT = {"pid": 4242, "actual_port": 48885, "session_token": "tok-abc", "revit_version": "2024"}
@@ -889,7 +890,8 @@ EXPECTED_KEYS = {
     ("mep", "/create_mep_system/"): ["element_count", "message", "outcome", "status", "system_id",
                                      "system_name", "system_type"],
     ("parameters", "/set_parameter/"): ["element_id", "message", "new_value", "old_value",
-                                        "parameter_name", "status", "transaction_status"],
+                                        "outcome", "parameter_name", "status",
+                                        "transaction_status"],
     ("rooms", "/create_room/"): ["area", "level", "message", "name", "number", "outcome",
                                  "room_id", "status"],
     ("rooms", "/create_room_separation/"): ["line_count", "line_ids", "message", "outcome",
@@ -1582,3 +1584,106 @@ def test_create_room_separation_rolled_back_is_a_409_with_nothing_succeeded(worl
     reply = call(world, handler_of(world, "rooms", "/create_room_separation/"), SEPARATION_BODY)
     assert reply.status == 409 and reply.data["status"] == "rolled_back"
     assert reply.data["outcome"]["succeeded"] == [] and "line_ids" not in reply.data
+
+
+# ------------------------------------ set_parameter outcome (D-03) and the world-wide invariant
+
+
+def parameter_world(world):
+    arm(world)
+    world.open("Only", ONLY_PATH, active=True)
+    return world.tokens()
+
+
+def test_set_parameter_success_carries_the_outcome_with_the_parameter_name(world):
+    parameter_world(world)
+    reply = call(world, handler_of(world, "parameters", "/set_parameter/"), PARAM_BODY)
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed", "requested": 1, "succeeded": ["Mark"],
+        "failed": [], "revit_failures": [],
+    }
+    assert reply.data["old_value"] == "old" and reply.data["new_value"] == "A"
+    assert reply.data["transaction_status"] == "Committed"
+
+
+def test_set_parameter_rollback_carries_the_outcome_and_stays_409(world):
+    parameter_world(world)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, "parameters", "/set_parameter/"), PARAM_BODY)
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["attempted_value"] == "A" and reply.data["old_value"] == "old"
+    assert reply.data["outcome"] == {
+        "transaction_status": "RolledBack", "requested": 1, "succeeded": [],
+        "failed": [], "revit_failures": [],
+    }
+
+
+class _OddParam(FakeParam):
+    """A parameter whose StorageType is none of String, Integer, Double or ElementId."""
+
+    StorageType = "None"
+
+
+def test_set_parameter_with_an_unsupported_storage_type_rolls_back_and_is_a_400(world):
+    parameter_world(world)
+    odd = _OddParam(world)
+    element = FakeElement(world, 1)
+    element.LookupParameter = lambda name: odd
+    world.hooks[(None, "GetElement")] = lambda doc, eid: element
+    reply = call(world, handler_of(world, "parameters", "/set_parameter/"), PARAM_BODY)
+    assert reply.status == 400
+    assert "storage type" in reply.data["error"] and "None" in reply.data["error"]
+    assert reply.data.get("status") != "success" and "new_value" not in reply.data
+    assert world.kinds("rollback") and world.kinds("commit") == []
+    assert world.sets == []
+
+
+def test_set_parameter_500_before_the_transaction_starts_carries_the_real_status(world):
+    parameter_world(world)
+    world.break_start.add("Only")
+    reply = call(world, handler_of(world, "parameters", "/set_parameter/"), PARAM_BODY)
+    assert reply.status == 500 and reply.data["error"]
+    assert reply.data["outcome"]["transaction_status"] == "Uninitialized"
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["outcome"]["requested"] == 1
+
+
+def reach(world, key):
+    items, body = TRANSACTING[key]
+    arm(world, items)
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    return body
+
+
+@pytest.mark.parametrize("key", list(TRANSACTING), ids=TRANSACTING_IDS)
+def test_every_transacting_success_carries_an_outcome_that_agrees_with_its_status(world, key):
+    body = reach(world, key)
+    reply = call(world, handler_of(world, *key), body)
+    assert reply.status == 200, reply.data
+    outcome = reply.data["outcome"]
+    assert outcome["transaction_status"] == "Committed"
+    expected = classify_outcome(True, len(outcome["succeeded"]), len(outcome["failed"]))
+    assert (reply.data["status"], reply.status) == expected
+
+
+@pytest.mark.parametrize("key", list(TRANSACTING), ids=TRANSACTING_IDS)
+def test_every_transacting_rollback_is_a_409_with_nothing_succeeded(world, key):
+    body = reach(world, key)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, *key), body)
+    assert reply.status == 409, reply.data
+    assert reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == []
+
+
+@pytest.mark.parametrize("key", list(TRANSACTING), ids=TRANSACTING_IDS)
+def test_every_transacting_500_carries_the_real_transaction_status(world, key):
+    body = reach(world, key)
+    world.break_start.add("Only")
+    reply = call(world, handler_of(world, *key), body)
+    assert reply.status == 500, reply.data
+    assert world.transactions, "the route never built a transaction"
+    assert reply.data["outcome"]["transaction_status"] == world.transactions[-1].status
+    assert reply.data["outcome"]["succeeded"] == []

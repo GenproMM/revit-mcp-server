@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v0.1
 current_phase: 04
 current_phase_name: Honest outcomes on every mutating route
-current_plan: 4
+current_plan: 6
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-10-23T17:52:32.074Z"
+stopped_at: Completed 04-05-PLAN.md
+last_updated: "2026-10-23T18:08:42.893Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 04 execution started
-state_head: 5668861bd35c1767cfc0caeb4054f4fbfc6450ff
+state_head: 677123152a3b39a9ef700ef62735bae5fd36f4d1
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 47
-  completed_plans: 39
+  completed_plans: 41
 milestone_name: Доверенный мост
 ---
 
@@ -30,9 +30,9 @@ See: .planning/PROJECT.md (updated 2026-10-14)
 ## Current Position
 
 Phase: 04 (Honest outcomes on every mutating route) — EXECUTING
-Current Plan: 4
+Current Plan: 6
 Total Plans in Phase: 11
-Plan: 4 of 11
+Plan: 6 of 11
 Status: Ready to execute
 Last activity: 2026-10-23 — Phase 04 execution started
 
@@ -100,6 +100,8 @@ Progress: [████░░░░░░] 43% of phase 02 plans (19/20)
 | Phase 04 P01 | 25 min | 3 tasks | 7 files |
 | Phase 04 P02 | 30 min | 3 tasks | 5 files |
 | Phase 04 P03 | 35 min | 2 tasks | 4 files |
+| Phase 04 P04 | 6 min | 2 tasks | 4 files |
+| Phase 04 P05 | 5 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -129,6 +131,8 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 04]: 04-02: a secondary Set() step that is missing, read-only, raises or returns False is an outcome.failed entry named after the step; create_mep_system with no resulting system rolls back and answers 422 (D-12, D-15) — Silent skips made a half-configured duct or empty system look like success; the primary element stays in succeeded so the reply is a partial
 - [Phase 04]: 04-03: a level that cannot be named stays succeeded and only INDEX.name fails; a floor offset that cannot be applied fails INDEX.offset (D-12)
 - [Phase 04]: 04-03: create_dimensions counts every input element that adds no geometry reference as a failed item; an empty dimension call commits and answers 422
+- [Phase 04]: 04-04: delete_elements stays all-or-nothing (outcome.succeeded = requested ids only after a kept commit); export_ifc reports Document.Export False as a 422 failed item; IFC exporter changes stay committed (open question A3)
+- [Phase 04]: 04-05: create_view reads the view only after a committed commit and reports the real name when the name step fails; open_model and execute_code carry outcome (null status for open_model)
 
 ### Roadmap Evolution
 
@@ -161,7 +165,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-23T17:52:31.903Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-10-23T18:08:42.719Z
+Stopped at: Completed 04-05-PLAN.md
 Resume file: None
 Next boundary: prepare bounded 02-02 recheck and require full Revit close/reopen before any live route; no G6 or broad rollout

@@ -52,6 +52,14 @@ def register_view_management_tools(mcp, revit_get, revit_post, revit_image=None)
         nothing is activated: use activate_document, then retry with the same
         selector. level_name is looked up in that document.
 
+        Outcome: the reply reports what Revit actually did. If some items or
+        follow-up steps (such as setting a name, a parameter or a line style)
+        fail, the reply starts with PARTIAL SUCCESS and lists each failure with
+        its reason; everything else was applied. If nothing succeeds the reply
+        is an error (HTTP 422, status failed). If Revit rolls the transaction
+        back the reply is an error (HTTP 409, rolled_back) and nothing was
+        changed.
+
         Args:
             view_type: Type of view — "floor_plan", "ceiling_plan", "section",
                 "elevation", or "3d"

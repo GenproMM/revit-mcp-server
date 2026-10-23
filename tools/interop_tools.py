@@ -52,6 +52,12 @@ def register_interop_tools(mcp, revit_get, revit_post, revit_image=None):
         nothing is activated: use activate_document, then retry with the same
         selector. view_name is looked up in that document.
 
+        Outcome: if Revit reports that the operation did not happen (for
+        example the export call returned False or no element id came back), the
+        reply is an error (HTTP 422, status failed) with the reason. If Revit
+        rolls the transaction back the reply is an error (HTTP 409,
+        rolled_back) and nothing was changed.
+
         Args:
             file_path: Output file path (must end in .ifc)
             ifc_version: "IFC2x3" (default) or "IFC4"
@@ -101,6 +107,12 @@ def register_interop_tools(mcp, revit_get, revit_post, revit_image=None):
         active in the UI is never assumed. A document that is open but not active
         is refused (HTTP 412) and nothing is activated: use activate_document,
         then retry with the same selector.
+
+        Outcome: if Revit reports that the operation did not happen (for
+        example the export call returned False or no element id came back), the
+        reply is an error (HTTP 422, status failed) with the reason. If Revit
+        rolls the transaction back the reply is an error (HTTP 409,
+        rolled_back) and nothing was changed.
 
         Args:
             file_path: Path to the file (DWG, DXF, DGN, or RVT)

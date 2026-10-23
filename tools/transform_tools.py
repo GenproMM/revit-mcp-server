@@ -53,6 +53,9 @@ def register_transform_tools(mcp, revit_get, revit_post, revit_image=None):
         nothing is activated: use activate_document, then retry with the same
         selector. element_ids are looked up in that document.
 
+        Outcome: all or nothing. If Revit rolls the transaction back the reply
+        is an error (HTTP 409, rolled_back) and nothing was changed.
+
         Args:
             element_ids: List of element IDs to transform
             operation: Transform type — "move", "copy", "rotate", or "mirror"

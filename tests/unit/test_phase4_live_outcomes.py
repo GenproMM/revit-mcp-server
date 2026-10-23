@@ -374,3 +374,427 @@ def test_outside_repo_is_true_only_for_paths_outside_the_repository(tmp_path):
     assert proc._outside_repo(os.path.join(REPO_ROOT, "x.json")) is False
     assert proc._outside_repo(os.path.join(REPO_ROOT, "tests", "unit", "x.json")) is False
     assert proc._outside_repo(os.path.join(REPO_ROOT + "-sibling", "x.json")) is True
+
+
+# =============================================================================
+# Task 2: the runner, the template and classify commands.
+#
+# The runner is driven through the script's _bridge seam with a fake bridge. The fake
+# answers the read-only preflight and the five writes with the canned replies above, and
+# records every call so a test can say exactly what was sent and in which order.
+
+
+class FakeBridge(object):
+    def __init__(self, ifc_path=None, owners=(4242,), documents=1, writable=True,
+                 post_replies=None, raise_on_post=None, port=PORT, status_reply=None,
+                 parameter_present=True, storage_type="String", tag_found=True):
+        self.REVIT_PORT = port
+        self.owners = list(owners) if owners is not None else None
+        self.documents = documents
+        self.writable = writable
+        self.parameter_present = parameter_present
+        self.storage_type = storage_type
+        self.tag_found = tag_found
+        self.status_reply = status_reply if status_reply is not None else {
+            "status": "active", "health": "healthy"}
+        self.ifc_path = ifc_path
+        self.raise_on_post = raise_on_post  # 1-based POST index that raises
+        self.post_replies = post_replies if post_replies is not None else [
+            reply_modify(), reply_partial(), reply_all_failed_text(), reply_export(), reply_delete()]
+        self.calls = []
+
+    def listener_snapshot(self, ports):
+        self.calls.append(("SNAPSHOT", list(ports), None))
+        if self.owners is None:
+            return None
+        return {ports[0]: list(self.owners)}
+
+    async def revit_get(self, endpoint, *args, **kwargs):
+        self.calls.append(("GET", endpoint, None))
+        if endpoint == "/status/":
+            return self.status_reply
+        if endpoint == "/documents/":
+            docs = [{"document": "doc1.aaaaaaaaaaaa.{}".format(i), "title": "Scratch"}
+                    for i in range(self.documents)]
+            return {"status": "success", "documents": docs, "count": len(docs)}
+        if endpoint == "/element_properties/{}".format(WALL):
+            parameters = []
+            if self.parameter_present:
+                parameters.append({"name": PARAMETER, "value": "", "storage_type": self.storage_type,
+                                   "read_only": not self.writable, "is_instance": True})
+            return {"status": "success", "element_id": WALL, "category": "Walls",
+                    "parameters": parameters, "parameter_count": len(parameters)}
+        if endpoint == "/element_properties/{}".format(TAG_TARGET):
+            if not self.tag_found:
+                return "Error: 404 - " + json.dumps({"error": "Element not found."})
+            return {"status": "success", "element_id": TAG_TARGET, "category": "Doors",
+                    "parameters": [], "parameter_count": 0}
+        raise AssertionError("unexpected GET {}".format(endpoint))
+
+    async def revit_post(self, endpoint, data, *args, **kwargs):
+        self.calls.append(("POST", endpoint, copy.deepcopy(data)))
+        index = len([c for c in self.calls if c[0] == "POST"])
+        if self.raise_on_post == index:
+            raise RuntimeError("synthetic transport failure on POST {}".format(index))
+        reply = copy.deepcopy(self.post_replies[index - 1])
+        if endpoint == "/export_ifc/" and self.ifc_path:
+            with open(self.ifc_path, "wb") as handle:
+                handle.write(b"ISO-10303-21;")
+            if isinstance(reply, dict):  # the route names the path it was given, as the real one does
+                reply["file_path"] = data["file_path"]
+                reply["outcome"]["succeeded"] = [data["file_path"]]
+        return reply
+
+    def posts(self):
+        return [(c[1], c[2]) for c in self.calls if c[0] == "POST"]
+
+    def post_endpoints(self):
+        return [c[1] for c in self.calls if c[0] == "POST"]
+
+
+class ExplodingBridge(object):
+    """Any use at all fails the test: a refusal must come before the bridge is touched."""
+
+    def __getattr__(self, name):
+        raise AssertionError("the bridge was touched ({}) before a refusal".format(name))
+
+
+def install(monkeypatch, fake):
+    monkeypatch.setattr(proc, "_bridge", lambda: fake)
+    return fake
+
+
+def paths(tmp_path, out="record.json", ifc="scratch.ifc"):
+    return str(tmp_path / out), str(tmp_path / ifc)
+
+
+def run_argv(out, ifc, **overrides):
+    values = {"--wall-id": str(WALL), "--parameter": PARAMETER, "--value": VALUE,
+              "--view-name": VIEW, "--tag-id": str(TAG_TARGET), "--ifc-path": ifc, "--out": out}
+    values.update(overrides)
+    argv = ["run"]
+    for name, value in values.items():
+        argv += [name, value]
+    return argv
+
+
+def load_record(path):
+    with open(path, "rb") as handle:
+        return json.loads(handle.read().decode("utf-8"))
+
+
+# ------------------------------------------------------------------- refusals
+
+
+def _refusal_cases(tmp_path):
+    out, ifc = paths(tmp_path)
+    existing = tmp_path / "existing.json"
+    existing.write_text("{}", encoding="utf-8")
+    present_ifc = tmp_path / "present.ifc"
+    present_ifc.write_bytes(b"x")
+    inside_out = os.path.join(REPO_ROOT, "phase4-record-never-written.json")
+    inside_ifc = os.path.join(REPO_ROOT, "phase4-export-never-written.ifc")
+    return [
+        ("record-exists", run_argv(str(existing), ifc)),
+        ("record-inside-repo", run_argv(inside_out, ifc)),
+        ("ifc-inside-repo", run_argv(out, inside_ifc)),
+        ("ifc-exists", run_argv(out, str(present_ifc))),
+        ("ifc-directory-missing", run_argv(out, str(tmp_path / "nope" / "x.ifc"))),
+        ("record-directory-missing", run_argv(str(tmp_path / "nope" / "r.json"), ifc)),
+        ("ifc-not-absolute", run_argv(out, "relative.ifc")),
+        ("ifc-wrong-extension", run_argv(out, str(tmp_path / "x.txt"))),
+        ("record-is-the-ifc-path", run_argv(ifc, ifc)),
+        ("bad-id-unknown-element", run_argv(out, ifc, **{"--tag-id": str(BAD)})),
+        ("blank-parameter", run_argv(out, ifc, **{"--parameter": "  "})),
+        ("port-out-of-range", run_argv(out, ifc, **{"--port": "70000"})),
+    ]
+
+
+REFUSAL_LABELS = ["record-exists", "record-inside-repo", "ifc-inside-repo", "ifc-exists",
+                  "ifc-directory-missing", "record-directory-missing", "ifc-not-absolute",
+                  "ifc-wrong-extension", "record-is-the-ifc-path", "bad-id-unknown-element",
+                  "blank-parameter", "port-out-of-range"]
+
+
+@pytest.mark.parametrize("label", REFUSAL_LABELS)
+def test_run_refuses_before_any_request_and_writes_nothing(monkeypatch, tmp_path, capsys, label):
+    argv = dict(_refusal_cases(tmp_path))[label]
+    install(monkeypatch, ExplodingBridge())
+    before = sorted(os.listdir(str(tmp_path)))
+    assert proc.main(argv) == 2
+    out = capsys.readouterr().out
+    assert "PHASE4_OUTCOMES_OK" not in out
+    assert sorted(os.listdir(str(tmp_path))) == before
+    for leaked in ("phase4-record-never-written.json", "phase4-export-never-written.ifc"):
+        assert not os.path.exists(os.path.join(REPO_ROOT, leaked))
+
+
+def test_run_refusal_of_an_existing_record_leaves_it_untouched(monkeypatch, tmp_path):
+    out, ifc = paths(tmp_path)
+    with open(out, "wb") as handle:
+        handle.write(b'{"keep": "me"}')
+    install(monkeypatch, ExplodingBridge())
+    assert proc.main(run_argv(out, ifc)) == 2
+    with open(out, "rb") as handle:
+        assert handle.read() == b'{"keep": "me"}'
+
+
+def test_run_with_a_missing_required_option_is_a_usage_error_and_sends_nothing(monkeypatch, capsys):
+    install(monkeypatch, ExplodingBridge())
+    assert proc.main(["run", "--wall-id", "5"]) == 2
+    assert proc.main([]) == 2
+    assert proc.main(["nonsense"]) == 2
+    assert "PHASE4_OUTCOMES_OK" not in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------ preflight
+
+
+def _preflight_cases():
+    return [
+        ("two-listeners", dict(owners=(1, 2)), "preflight.listeners"),
+        ("no-listener", dict(owners=()), "preflight.listeners"),
+        ("inventory-unavailable", dict(owners=None), "preflight.listeners"),
+        ("two-documents", dict(documents=2), "preflight.documents"),
+        ("no-document", dict(documents=0), "preflight.documents"),
+        ("parameter-read-only", dict(writable=False), "preflight.parameter_writable"),
+        ("parameter-absent", dict(parameter_present=False), "preflight.parameter_writable"),
+        ("parameter-not-text", dict(storage_type="Integer"), "preflight.parameter_writable"),
+        ("status-error", dict(status_reply="Error: 503 - {}"), "preflight.status_ok"),
+        ("tag-target-missing", dict(tag_found=False), "preflight.tag_element_found"),
+        ("wrong-port", dict(port=48999), "port"),
+    ]
+
+
+@pytest.mark.parametrize("label,fault,field", _preflight_cases(), ids=[c[0] for c in _preflight_cases()])
+def test_preflight_failure_sends_no_post_and_records_zero(monkeypatch, tmp_path, capsys, label, fault, field):
+    out, ifc = paths(tmp_path)
+    fake = install(monkeypatch, FakeBridge(**fault))
+    assert proc.main(run_argv(out, ifc)) == 1
+    text = capsys.readouterr().out
+    assert fake.posts() == []
+    assert not os.path.exists(ifc)
+    assert "PHASE4_OUTCOMES_STOP" in text and "PHASE4_OUTCOMES_OK" not in text
+    assert "POSTS_SENT=0" in text
+    assert "consumed" not in text
+    assert "nothing was written to the model" in text.lower()
+    record = load_record(out)
+    assert record["posts_sent"] == 0
+    assert record["stop_reason"]
+    assert field in record["stop_reason"] or field in text
+    assert all(step is None for step in record["steps"].values())
+
+
+def test_preflight_stop_sends_nothing_and_allows_a_rerun_to_a_fresh_out(monkeypatch, tmp_path, capsys):
+    out1, ifc = paths(tmp_path, out="first.json")
+    install(monkeypatch, FakeBridge(owners=(1, 2)))
+    assert proc.main(run_argv(out1, ifc)) == 1
+    first_text = capsys.readouterr().out
+    assert "POSTS_SENT=0" in first_text and "fresh --out" in first_text
+    assert not os.path.exists(ifc)
+    with open(out1, "rb") as handle:
+        first_bytes = handle.read()
+
+    # The condition is fixed (one listener now); the same arguments with a fresh --out are not refused.
+    out2 = str(tmp_path / "second.json")
+    fixed = install(monkeypatch, FakeBridge(ifc_path=ifc))
+    assert proc.main(run_argv(out2, ifc)) == 0
+    second_text = capsys.readouterr().out
+    assert "PHASE4_OUTCOMES_OK" in second_text and "POSTS_SENT=5" in second_text
+    assert len(fixed.posts()) == 5
+    with open(out1, "rb") as handle:
+        assert handle.read() == first_bytes  # the first record is left unchanged
+    assert load_record(out2)["posts_sent"] == 5
+
+
+# ----------------------------------------------------------------- the full run
+
+
+def test_run_issues_the_five_posts_once_each_in_order(monkeypatch, tmp_path, capsys):
+    out, ifc = paths(tmp_path)
+    fake = install(monkeypatch, FakeBridge(ifc_path=ifc))
+    assert proc.main(run_argv(out, ifc)) == 0
+    text = capsys.readouterr().out
+    assert fake.post_endpoints() == [
+        "/modify_element/", "/tag_elements/", "/tag_elements/", "/export_ifc/", "/delete_elements/"]
+    assert "PHASE4_OUTCOMES_OK" in text and "POSTS_SENT=5" in text
+    assert "one-shot gate is consumed" in text
+    posts = dict(enumerate(fake.posts()))
+    assert posts[0][1]["element_id"] == WALL and posts[0][1]["parameters"] == {PARAMETER: VALUE}
+    assert posts[1][1]["element_ids"] == [TAG_TARGET, BAD] and posts[1][1]["view_name"] == VIEW
+    assert posts[2][1]["element_ids"] == [BAD] and posts[2][1]["view_name"] == VIEW
+    assert posts[3][1]["file_path"] == ifc
+    assert posts[4][1]["element_ids"] == [NEW_TAG]  # the tag ids step 2's raw reply returned
+    record = load_record(out)
+    assert record["posts_sent"] == 5
+    assert record["steps"]["s4"]["file_exists"] is True
+    assert record["inputs"]["ifc_path"] == ifc and record["inputs"]["port"] == PORT
+    assert record["preflight"] == {"status_ok": True, "listeners": [4242], "documents": 1,
+                                   "parameter_writable": True, "tag_element_found": True}
+    assert proc.classify_outcomes(record) == {"verdict": "ok", "reasons": [], "posts_sent": 5}
+
+
+def test_run_sends_only_allowed_routes_and_never_the_secret_key(monkeypatch, tmp_path):
+    out, ifc = paths(tmp_path)
+    fake = install(monkeypatch, FakeBridge(ifc_path=ifc))
+    assert proc.main(run_argv(out, ifc)) == 0
+    assert fake.calls
+    for method, endpoint, body in fake.calls:
+        if method != "SNAPSHOT":
+            proc._require_allowed(endpoint)
+        assert "_mcp" not in (body or {})
+    with open(out, "rb") as handle:
+        assert b"_mcp" not in handle.read()
+
+
+def test_run_records_the_raw_reply_and_the_rendered_text_of_every_step(monkeypatch, tmp_path):
+    out, ifc = paths(tmp_path)
+    install(monkeypatch, FakeBridge(ifc_path=ifc))
+    assert proc.main(run_argv(out, ifc)) == 0
+    record = load_record(out)
+    for key in proc.STEP_KEYS:
+        recorded = record["steps"][key]
+        assert set(recorded) >= {"endpoint", "body", "raw", "rendered"}
+    assert record["steps"]["s2"]["raw"] == reply_partial()
+    assert record["steps"]["s2"]["rendered"] == format_response(reply_partial())
+    assert "=== PARTIAL SUCCESS ===" in record["steps"]["s2"]["rendered"]
+    # the 422 stays the bridge's error string, exactly as returned
+    assert record["steps"]["s3"]["raw"] == reply_all_failed_text()
+
+
+def test_run_record_keeps_non_ascii_text_as_utf8(monkeypatch, tmp_path):
+    out, ifc = paths(tmp_path)
+    fake = install(monkeypatch, FakeBridge(ifc_path=ifc))
+    assert proc.main(run_argv(out, ifc, **{"--value": "Проект"})) == 0
+    with open(out, "rb") as handle:
+        assert "Проект".encode("utf-8") in handle.read()
+    assert fake.posts()[0][1]["parameters"] == {PARAMETER: "Проект"}
+
+
+def test_run_without_new_tag_ids_skips_the_delete_and_is_a_stop(monkeypatch, tmp_path, capsys):
+    out, ifc = paths(tmp_path)
+    empty = reply_partial()
+    empty["tag_ids"] = []
+    replies = [reply_modify(), empty, reply_all_failed_text(), reply_export(), reply_delete()]
+    fake = install(monkeypatch, FakeBridge(ifc_path=ifc, post_replies=replies))
+    assert proc.main(run_argv(out, ifc)) == 1
+    text = capsys.readouterr().out
+    assert len(fake.posts()) == 4 and "/delete_elements/" not in fake.post_endpoints()
+    assert "POSTS_SENT=4" in text and "consumed" in text
+    record = load_record(out)
+    assert record["posts_sent"] == 4 and "skipped" in record["steps"]["s5"]
+
+
+def test_run_never_deletes_the_wall_or_the_tagged_element(monkeypatch, tmp_path):
+    out, ifc = paths(tmp_path)
+    risky = reply_partial()
+    risky["tag_ids"] = [WALL, TAG_TARGET, BAD, NEW_TAG, NEW_TAG, "7", True]
+    replies = [reply_modify(), risky, reply_all_failed_text(), reply_export(), reply_delete()]
+    fake = install(monkeypatch, FakeBridge(ifc_path=ifc, post_replies=replies))
+    proc.main(run_argv(out, ifc))
+    assert fake.posts()[4][1]["element_ids"] == [NEW_TAG]
+
+
+def test_run_keeps_going_after_a_failing_reply_and_still_sends_each_step_once(monkeypatch, tmp_path):
+    out, ifc = paths(tmp_path)
+    replies = [reply_modify(), reply_partial(), reply_all_failed_text(), "Error: 500 - {}", reply_delete()]
+    fake = install(monkeypatch, FakeBridge(ifc_path=ifc, post_replies=replies))
+    assert proc.main(run_argv(out, ifc)) == 1  # a failing export is a stop, but every step was sent once
+    assert len(fake.posts()) == 5
+
+
+def test_posts_sent_counts_a_raising_post_and_declares_the_gate_consumed(monkeypatch, tmp_path, capsys):
+    out, ifc = paths(tmp_path)
+    fake = install(monkeypatch, FakeBridge(ifc_path=ifc, raise_on_post=2))
+    assert proc.main(run_argv(out, ifc)) == 1
+    text = capsys.readouterr().out
+    assert len(fake.posts()) == 2  # no third POST after the raise
+    assert "PHASE4_OUTCOMES_STOP" in text and "PHASE4_OUTCOMES_OK" not in text
+    assert "POSTS_SENT=2" in text
+    assert "The one-shot gate is consumed: do not run this again." in text
+    record = load_record(out)
+    assert record["posts_sent"] == 2  # the raising POST counts: its outcome is unknown
+    assert "synthetic transport failure" in record["steps"]["s2"]["exception"]
+    assert record["steps"]["s2"]["raw"] is None
+    assert record["steps"]["s3"] is None and record["steps"]["s5"] is None
+    assert "synthetic transport failure" in record["stop_reason"]
+    assert not os.path.exists(ifc)
+
+
+def test_the_record_is_written_even_when_the_bridge_cannot_be_imported(monkeypatch, tmp_path, capsys):
+    out, ifc = paths(tmp_path)
+
+    def broken():
+        raise ImportError("synthetic import failure")
+
+    monkeypatch.setattr(proc, "_bridge", broken)
+    assert proc.main(run_argv(out, ifc)) == 1
+    text = capsys.readouterr().out
+    assert "POSTS_SENT=0" in text and "PHASE4_OUTCOMES_STOP" in text
+    assert "synthetic import failure" in load_record(out)["stop_reason"]
+
+
+# --------------------------------------------------------------- plain records
+
+
+class _TaggedDict(dict):
+    pass
+
+
+class _TaggedStr(str):
+    pass
+
+
+def test_plain_copies_a_provenance_tagged_reply_into_plain_json_types():
+    raw = _TaggedDict({"status": "success", "nested": [_TaggedDict({"a": 1})], 5: "int key"})
+    raw.revit_provenance = {"pid": 1}
+    plain = proc._plain(raw)
+    assert type(plain) is dict and type(plain["nested"][0]) is dict
+    assert plain["5"] == "int key"
+    assert not hasattr(plain, "revit_provenance")
+    text = _TaggedStr("Error: 422 - {}")
+    text.revit_provenance = {"pid": 1}
+    assert type(proc._plain(text)) is str
+    assert proc._plain({"_mcp": {"secret": "s"}, "kept": 1}) == {"kept": 1}
+    json.dumps(proc._plain({"x": object(), "y": (1, 2)}))
+
+
+# ------------------------------------------------------------- template / classify
+
+
+def test_template_command_prints_the_empty_record(capsys):
+    assert proc.main(["template"]) == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert {"inputs", "preflight", "posts_sent", "steps"} <= set(printed)
+    assert printed == proc.evidence_template()
+
+
+def test_classify_command_prints_the_token_and_posts_sent(tmp_path, capsys):
+    path = tmp_path / "record.json"
+    path.write_text(json.dumps(ok_record(), ensure_ascii=False), encoding="utf-8")
+    assert proc.main(["classify", str(path)]) == 0
+    text = capsys.readouterr().out
+    assert "PHASE4_OUTCOMES_OK" in text and "POSTS_SENT=5" in text
+
+
+def test_classify_command_stop_lists_reasons_and_reports_an_unknown_count(tmp_path, capsys):
+    record = ok_record()
+    del record["posts_sent"]
+    record["steps"]["s4"]["file_exists"] = False
+    path = tmp_path / "record.json"
+    path.write_text(json.dumps(record), encoding="utf-8")
+    assert proc.main(["classify", str(path)]) == 1
+    text = capsys.readouterr().out
+    assert "PHASE4_OUTCOMES_STOP" in text and "PHASE4_OUTCOMES_OK" not in text
+    assert "POSTS_SENT=unknown" in text
+    assert "s4.file_exists" in text
+
+
+def test_classify_command_unreadable_files_are_a_stop_not_a_traceback(tmp_path, capsys):
+    assert proc.main(["classify", str(tmp_path / "does-not-exist.json")]) == 1
+    bad = tmp_path / "bad.json"
+    bad.write_bytes(b"\xff\xfe not json")
+    assert proc.main(["classify", str(bad)]) == 1
+    text = capsys.readouterr().out
+    assert "PHASE4_OUTCOMES_OK" not in text
+    assert text.count("PHASE4_OUTCOMES_STOP") == 2 and "POSTS_SENT=unknown" in text

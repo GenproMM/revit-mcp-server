@@ -99,6 +99,7 @@ The record is machine local: keep it outside the repository.
 """
 import argparse
 import asyncio
+import datetime
 import json
 import os
 import re
@@ -157,6 +158,28 @@ def _require_allowed(endpoint):
         key = _PROPERTIES_ROUTE
     if key not in ALLOWED_ENDPOINTS:
         raise ValueError("endpoint {!r} is not on the allow-list".format(endpoint))
+
+
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _plain(value):
+    """A plain JSON-safe copy of a bridge reply.
+
+    The bridge tags a reply with provenance (an attribute on a dict or str subclass); the
+    copy carries none of it. A reserved ``_mcp`` key is dropped at every depth, so a record
+    can never hold the shared-secret envelope even if a body ever carried it.
+    """
+    if isinstance(value, dict):
+        return dict((str(key), _plain(item)) for key, item in value.items() if key != "_mcp")
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    if isinstance(value, str):
+        return str(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)
 
 
 def _outside_repo(path):
@@ -416,11 +439,305 @@ USAGE = (
 )
 
 
+MSG_NO_WRITE = ("No write step was sent: nothing was written to the model. Fix the condition "
+                "named above and run again with a fresh --out.")
+MSG_CONSUMED = "The one-shot gate is consumed: do not run this again."
+
+
+class _UsageError(Exception):
+    pass
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise _UsageError(message)
+
+
+def _build_parser():
+    parser = _Parser(prog="test_phase4_live_outcomes.py")
+    commands = parser.add_subparsers(dest="command")
+    commands.add_parser("template")
+    classify = commands.add_parser("classify")
+    classify.add_argument("record")
+    run = commands.add_parser("run")
+    run.add_argument("--wall-id", type=int, required=True)
+    run.add_argument("--parameter", required=True)
+    run.add_argument("--value", required=True)
+    run.add_argument("--view-name", required=True)
+    run.add_argument("--tag-id", type=int, required=True)
+    run.add_argument("--ifc-path", required=True)
+    run.add_argument("--out", required=True)
+    run.add_argument("--port", type=int, default=DEFAULT_PORT)
+    return parser
+
+
+def _refusal(args):
+    """Why the run may not start, or None. Decided before the bridge is touched."""
+    out = args.out
+    ifc = args.ifc_path
+    if not (_is_int(args.wall_id) and args.wall_id > 0):
+        return "--wall-id must be a positive element id"
+    if not (_is_int(args.tag_id) and args.tag_id > 0 and args.tag_id != BAD_ID):
+        return "--tag-id must be a positive element id other than {}".format(BAD_ID)
+    for name in ("parameter", "value", "view_name"):
+        if not _nonblank(getattr(args, name)):
+            return "--{} must not be blank".format(name.replace("_", "-"))
+    if not (_is_int(args.port) and 1 <= args.port <= 65535):
+        return "--port must be between 1 and 65535"
+    if not _nonblank(out):
+        return "--out must not be blank"
+    if not (os.path.isabs(ifc) and ifc.lower().endswith(".ifc")):
+        return "--ifc-path must be an absolute path ending in .ifc ({})".format(ifc)
+    if os.path.normcase(os.path.abspath(out)) == os.path.normcase(os.path.abspath(ifc)):
+        return "--out and --ifc-path must be different files"
+    if os.path.exists(out):
+        return "{} already exists; a record is never overwritten (use a fresh --out)".format(out)
+    if not _outside_repo(out):
+        return "--out {} is inside the repository; a raw record stays outside it".format(out)
+    if not _outside_repo(ifc):
+        return "--ifc-path {} is inside the repository; an export stays outside it".format(ifc)
+    if os.path.exists(ifc):
+        return "--ifc-path {} already exists; the export goes to a new file".format(ifc)
+    if not os.path.isdir(os.path.dirname(os.path.abspath(ifc))):
+        return "the directory of --ifc-path does not exist ({})".format(ifc)
+    if not os.path.isdir(os.path.dirname(os.path.abspath(out))):
+        return "the directory of --out does not exist ({}); the record would be lost".format(out)
+    return None
+
+
+def _render(raw):
+    """The text the model would read for a reply, from the reply object as the bridge returned it."""
+    try:
+        if REPO_ROOT not in sys.path:
+            sys.path.insert(0, REPO_ROOT)
+        from tools.utils import format_response
+
+        return format_response(raw)
+    except Exception as ex:
+        return "(format_response failed: {}: {})".format(type(ex).__name__, ex)
+
+
+def _describe_reply(reply):
+    text = repr(reply)
+    return text if len(text) <= 120 else text[:117] + "..."
+
+
+async def _read(bridge, endpoint):
+    """One allowed GET: (reply, None) or (None, exception text)."""
+    try:
+        _require_allowed(endpoint)
+        return await bridge.revit_get(endpoint), None
+    except Exception as ex:
+        return None, "{}: {}".format(type(ex).__name__, ex)
+
+
+async def _preflight(bridge, args, record):
+    """Read-only checks before any write. Returns the stop reason, or None when all pass."""
+    pre = record["preflight"]
+    configured = getattr(bridge, "REVIT_PORT", None)
+    if configured is not None and configured != args.port:
+        return ("preflight.port: the bridge targets port {} but --port is {}; start the script with "
+                "REVIT_PORT unset or equal to --port".format(configured, args.port))
+
+    reply, problem = await _read(bridge, "/status/")
+    pre["status_ok"] = bool(isinstance(reply, dict) and not reply.get("error"))
+    if not pre["status_ok"]:
+        return "preflight.status_ok: GET /status/ did not answer ({})".format(problem or _describe_reply(reply))
+
+    try:
+        snapshot = bridge.listener_snapshot([args.port])
+    except Exception:
+        snapshot = None
+    owners = snapshot.get(args.port) if isinstance(snapshot, dict) else None
+    if not (isinstance(owners, list) and all(_is_int(pid) and pid > 0 for pid in owners)):
+        return "preflight.listeners: the OS listener inventory is unavailable for port {}".format(args.port)
+    pre["listeners"] = list(owners)
+    if len(owners) != 1:
+        return "preflight.listeners: expected exactly one owner of port {}, got {}".format(args.port, owners)
+
+    reply, problem = await _read(bridge, "/documents/")
+    documents = reply.get("documents") if isinstance(reply, dict) else None
+    if not isinstance(documents, list):
+        return "preflight.documents: GET /documents/ gave no listing ({})".format(problem or _describe_reply(reply))
+    pre["documents"] = len(documents)
+    if len(documents) != 1:
+        return "preflight.documents: expected exactly one open document, got {}".format(len(documents))
+
+    reply, problem = await _read(bridge, "/element_properties/{}".format(args.wall_id))
+    parameters = reply.get("parameters") if isinstance(reply, dict) else None
+    if not isinstance(parameters, list):
+        pre["parameter_writable"] = False
+        return "preflight.parameter_writable: wall {} was not read ({})".format(
+            args.wall_id, problem or _describe_reply(reply))
+    found = [p for p in parameters if isinstance(p, dict) and p.get("name") == args.parameter]
+    entry = found[0] if found else None
+    pre["parameter_writable"] = bool(
+        entry is not None and entry.get("read_only") is False and str(entry.get("storage_type")) == "String")
+    if not pre["parameter_writable"]:
+        return ("preflight.parameter_writable: wall {} has no writable text parameter named {!r} "
+                "(found: {})".format(args.wall_id, args.parameter, _describe_reply(entry)))
+
+    reply, problem = await _read(bridge, "/element_properties/{}".format(args.tag_id))
+    pre["tag_element_found"] = bool(isinstance(reply, dict) and not reply.get("error")
+                                    and reply.get("element_id") == args.tag_id)
+    if not pre["tag_element_found"]:
+        return "preflight.tag_element_found: element {} was not read ({})".format(
+            args.tag_id, problem or _describe_reply(reply))
+    return None
+
+
+async def _post_step(bridge, record, key, endpoint, body):
+    """Send one write exactly once. Returns a stop reason when the POST raised, else None."""
+    _require_allowed(endpoint)
+    step = {"endpoint": endpoint, "body": _plain(body), "raw": None, "rendered": None}
+    record["steps"][key] = step
+    record["posts_sent"] += 1  # counted before the call: a POST that raises or times out was sent
+    try:
+        raw = await bridge.revit_post(endpoint, body)
+    except Exception as ex:
+        step["exception"] = "{}: {}".format(type(ex).__name__, ex)
+        return "{}: revit_post raised {}".format(key, step["exception"])
+    step["rendered"] = _render(raw)
+    step["raw"] = _plain(raw)
+    return None
+
+
+def _new_tag_ids(step, args):
+    """The tag ids step 2 reports as created, never the wall, the tagged element or the bad id."""
+    raw = step.get("raw") if isinstance(step, dict) else None
+    ids = raw.get("tag_ids") if isinstance(raw, dict) else None
+    keep = []
+    for value in ids if isinstance(ids, list) else []:
+        if (_is_int(value) and value > 0 and value not in (args.wall_id, args.tag_id, BAD_ID)
+                and value not in keep):
+            keep.append(value)
+    return keep
+
+
+async def _write_steps(bridge, args, record):
+    """The five D-11 writes in order, once each. Returns a stop reason, or None when all were sent."""
+    inputs = record["inputs"]
+    tag_body = {"element_ids": [args.tag_id, BAD_ID], "add_leader": False,
+                "orientation": "horizontal", "view_name": args.view_name}
+    bad_body = dict(tag_body, element_ids=[BAD_ID])
+    plan = (
+        ("s1", "/modify_element/",
+         {"element_id": args.wall_id, "parameters": {args.parameter: args.value}}),
+        ("s2", "/tag_elements/", tag_body),
+        ("s3", "/tag_elements/", bad_body),
+        ("s4", "/export_ifc/",
+         {"file_path": inputs["ifc_path"], "ifc_version": "IFC2x3", "export_base_quantities": True}),
+    )
+    for key, endpoint, body in plan:
+        reason = await _post_step(bridge, record, key, endpoint, body)
+        if key == "s4":
+            record["steps"]["s4"]["file_exists"] = os.path.exists(inputs["ifc_path"])
+        if reason:
+            return reason
+    ids = _new_tag_ids(record["steps"]["s2"], args)
+    if not ids:
+        message = "step 2 returned no new tag ids, so there is nothing of this run to delete"
+        record["steps"]["s5"] = {"skipped": message}
+        return "s5: skipped ({})".format(message)
+    return await _post_step(bridge, record, "s5", "/delete_elements/", {"element_ids": ids})
+
+
+async def _execute(args, record):
+    bridge = _bridge()
+    reason = await _preflight(bridge, args, record)
+    if reason:
+        return reason
+    return await _write_steps(bridge, args, record)
+
+
+def _save(path, record):
+    """Write the record once; never overwrites. False (and the record on stdout) if it cannot."""
+    try:
+        with open(path, "x", encoding="utf-8", newline="\n") as handle:
+            json.dump(record, handle, ensure_ascii=False, indent=2)
+        return True
+    except OSError as ex:
+        print("WARNING: the record could not be written to {} ({}: {}); it follows.".format(
+            path, type(ex).__name__, ex))
+        print(json.dumps(record, ensure_ascii=False, indent=2))
+        return False
+
+
+def _report(record):
+    """Print the verdict token, POSTS_SENT, the guidance and the reasons; return the exit code."""
+    result = classify_outcomes(record)
+    ok = result["verdict"] == VERDICT_OK
+    posts = result["posts_sent"]
+    print(SENTINEL_OK if ok else SENTINEL_STOP)
+    print("POSTS_SENT={}".format(posts if posts is not None else "unknown"))
+    if posts == 0:
+        print(MSG_NO_WRITE)
+    elif posts is not None and posts >= 1:
+        print(MSG_CONSUMED)
+    stop_reason = record.get("stop_reason") if isinstance(record, dict) else None
+    if stop_reason:
+        print("stop: {}".format(stop_reason))
+    for reason in result["reasons"]:
+        print("  - " + reason)
+    return 0 if ok else 1
+
+
+async def _run(args):
+    global _BRIDGE_PORT
+    refusal = _refusal(args)
+    if refusal:
+        print("refused: {}".format(refusal))
+        return 2
+    _BRIDGE_PORT = args.port
+    record = evidence_template()
+    record["inputs"].update({
+        "wall_id": args.wall_id, "parameter": args.parameter, "value": args.value,
+        "view_name": args.view_name, "tag_id": args.tag_id, "ifc_path": args.ifc_path,
+        "port": args.port,
+    })
+    record["posts_sent"] = 0
+    reason = None
+    try:
+        reason = await _execute(args, record)
+    except Exception as ex:
+        reason = "unexpected {}: {}".format(type(ex).__name__, ex)
+    except BaseException as ex:
+        reason = "interrupted ({})".format(type(ex).__name__)
+        raise
+    finally:
+        record["stop_reason"] = reason
+        record["recorded_at"] = _now()
+        written = _save(args.out, record)
+    code = _report(record)
+    if written:
+        print("record: {}".format(args.out))
+    return code
+
+
+def _cmd_classify(path):
+    try:
+        with open(path, "rb") as handle:
+            record = json.loads(handle.read().decode("utf-8-sig"))
+    except (OSError, ValueError) as ex:
+        record = {"stop_reason": "cannot read the record {!r}: {}".format(path, ex)}
+    return _report(record)
+
+
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
-    if args == ["template"]:
+    try:
+        namespace = _build_parser().parse_args(args)
+    except _UsageError as ex:
+        print("usage error: {}".format(ex))
+        print(USAGE)
+        return 2
+    if namespace.command == "template":
         print(json.dumps(evidence_template(), indent=2))
         return 0
+    if namespace.command == "classify":
+        return _cmd_classify(namespace.record)
+    if namespace.command == "run":
+        return asyncio.run(_run(namespace))
     print(USAGE)
     return 2
 

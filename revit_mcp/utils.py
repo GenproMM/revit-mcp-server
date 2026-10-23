@@ -7,6 +7,9 @@ import logging
 # and unit tested under CPython 3 (this module cannot -- it needs pyRevit).
 # Re-exported here so route modules keep using `from utils import ...`.
 from .textutils import (  # noqa: F401
+    build_outcome,
+    classify_outcome,
+    finalize_outcome,
     normalize_string,
     parse_request_data,
     sanitize_string,

@@ -147,6 +147,38 @@ def _provenance_lines(response, provenance, text):
     return lines
 
 
+# Most failed lines a partial reply renders; the rest are counted, not listed.
+_PARTIAL_FAILED_CAP = 100
+
+
+def _partial_lines(response):
+    """Render a status "partial" reply: the banner, the counts and each failed item."""
+    outcome = response.get("outcome")
+    if not isinstance(outcome, dict):
+        outcome = {}
+    succeeded = outcome.get("succeeded")
+    if not isinstance(succeeded, list):
+        succeeded = []
+    failed = outcome.get("failed")
+    if not isinstance(failed, list):
+        failed = []
+    requested = outcome.get("requested")
+    total = requested if requested is not None else len(succeeded) + len(failed)
+    lines = ["=== PARTIAL SUCCESS ==="]
+    if response.get("message"):
+        lines.append(str(response["message"]))
+    lines.append("Succeeded: {} of {}".format(len(succeeded), total))
+    for entry in failed[:_PARTIAL_FAILED_CAP]:
+        if isinstance(entry, dict):
+            lines.append("Failed {}: {}".format(entry.get("item"), entry.get("reason")))
+        else:
+            lines.append("Failed {}".format(entry))
+    if len(failed) > _PARTIAL_FAILED_CAP:
+        lines.append("... and {} more in outcome.failed".format(
+            len(failed) - _PARTIAL_FAILED_CAP))
+    return "\n".join(lines)
+
+
 def _project_response(response):
     """The projection of one reply to text, unchanged since before provenance rendering.
 
@@ -171,6 +203,12 @@ def _project_response(response):
         is_success = not has_error
 
         if is_success:
+            if status == "partial":
+                # A 200 partial arrives as a dict (409 and 422 arrive as bridge error
+                # strings). It is deliberately outside the failure set above, so its
+                # valid data is not hidden behind an error banner; this branch is what
+                # keeps the failed items visible instead.
+                return _partial_lines(response)
             # For successful responses, return the most relevant data
             if "output" in response:  # Code execution responses
                 return response["output"]

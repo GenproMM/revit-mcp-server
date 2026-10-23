@@ -30,6 +30,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from revit_mcp import identity
+from tools.utils import format_response
 
 IDENT = {"pid": 4242, "actual_port": 48885, "session_token": "tok-abc", "revit_version": "2024"}
 
@@ -272,7 +273,10 @@ class FakeElement(object):
         self._world = world
         self.Id = types.SimpleNamespace(Value=ident)
         self.Name = "El"
-        self.Category = None
+        # Taggable: a wall with a point location, so tag_elements runs to the end.
+        self.Category = types.SimpleNamespace(
+            BuiltInCategory=world.db.BuiltInCategory.OST_Walls, Name="Walls")
+        self.Location = types.SimpleNamespace(Point=XYZ(0, 0, 0))
         self.Parameters = []
         system = FakeElement(world, 7, with_system=False) if with_system else None
         self.ConnectorManager = types.SimpleNamespace(
@@ -294,6 +298,7 @@ class World(object):
         self.hooks = {}
         self.collector_items = []
         self.commit_status = "Committed"
+        self.explode_after_commit = False
         self.break_start = set()
         self.sets = []
         self.app = RouteApplication(self)
@@ -333,6 +338,14 @@ class World(object):
         return [entry["document"] for entry in listing["documents"]]
 
 
+class _Elements(list):
+    """What ToElements answers: a list that also has the .NET collection's Count."""
+
+    @property
+    def Count(self):
+        return len(self)
+
+
 class XYZ(object):
     def __init__(self, x, y, z):
         self.X, self.Y, self.Z = x, y, z
@@ -347,19 +360,30 @@ def make_db(world):
             world.record("transaction", doc, name)
             self.doc = doc
             self.started = False
+            self.status = "Uninitialized"
 
         def Start(self):
             if world.explode or getattr(self.doc, "label", None) in world.break_start:
                 raise RuntimeError("transaction could not start")
             self.started = True
+            self.status = "Started"
             world.record("start", self.doc)
 
         def Commit(self):
             world.record("commit", self.doc)
+            self.status = world.commit_status
+            if world.explode_after_commit:
+                world.explode = True
             return world.commit_status
 
         def RollBack(self):
             world.record("rollback", self.doc)
+            self.status = "RolledBack"
+
+        def GetStatus(self):
+            # A real method, not __getattr__, so no "txattr" event is recorded and
+            # test_suppress_warnings_comes_immediately_after_start is unaffected.
+            return self.status
 
         def HasStarted(self):
             return self.started
@@ -386,7 +410,7 @@ def make_db(world):
             if name.startswith("_"):
                 raise AttributeError(name)
             if name == "ToElements":
-                return lambda: self._items()
+                return lambda: _Elements(self._items())
             return lambda *args, **kwargs: self
 
         def __iter__(self):
@@ -413,6 +437,19 @@ def make_db(world):
                                            Double="Double", ElementId="ElementId")
     db.XYZ = XYZ
     db.Line = MagicMock(name="DB.Line")
+    # Distinguishable ids: tag_elements builds an id per input and the fake document
+    # answers by its value. A MagicMock caches its children, so OST_Walls is the same
+    # key on every access.
+    db.ElementId = MagicMock(
+        name="DB.ElementId", side_effect=lambda value: types.SimpleNamespace(Value=int(value)))
+    db.BuiltInCategory = MagicMock(name="DB.BuiltInCategory")
+    created_tags = []
+
+    def create_tag(*args, **kwargs):
+        created_tags.append(args)
+        return types.SimpleNamespace(Id=types.SimpleNamespace(Value=900 + len(created_tags)))
+
+    db.IndependentTag = types.SimpleNamespace(Create=create_tag)
     return db
 
 
@@ -519,10 +556,20 @@ def call(world, fn, body=None, **extra):
     return fn(**dict((name, available[name]) for name in parameters if name in available))
 
 
-def arm(world, items=()):
-    """Collector results and the element GetElement answers, for a success path."""
+def arm(world, items=(), missing=()):
+    """Collector results and the element GetElement answers, for a success path.
+
+    ``missing`` lists element ids GetElement answers None for (an id that is not in the
+    model); every other id is a taggable element carrying that id."""
     world.collector_items = list(items)
-    world.hooks[(None, "GetElement")] = lambda doc, eid: FakeElement(world)
+
+    def get_element(doc, eid):
+        value = getattr(eid, "Value", None)
+        if value in missing:
+            return None
+        return FakeElement(world, value if isinstance(value, int) else 1)
+
+    world.hooks[(None, "GetElement")] = get_element
 
 
 def two_documents(world, active="beta"):
@@ -779,7 +826,8 @@ EXPECTED_KEYS = {
     ("rooms", "/create_room_separation/"): ["line_count", "line_ids", "message", "status"],
     ("structure", "/create_grid/"): ["count", "created", "message", "status"],
     ("structure", "/create_framing/"): ["count", "created", "message", "status"],
-    ("tags", "/tag_elements/"): ["message", "skipped", "status", "tag_ids", "tagged_count"],
+    ("tags", "/tag_elements/"): ["message", "outcome", "skipped", "status", "tag_ids",
+                                 "tagged_count"],
 }
 
 
@@ -922,3 +970,34 @@ def test_a_missing_element_is_still_a_404_before_any_transaction_and_is_attribut
                  MUTATIONS[("mep", "/create_mep_system/")])
     assert reply.status == 404 and world.kinds("transaction") == []
     assert reply.data["document"]["title"] == "Only"
+
+
+# ------------------------------------------------ tag_elements: honest outcome (D-03, D-04, D-14)
+
+MISSING_ID = 999999999
+
+
+def test_tag_elements_mixed_batch_reaches_the_model_as_a_partial_with_the_failing_id(world):
+    """The phase tracer: route handler -> outcome helpers -> reply -> format_response."""
+    arm(world, [_named("Plan A")], missing=(MISSING_ID,))
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, handler_of(world, "tags", "/tag_elements/"),
+                 {"element_ids": [5, MISSING_ID], "view_name": "Plan A"})
+    assert reply.status == 200
+    assert reply.data["status"] == "partial"
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed",
+        "requested": 2,
+        "succeeded": [5],
+        "failed": [{"item": MISSING_ID, "reason": "Element not found"}],
+        "revit_failures": [],
+    }
+    assert reply.data["tagged_count"] == 1
+    assert reply.data["skipped"] == [{"element_id": MISSING_ID, "reason": "Element not found"}]
+    assert len(reply.data["tag_ids"]) == 1
+    text = format_response(reply.data)
+    assert "=== PARTIAL SUCCESS ===" in text
+    assert "Succeeded: 1 of 2" in text
+    assert str(MISSING_ID) in text and "Element not found" in text
+    assert "ERROR DETAILS" not in text

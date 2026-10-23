@@ -4,7 +4,7 @@ Tags Module for Revit MCP
 Handles element tagging with annotation symbols
 """
 
-from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings, parse_request_data
+from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
@@ -113,39 +113,37 @@ def register_tag_routes(api):
 
             t = DB.Transaction(doc, "Tag Elements via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 tagged_ids = []
                 skipped = []
+                succeeded = []
+                failed = []
+
+                def skip(eid, reason):
+                    # One reason text, two shapes: the legacy `skipped` entry and the
+                    # D-03 outcome.failed entry.
+                    skipped.append({"element_id": eid, "reason": reason})
+                    failed.append({"item": eid, "reason": reason})
 
                 for eid in element_ids:
                     elem_id = make_element_id(eid)
                     elem = doc.GetElement(elem_id)
 
                     if not elem:
-                        skipped.append({
-                            "element_id": eid,
-                            "reason": "Element not found",
-                        })
+                        skip(eid, "Element not found")
                         continue
 
                     if not elem.Category:
-                        skipped.append({
-                            "element_id": eid,
-                            "reason": "Element has no category",
-                        })
+                        skip(eid, "Element has no category")
                         continue
 
                     # Find tag type for this element's category
                     tag_type = find_tag_type_for_element(elem)
                     if not tag_type:
-                        skipped.append({
-                            "element_id": eid,
-                            "reason": "No tag type found for category '{}'".format(
-                                get_element_name(elem.Category)
-                            ),
-                        })
+                        skip(eid, "No tag type found for category '{}'".format(
+                            get_element_name(elem.Category)))
                         continue
 
                     # Ensure tag type is activated
@@ -183,10 +181,7 @@ def register_tag_routes(api):
                             )
 
                     if not tag_point:
-                        skipped.append({
-                            "element_id": eid,
-                            "reason": "Cannot determine element location",
-                        })
+                        skip(eid, "Cannot determine element location")
                         continue
 
                     try:
@@ -205,32 +200,26 @@ def register_tag_routes(api):
 
                         if tag:
                             tagged_ids.append(get_element_id_value(tag))
+                            succeeded.append(eid)
                         else:
-                            skipped.append({
-                                "element_id": eid,
-                                "reason": "Tag creation returned null — no tag type available for this category",
-                            })
+                            skip(eid, "Tag creation returned null — no tag type available for this category")
                     except Exception as tag_err:
-                        skipped.append({
-                            "element_id": eid,
-                            "reason": "Tag failed: {}".format(str(tag_err)),
-                        })
+                        skip(eid, "Tag failed: {}".format(str(tag_err)))
 
-                t.Commit()
-
-                return routes.make_response(
-                    data={
-                        "status": "success",
-                        "tagged_count": len(tagged_ids),
-                        "tag_ids": tagged_ids,
-                        "skipped": skipped,
-                        "message": "Tagged {} element{}, {} skipped".format(
-                            len(tagged_ids),
-                            "s" if len(tagged_ids) != 1 else "",
-                            len(skipped),
-                        ),
-                    }
-                )
+                commit_result = commit_and_report(t, swallower)
+                data = {
+                    "tagged_count": len(tagged_ids),
+                    "tag_ids": tagged_ids,
+                    "skipped": skipped,
+                    "message": "Tagged {} element{}, {} skipped".format(
+                        len(tagged_ids),
+                        "s" if len(tagged_ids) != 1 else "",
+                        len(skipped),
+                    ),
+                }
+                payload, http = finalize_outcome(
+                    commit_result, data, len(element_ids), succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():

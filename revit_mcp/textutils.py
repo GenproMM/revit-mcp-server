@@ -314,3 +314,99 @@ def describe_broken_path(path):
         "This is not a Unicode problem: Cyrillic and other non-ASCII path names "
         "transfer correctly.".format("; ".join(hits))
     )
+
+
+# ---------------------------------------------------------------- honest outcomes
+#
+# One schema and one classifier for what a mutating route reports (phase 4; D-03,
+# D-04). The helpers are pure on purpose: a route module cannot be imported under
+# CPython, so the decision of "success, partial, failed or rolled back" lives here
+# where a truth table can pin it. Routes call finalize_outcome() with what
+# commit_and_report() returned and answer with the (payload, http_status) it gives.
+
+
+def classify_outcome(committed, n_succeeded, n_failed):
+    """Return (status, http_status) for one finished transaction (D-04).
+
+    The one place that decides the reply status and HTTP code, so no route can
+    drift into its own convention. A transaction that did not commit is
+    ("rolled_back", 409) whatever the counts say: the 409 is load-bearing because
+    the bridge turns only non-200 replies into errors the model can see, so a
+    rollback must never be a 200. A commit with no failed item is
+    ("success", 200), which includes the empty call (0 succeeded, 0 failed). A
+    commit where some items worked and some did not is ("partial", 200), and a
+    commit where every attempted item failed is ("failed", 422).
+    """
+    if not committed:
+        return "rolled_back", 409
+    if n_failed == 0:
+        return "success", 200
+    if n_succeeded > 0:
+        return "partial", 200
+    return "failed", 422
+
+
+def build_outcome(transaction_status, requested, succeeded, failed, revit_failures):
+    """Return the `outcome` block (D-03): exactly five keys, in the order given.
+
+    `requested` is the route's own integer count (or None) and is never derived
+    here. `succeeded` and `revit_failures` become new lists with no sort and no
+    de-duplication, so a repeated input id is reported as many times as the route
+    handled it. Each failed entry is reduced to {"item", "reason"}: any other key a
+    route attached (a request body, a secret, a traceback) is dropped, so nothing
+    but the item and its reason text can ride along (D-07).
+    """
+    reduced = []
+    for entry in (failed or []):
+        reduced.append({
+            "item": entry["item"],
+            "reason": sanitize_value(entry.get("reason")),
+        })
+    return {
+        "transaction_status": transaction_status,
+        "requested": requested,
+        "succeeded": list(succeeded or []),
+        "failed": reduced,
+        "revit_failures": list(revit_failures or []),
+    }
+
+
+def finalize_outcome(commit_result, data, requested, succeeded, failed):
+    """Return (payload, http_status) for a route that just called commit_and_report().
+
+    `commit_result` is the dict commit_and_report() returned; only a committed
+    flag that is exactly True counts as committed. `data` is the route's own
+    reply body and is never mutated.
+
+    On 409 the payload is the existing rollback contract (status, message,
+    top-level transaction_status and failures) plus an `outcome` whose succeeded
+    is []. The route's legacy keys are left out on purpose: they would name
+    elements, ids and counts that no longer exist in the model. On 200 and 422
+    the payload is a copy of `data` with `status` set and `outcome` added; a 422
+    also carries a truthy `error`, which is what makes the model see it.
+    """
+    committed = commit_result.get("committed") is True
+    transaction_status = commit_result.get("transaction_status")
+    failures = commit_result.get("failures") or []
+    status, http_status = classify_outcome(committed, len(succeeded), len(failed))
+    if http_status == 409:
+        return {
+            "status": status,
+            "message": (
+                "Revit rolled the transaction back at Commit() "
+                "(transaction_status: {}); no change from this call was kept in the "
+                "model. 'failures' lists what Revit reported.".format(transaction_status)),
+            "transaction_status": transaction_status,
+            "failures": list(failures),
+            "outcome": build_outcome(transaction_status, requested, [], failed, failures),
+        }, http_status
+    payload = dict(data)
+    payload["status"] = status
+    payload["outcome"] = build_outcome(
+        transaction_status, requested, succeeded, failed, failures)
+    if http_status == 422:
+        count = requested if requested is not None else len(failed)
+        payload["error"] = (
+            "None of the {} requested item(s) succeeded; each item and its reason "
+            "is in outcome.failed".format(count))
+    return payload, http_status

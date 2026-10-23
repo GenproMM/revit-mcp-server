@@ -115,6 +115,8 @@ BIM-инженеры Genpro на Windows с Revit 2024–2027 и pyRevit.
 | d27-b: в очередь идут все вызовы, кроме GET `/status/`, включая чтения | Стенд 01-04 (pyRevit 6.5.3) показал cross-wired-mutation и cross-wired-read в общем обработчике pyRevit; `/status/` отвечает за 0.01–0.02 с | ✓ Good — Phase 1 |
 | a5-a: пользователи делят одну запись `revit`, `REVIT_PORT` — только настройка развёртывания | Запись нельзя скопировать; мульти-Revit живёт внутри одного сервера | ✓ Good — Phase 1 |
 | d27-c: межпроцессное перекрытие закрывается на стороне Revit | Замок клиента не видит другие процессы MCP, curl и прямой `/execute_code/` | — Pending (backlog 999.1) |
+| D-04: сравнение секрета — рукописное сравнение фиксированной длины поверх `hashlib.sha256`, не `CryptographicOperations.FixedTimeEquals` | В живом движке pyRevit (IronPython 3.4.2, .NET Framework 4) тип `FixedTimeEquals` отсутствует; примитив и модули `trust`/`integrity` наблюдены в живой пробе | ✓ Good — Phase 3 (версии Revit/pyRevit, число listener'ов и дата пробы инженером не сообщены) |
+| D-13+: отсутствие файла подтверждается повторным чтением манифеста и самого элемента; не подтверждено — `unverifiable/absence_unconfirmed`, а не `verified_mismatch` | В CPython на Windows сетевые ошибки 53/67 приходят как ENOENT: оборванная шара читалась бы как порча и (после Фазы 5) блокировала бы мутации до перезапуска Revit | ✓ Good — Phase 3 (план 03-09). Остаток: errno IronPython для оборванной сети не наблюдался вживую; два сбоя вокруг повторного чтения всё ещё дают ложный mismatch |
 
 ## Evolution
 
@@ -146,4 +148,4 @@ This document evolves at phase transitions and milestone boundaries.
 - Локальный структурный журнал аудита с честным результатом, включая откаты и пропуски
 
 ---
-*Last updated: 2026-10-14 after Phase 1*
+*Last updated: 2026-10-23 after Phase 3 (код секрета и проверки целостности готов и проверен тестами, но не подключён: пункты Active про секрет, бинд и целостность остаются открытыми до Фазы 5; эволюция документа после Фазы 2 здесь не записана)*

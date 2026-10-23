@@ -298,7 +298,6 @@ class World(object):
         self.hooks = {}
         self.collector_items = []
         self.commit_status = "Committed"
-        self.explode_after_commit = False
         self.break_start = set()
         self.sets = []
         self.app = RouteApplication(self)
@@ -372,8 +371,6 @@ def make_db(world):
         def Commit(self):
             world.record("commit", self.doc)
             self.status = world.commit_status
-            if world.explode_after_commit:
-                world.explode = True
             return world.commit_status
 
         def RollBack(self):
@@ -389,7 +386,7 @@ def make_db(world):
             return self.started
 
         def HasEnded(self):
-            return False
+            return self.status in ("Committed", "RolledBack")
 
         def __getattr__(self, name):
             if name.startswith("_"):
@@ -1001,3 +998,92 @@ def test_tag_elements_mixed_batch_reaches_the_model_as_a_partial_with_the_failin
     assert "Succeeded: 1 of 2" in text
     assert str(MISSING_ID) in text and "Element not found" in text
     assert "ERROR DETAILS" not in text
+
+
+TAG_BODY = {"element_ids": [5, MISSING_ID], "view_name": "Plan A"}
+
+
+def tag_handler(world):
+    return handler_of(world, "tags", "/tag_elements/")
+
+
+def test_tag_elements_rolled_back_at_commit_is_409_and_keeps_no_success_claim(world):
+    arm(world, [_named("Plan A")], missing=(MISSING_ID,))
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    world.commit_status = "RolledBack"
+    reply = call(world, tag_handler(world), TAG_BODY)
+    assert reply.status == 409
+    assert reply.data["status"] == "rolled_back"
+    assert reply.data["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["failed"] == [{"item": MISSING_ID, "reason": "Element not found"}]
+    assert "tag_ids" not in reply.data and "tagged_count" not in reply.data
+
+
+def test_tag_elements_all_ids_missing_is_422_failed_and_the_model_reads_every_id(world):
+    arm(world, [_named("Plan A")], missing=(MISSING_ID,))
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, tag_handler(world),
+                 {"element_ids": [MISSING_ID], "view_name": "Plan A"})
+    assert reply.status == 422
+    assert reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert len(reply.data["outcome"]["failed"]) == 1
+    # The bridge turns a non-200 reply into this string; the model must see it verbatim.
+    bridged = "Error: 422 - " + json.dumps(reply.data)
+    assert format_response(bridged) == bridged
+    assert str(MISSING_ID) in format_response(bridged)
+
+
+def test_tag_elements_every_id_valid_is_200_success(world):
+    arm(world, [_named("Plan A")])
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, tag_handler(world), {"element_ids": [5, 6], "view_name": "Plan A"})
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"]["succeeded"] == [5, 6]
+    assert reply.data["outcome"]["failed"] == []
+
+
+def test_tag_elements_duplicate_valid_id_is_reported_twice_not_deduplicated(world):
+    arm(world, [_named("Plan A")])
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    reply = call(world, tag_handler(world), {"element_ids": [5, 5], "view_name": "Plan A"})
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"]["requested"] == 2
+    assert reply.data["outcome"]["succeeded"] == [5, 5]
+
+
+def test_tag_elements_500_before_the_transaction_starts_still_carries_an_outcome(world):
+    arm(world, [_named("Plan A")])
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    world.break_start.add("Only")
+    reply = call(world, tag_handler(world), TAG_BODY)
+    assert reply.status == 500 and reply.data["error"]
+    assert reply.data["outcome"]["transaction_status"] == "Uninitialized"
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["requested"] == 2
+
+
+def test_tag_elements_500_after_a_commit_names_committed_and_keeps_what_was_tagged(
+        world, monkeypatch):
+    """D-14: a call that raised after Commit() really did change the model."""
+    arm(world, [_named("Plan A")])
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    handler = tag_handler(world)
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("reply could not be built")
+
+    monkeypatch.setattr(sys.modules["revit_mcp.tags"], "finalize_outcome", explode)
+    reply = call(world, handler, {"element_ids": [5], "view_name": "Plan A"})
+    assert reply.status == 500 and "reply could not be built" in reply.data["error"]
+    assert reply.data["outcome"]["transaction_status"] == "Committed"
+    assert reply.data["outcome"]["succeeded"] == [5]
+    assert world.kinds("rollback") == [], "a committed transaction must not be rolled back"

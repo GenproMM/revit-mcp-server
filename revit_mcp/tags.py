@@ -4,7 +4,7 @@ Tags Module for Revit MCP
 Handles element tagging with annotation symbols
 """
 
-from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome
+from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
@@ -20,6 +20,11 @@ def register_tag_routes(api):
 
     def _tag_elements(doc, request):
         """Tag elements with annotation symbols in a view."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -34,6 +39,7 @@ def register_tag_routes(api):
                     data={"error": "element_ids is required and must not be empty"},
                     status=400,
                 )
+            requested = len(element_ids)
 
             # Find the view
             view_name = data.get("view_name")
@@ -118,8 +124,6 @@ def register_tag_routes(api):
             try:
                 tagged_ids = []
                 skipped = []
-                succeeded = []
-                failed = []
 
                 def skip(eid, reason):
                     # One reason text, two shapes: the legacy `skipped` entry and the
@@ -218,7 +222,7 @@ def register_tag_routes(api):
                     ),
                 }
                 payload, http = finalize_outcome(
-                    commit_result, data, len(element_ids), succeeded, failed)
+                    commit_result, data, requested, succeeded, failed)
                 return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
@@ -230,7 +234,9 @@ def register_tag_routes(api):
             logger.error("Failed to tag elements: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/tag_elements/", methods=["POST"])

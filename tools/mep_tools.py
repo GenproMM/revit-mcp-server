@@ -56,6 +56,14 @@ def register_mep_tools(mcp, revit_get, revit_post, revit_image=None):
         nothing is activated: use activate_document, then retry with the same
         selector. Type, system and level names are looked up in that document.
 
+        Outcome: the reply reports what Revit actually did. If the element is
+        created but a follow-up step (such as setting a name, a number, a
+        dimension, a property, a schedule field, the rotation or a line style)
+        fails, the reply starts with PARTIAL SUCCESS, the created element stays
+        in the model, and each failed step is listed with its reason. If Revit
+        rolls the transaction back the reply is an error (HTTP 409,
+        rolled_back) and nothing was changed.
+
         Args:
             start_point: Start point {"x", "y", "z"} in mm
             end_point: End point {"x", "y", "z"} in mm
@@ -116,6 +124,14 @@ def register_mep_tools(mcp, revit_get, revit_post, revit_image=None):
         nothing is activated: use activate_document, then retry with the same
         selector. Type, system and level names are looked up in that document.
 
+        Outcome: the reply reports what Revit actually did. If the element is
+        created but a follow-up step (such as setting a name, a number, a
+        dimension, a property, a schedule field, the rotation or a line style)
+        fails, the reply starts with PARTIAL SUCCESS, the created element stays
+        in the model, and each failed step is listed with its reason. If Revit
+        rolls the transaction back the reply is an error (HTTP 409,
+        rolled_back) and nothing was changed.
+
         Args:
             start_point: Start point {"x", "y", "z"} in mm
             end_point: End point {"x", "y", "z"} in mm
@@ -166,6 +182,14 @@ def register_mep_tools(mcp, revit_get, revit_post, revit_image=None):
         nothing is activated: use activate_document, then retry with the same
         selector. Element ids belong to one document, so name the document the
         ids were read from.
+
+        Outcome: the reply reports what Revit actually did. If some items or
+        follow-up steps (such as setting a name, a parameter or a line style)
+        fail, the reply starts with PARTIAL SUCCESS and lists each failure with
+        its reason; everything else was applied. If nothing succeeds the reply
+        is an error (HTTP 422, status failed). If Revit rolls the transaction
+        back the reply is an error (HTTP 409, rolled_back) and nothing was
+        changed.
 
         Args:
             system_type: "mechanical" or "piping"

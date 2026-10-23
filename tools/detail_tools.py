@@ -52,6 +52,14 @@ def register_detail_tools(mcp, revit_get, revit_post, revit_image=None):
         nothing is activated: use activate_document, then retry with the same
         selector.
 
+        Outcome: the reply reports what Revit actually did. If the element is
+        created but a follow-up step (such as setting a name, a number, a
+        dimension, a property, a schedule field, the rotation or a line style)
+        fails, the reply starts with PARTIAL SUCCESS, the created element stays
+        in the model, and each failed step is listed with its reason. If Revit
+        rolls the transaction back the reply is an error (HTTP 409,
+        rolled_back) and nothing was changed.
+
         Args:
             start_point: Start point {"x", "y", "z"} in mm
             end_point: End point {"x", "y", "z"} in mm

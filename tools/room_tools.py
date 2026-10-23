@@ -51,6 +51,14 @@ def register_room_tools(mcp, revit_get, revit_post, revit_image=None):
         nothing is activated: use activate_document, then retry with the same
         selector. level_name is looked up in that document.
 
+        Outcome: the reply reports what Revit actually did. If the element is
+        created but a follow-up step (such as setting a name, a number, a
+        dimension, a property, a schedule field, the rotation or a line style)
+        fails, the reply starts with PARTIAL SUCCESS, the created element stays
+        in the model, and each failed step is listed with its reason. If Revit
+        rolls the transaction back the reply is an error (HTTP 409,
+        rolled_back) and nothing was changed.
+
         Args:
             level_name: Target level name (e.g., "Level 1")
             location: Optional placement point {"x": float, "y": float} in mm
@@ -98,6 +106,12 @@ def register_room_tools(mcp, revit_get, revit_post, revit_image=None):
         assumed. A document that is open but not active is refused (HTTP 412) and
         nothing is activated: use activate_document, then retry with the same
         selector. level_name and view_name are looked up in that document.
+
+        Outcome: if Revit reports that the operation did not happen (for
+        example the export call returned False or no element id came back), the
+        reply is an error (HTTP 422, status failed) with the reason. If Revit
+        rolls the transaction back the reply is an error (HTTP 409,
+        rolled_back) and nothing was changed.
 
         Args:
             lines: List of line segments, each with:

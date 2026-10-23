@@ -51,6 +51,14 @@ def register_documentation_tools(mcp, revit_get, revit_post, revit_image=None):
         nothing is activated: use activate_document, then retry with the same
         selector.
 
+        Outcome: the reply reports what Revit actually did. If the element is
+        created but a follow-up step (such as setting a name, a number, a
+        dimension, a property, a schedule field, the rotation or a line style)
+        fails, the reply starts with PARTIAL SUCCESS, the created element stays
+        in the model, and each failed step is listed with its reason. If Revit
+        rolls the transaction back the reply is an error (HTTP 409,
+        rolled_back) and nothing was changed.
+
         Args:
             sheet_number: Sheet number, e.g. "A101" (optional, auto-assigned)
             sheet_name: Sheet title, e.g. "Ground Floor Plan" (defaults to "Unnamed Sheet")
@@ -95,6 +103,14 @@ def register_documentation_tools(mcp, revit_get, revit_post, revit_image=None):
         assumed. A document that is open but not active is refused (HTTP 412) and
         nothing is activated: use activate_document, then retry with the same
         selector.
+
+        Outcome: the reply reports what Revit actually did. If the element is
+        created but a follow-up step (such as setting a name, a number, a
+        dimension, a property, a schedule field, the rotation or a line style)
+        fails, the reply starts with PARTIAL SUCCESS, the created element stays
+        in the model, and each failed step is listed with its reason. If Revit
+        rolls the transaction back the reply is an error (HTTP 409,
+        rolled_back) and nothing was changed.
 
         Args:
             category: BuiltInCategory name, e.g. "OST_Walls", "OST_Rooms" (required)
@@ -141,6 +157,12 @@ def register_documentation_tools(mcp, revit_get, revit_post, revit_image=None):
         UI is never assumed. A document that is open but not active is refused
         (HTTP 412) and nothing is activated: use activate_document, then retry
         with the same selector.
+
+        Outcome: if Revit reports that the operation did not happen (for
+        example the export call returned False or no element id came back), the
+        reply is an error (HTTP 422, status failed) with the reason. If Revit
+        rolls the transaction back the reply is an error (HTTP 409,
+        rolled_back) and nothing was changed.
 
         Args:
             view_name: Name of the view or sheet to export (optional, uses active view)

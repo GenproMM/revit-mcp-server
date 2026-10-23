@@ -17,6 +17,7 @@ live recheck after a full Revit restart (02-18). Nothing here touches Revit.
 
 import importlib
 import inspect
+import itertools
 import json
 import sys
 import types
@@ -25,6 +26,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from revit_mcp import identity
+from revit_mcp.textutils import classify_outcome
+from tools.utils import format_response
 
 IDENT = {"pid": 4242, "actual_port": 48885, "session_token": "tok-abc", "revit_version": "2024"}
 
@@ -121,6 +124,13 @@ class RouteDocument(object):
         self._world.record("attr", self, name)
         if self._world.explode:
             raise RuntimeError("document access failed: " + name)
+        # A document attribute that must answer a configured object (doc.Create), then a
+        # method a test wants to behave, keyed by (label or None, name).
+        if name in self._world.attr_overrides:
+            return self._world.attr_overrides[name]
+        hook = self._world.hooks.get((self.label, name)) or self._world.hooks.get((None, name))
+        if hook is not None:
+            return lambda *args, **kwargs: hook(self, *args, **kwargs)
         return MagicMock(name=name)
 
 
@@ -186,6 +196,13 @@ class World(object):
     def __init__(self):
         self.events = []
         self.explode = False
+        self.hooks = {}
+        self.attr_overrides = {}
+        self.transactions = []
+        self.collector_items = []
+        self.commit_status = "Committed"
+        self.break_start = set()
+        self.db = None
         self.app = RouteApplication(self)
         self.uiapp = RouteUIApp(self, self.app)
         self.injected = InjectedDocument(self)
@@ -220,31 +237,55 @@ class World(object):
         return [entry["document"] for entry in listing["documents"]]
 
 
+class _NetList(list):
+    """System.Collections.Generic.List: a list with .NET's Add."""
+
+    def Add(self, item):
+        self.append(item)
+
+
+class _Elements(list):
+    """What ToElements answers: a list that also has the .NET collection's Count."""
+
+    @property
+    def Count(self):
+        return len(self)
+
+
 def make_db(world):
     class Transaction(object):
         def __init__(self, doc, name=""):
             world.record("transaction", doc, name)
             self.doc = doc
             self.started = False
+            self.status = "Uninitialized"
+            world.transactions.append(self)
 
         def Start(self):
-            if world.explode:
+            if world.explode or getattr(self.doc, "label", None) in world.break_start:
                 raise RuntimeError("transaction could not start")
             self.started = True
+            self.status = "Started"
             world.record("start", self.doc)
 
         def Commit(self):
             world.record("commit", self.doc)
-            return "Committed"
+            self.status = world.commit_status
+            return world.commit_status
 
         def RollBack(self):
             world.record("rollback", self.doc)
+            self.status = "RolledBack"
+
+        def GetStatus(self):
+            # A real method, not __getattr__, so no event is recorded.
+            return self.status
 
         def HasStarted(self):
             return self.started
 
         def HasEnded(self):
-            return False
+            return self.status in ("Committed", "RolledBack")
 
         def __enter__(self):
             return self
@@ -263,19 +304,24 @@ def make_db(world):
             if world.explode:
                 raise RuntimeError("collector could not be created")
 
+        def _items(self):
+            return [make(world) for make in world.collector_items]
+
         def __getattr__(self, name):
             if name.startswith("_"):
                 raise AttributeError(name)
+            if name == "ToElements":
+                return lambda: _Elements(self._items())
             return lambda *args, **kwargs: self
 
         def __iter__(self):
-            return iter(())
+            return iter(self._items())
 
         def __len__(self):
-            return 0
+            return len(world.collector_items)
 
         def __getitem__(self, index):
-            raise IndexError(index)
+            return self._items()[index]
 
     class IFailuresPreprocessor(object):
         pass
@@ -290,6 +336,9 @@ def make_db(world):
     db.Transaction = Transaction
     db.FilteredElementCollector = FilteredElementCollector
     db.IFailuresPreprocessor = IFailuresPreprocessor
+    # Assigned once, so what a route compares against is the same object on every access
+    # (a fresh _DB.__getattr__ mock per access would never equal the Commit result).
+    db.TransactionStatus = types.SimpleNamespace(Committed="Committed", RolledBack="RolledBack")
     return db
 
 
@@ -326,15 +375,17 @@ def world(monkeypatch):
     def make_response(data=None, status=200, headers=None):
         return FakeResponse(status, data)
 
+    db = make_db(w)
+    w.db = db
     fake_pyrevit = types.SimpleNamespace(
         routes=types.SimpleNamespace(make_response=make_response),
         revit=MagicMock(name="revit"),
-        DB=make_db(w),
+        DB=db,
         HOST_APP=HostAppTrap(),
     )
     monkeypatch.setitem(sys.modules, "pyrevit", fake_pyrevit)
     generic = types.ModuleType("System.Collections.Generic")
-    generic.List = list
+    generic.List = _NetList
     collections_mod = types.ModuleType("System.Collections")
     collections_mod.Generic = generic
     system = types.ModuleType("System")
@@ -404,6 +455,113 @@ ATTRIBUTION_KEYS = ("document", "process_identity")
 
 def without_attribution(data):
     return dict((key, value) for key, value in data.items() if key not in ATTRIBUTION_KEYS)
+
+
+# --------------------------------------------------- arming the world for real successes
+#
+# Plan 04-03: a migrated route commits through commit_and_report, which compares the
+# Commit() result with DB.TransactionStatus.Committed, and builds an outcome from what
+# the fake Revit created. The MUTATIONS bodies above stay minimal (they only prove the
+# guard); the rows below reach a real success.
+
+
+class XYZ(object):
+    def __init__(self, x, y, z):
+        self.X, self.Y, self.Z = x, y, z
+
+    def DistanceTo(self, other):
+        return ((self.X - other.X) ** 2 + (self.Y - other.Y) ** 2 + (self.Z - other.Z) ** 2) ** 0.5
+
+
+class _Item(object):
+    """A collector result: a named element with the few members the routes read."""
+
+    def __init__(self, world, name="Item", elevation=0.0):
+        self.world = world
+        self.Name = name
+        self.Id = types.SimpleNamespace(Value=11)
+        self.Elevation = elevation
+        self.IsActive = True
+        self.IsTemplate = False
+        self.Category = None
+
+    def Activate(self):
+        pass
+
+
+def _named(name, **kwargs):
+    return lambda world: _Item(world, name, **kwargs)
+
+
+class Created(object):
+    """An element a fake Create call answers."""
+
+    def __init__(self, ident, name_raises=None):
+        self.Id = types.SimpleNamespace(Value=ident)
+        self._name = "Created {}".format(ident)
+        self._name_raises = name_raises
+
+    @property
+    def Name(self):
+        return self._name
+
+    @Name.setter
+    def Name(self, value):
+        if self._name_raises is not None:
+            raise self._name_raises
+        self._name = value
+
+
+_WALL = {"element_type": "wall", "start_point": {"x": 0, "y": 0}, "end_point": {"x": 1000, "y": 0}}
+_FLOOR = {"element_type": "floor",
+          "boundary": [{"x": 0, "y": 0}, {"x": 1000, "y": 0}, {"x": 1000, "y": 1000}]}
+
+# Routes that open a transaction on the document and reach a real HTTP 200:
+# (collector items the route finds, body). Plan 04-07 adds the colour routes.
+TRANSACTING = {
+    ("building", "/create_line/"): ([_named("L1")], {"elements": [dict(_WALL)]}),
+    ("building", "/create_surface/"): ([_named("L1")], {"elements": [dict(_FLOOR)]}),
+    ("building", "/create_level/"): ([], {"levels": [{"elevation": 3000, "name": "L1"}]}),
+}
+TRANSACTING_IDS = ["{}:{}".format(module, route) for module, route in TRANSACTING]
+
+
+def override_create(world, **methods):
+    """Make ``doc.Create`` answer a configured object."""
+    create = MagicMock(name="Create")
+    for name, fn in methods.items():
+        getattr(create, name).side_effect = fn
+    world.attr_overrides["Create"] = create
+    return create
+
+
+def arm(world, items=()):
+    """Collector results plus stable DB attributes, so a route reaches a real success.
+
+    Every DB attribute a route compares or calls is assigned once here: the fake DB hands
+    out a fresh MagicMock on each access of an unassigned name."""
+    world.collector_items = list(items)
+    ids = itertools.count(61)
+    world.db.XYZ = XYZ
+    world.db.Line = MagicMock(name="DB.Line")
+    world.db.Wall = types.SimpleNamespace(Create=lambda *args: Created(next(ids)))
+    world.db.Floor = types.SimpleNamespace(Create=lambda *args: Created(next(ids)))
+    world.db.Level = types.SimpleNamespace(Create=lambda *args: Created(next(ids)))
+    override_create(world, NewFootPrintRoof=lambda *args: Created(next(ids)))
+
+
+def reach(world, key):
+    items, body = TRANSACTING[key]
+    arm(world, items)
+    world.open("Only", "C:/Models/Only.rvt", active=True)
+    world.tokens()
+    return body
+
+
+def run(world, key, body=None):
+    """Reach the route's real success state and call it with ``body`` (default: its row)."""
+    row_body = reach(world, key)
+    return call(world, handler_of(world, *key), row_body if body is None else body)
 
 
 # ------------------------------------------------------------------ classification
@@ -609,7 +767,8 @@ def test_create_level_success_keeps_its_body_and_opens_the_transaction_on_the_re
     reply = call(world, handler_of(world, "building", "/create_level/"),
                  MUTATIONS[("building", "/create_level/")])
     assert reply.status == 200
-    assert sorted(without_attribution(reply.data)) == ["count", "created", "message", "status"]
+    assert sorted(without_attribution(reply.data)) == [
+        "count", "created", "message", "outcome", "status"]
     assert reply.data["status"] == "success"
     order = [event[0] for event in world.events]
     assert order[:2] == ["transaction", "start"], "the guard must precede any transaction"
@@ -687,3 +846,175 @@ def test_the_guard_reads_everything_through_the_injected_uiapp(world):
         None, uiapp=world.uiapp)
     assert document is None and response.status == 412
     assert response.data["process_identity"] == IDENT
+
+
+# ------------------------------------------------- honest outcomes (plan 04-03, Task 1)
+
+
+@pytest.mark.parametrize("key", list(TRANSACTING), ids=TRANSACTING_IDS)
+def test_every_transacting_success_carries_an_outcome_that_agrees_with_its_status(world, key):
+    reply = run(world, key)
+    assert reply.status == 200, reply.data
+    outcome = reply.data["outcome"]
+    assert outcome["transaction_status"] == "Committed"
+    expected = classify_outcome(True, len(outcome["succeeded"]), len(outcome["failed"]))
+    assert (reply.data["status"], reply.status) == expected
+
+
+@pytest.mark.parametrize("key", list(TRANSACTING), ids=TRANSACTING_IDS)
+def test_every_transacting_rollback_is_a_409_with_nothing_succeeded(world, key):
+    body = reach(world, key)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, *key), body)
+    assert reply.status == 409, reply.data
+    assert reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == []
+
+
+@pytest.mark.parametrize("key", list(TRANSACTING), ids=TRANSACTING_IDS)
+def test_every_transacting_500_carries_the_real_transaction_status(world, key):
+    body = reach(world, key)
+    world.break_start.add("Only")
+    reply = call(world, handler_of(world, *key), body)
+    assert reply.status == 500, reply.data
+    assert world.transactions, "the route never built a transaction"
+    assert reply.data["outcome"]["transaction_status"] == world.transactions[-1].status
+    assert reply.data["outcome"]["succeeded"] == []
+
+
+def test_the_fake_world_reports_the_transaction_status_it_commits_with(world):
+    """Wave 0 gap: a route that compares Commit() with DB.TransactionStatus needs both
+    sides in the fake, and GetStatus must follow the transaction."""
+    doc = world.open("Only", "C:/Models/Only.rvt", active=True)
+    t = world.db.Transaction(doc, "x")
+    assert t.GetStatus() == "Uninitialized"
+    t.Start()
+    assert t.GetStatus() == "Started" and not t.HasEnded()
+    assert t.Commit() == world.db.TransactionStatus.Committed
+    assert t.GetStatus() == "Committed" and t.HasEnded()
+    world.commit_status = "RolledBack"
+    t2 = world.db.Transaction(doc, "y")
+    t2.Start()
+    assert t2.Commit() == world.db.TransactionStatus.RolledBack
+
+
+def levels_answer(world, *levels):
+    queue = iter(levels)
+    world.db.Level = types.SimpleNamespace(Create=lambda *args: next(queue))
+
+
+def test_create_level_with_one_valid_and_one_without_elevation_is_a_partial(world):
+    reach(world, ("building", "/create_level/"))
+    levels_answer(world, Created(21))
+    reply = call(world, handler_of(world, "building", "/create_level/"),
+                 {"levels": [{"elevation": 3000, "name": "L1"}, {"name": "no elevation"}]})
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed",
+        "requested": 2,
+        "succeeded": [21],
+        "failed": [{"item": 1, "reason": "elevation is required"}],
+        "revit_failures": [],
+    }
+    assert reply.data["errors"] == ["Level 1: elevation is required"]
+    assert reply.data["count"] == 1
+    text = format_response(without_attribution(reply.data))
+    assert "=== PARTIAL SUCCESS ===" in text and "elevation is required" in text
+
+
+def test_create_level_with_no_valid_level_is_a_422_failed(world):
+    reach(world, ("building", "/create_level/"))
+    reply = call(world, handler_of(world, "building", "/create_level/"),
+                 {"levels": [{"name": "a"}, {"name": "b"}]})
+    assert reply.status == 422
+    assert reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert [entry["item"] for entry in reply.data["outcome"]["failed"]] == [0, 1]
+    assert reply.data["count"] == 0
+
+
+def test_a_level_that_cannot_be_named_is_still_succeeded_and_only_the_name_step_fails(world):
+    reach(world, ("building", "/create_level/"))
+    levels_answer(world, Created(22, name_raises=RuntimeError("taken")))
+    reply = call(world, handler_of(world, "building", "/create_level/"),
+                 {"levels": [{"elevation": 3000, "name": "L1"}]})
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"]["succeeded"] == [22]
+    assert reply.data["outcome"]["failed"] == [{"item": "0.name", "reason": "taken"}]
+    assert reply.data["count"] == 1 and reply.data["created"][0]["id"] == 22
+    assert reply.data["created"][0]["name"] == "Created 22"
+
+
+def test_create_level_success_has_exactly_the_legacy_keys_plus_outcome(world):
+    reply = run(world, ("building", "/create_level/"))
+    assert sorted(without_attribution(reply.data)) == [
+        "count", "created", "message", "outcome", "status"]
+    assert reply.data["outcome"]["requested"] == 1
+
+
+def test_create_line_with_an_unsupported_item_and_a_valid_wall_is_a_partial(world):
+    body = {"elements": [dict(_WALL, element_type="door"), dict(_WALL)]}
+    reply = run(world, ("building", "/create_line/"), body)
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    outcome = reply.data["outcome"]
+    assert outcome["requested"] == 2 and outcome["succeeded"] == [61]
+    assert [entry["item"] for entry in outcome["failed"]] == [0]
+    assert "element_type 'door' not supported" in outcome["failed"][0]["reason"]
+    assert not outcome["failed"][0]["reason"].startswith("Element 0")
+    assert reply.data["errors"][0].startswith("Element 0: element_type 'door'")
+    assert reply.data["count"] == 1
+
+
+def test_create_line_with_only_invalid_items_is_a_422(world):
+    body = {"elements": [dict(_WALL, element_type="door"), {"start_point": {"x": 0}}]}
+    reply = run(world, ("building", "/create_line/"), body)
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    assert [entry["item"] for entry in reply.data["outcome"]["failed"]] == [0, 1]
+
+
+def test_create_surface_with_only_invalid_items_is_a_422(world):
+    body = {"elements": [{"element_type": "wallpaper"}, {"element_type": "floor"}]}
+    reply = run(world, ("building", "/create_surface/"), body)
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert [entry["item"] for entry in reply.data["outcome"]["failed"]] == [0, 1]
+    assert reply.data["errors"][1].startswith("Element 1: Boundary requires")
+
+
+def test_create_surface_with_one_valid_floor_and_one_invalid_item_is_a_partial(world):
+    body = {"elements": [dict(_FLOOR), {"element_type": "wallpaper"}]}
+    reply = run(world, ("building", "/create_surface/"), body)
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"]["succeeded"] == [61]
+    assert [entry["item"] for entry in reply.data["outcome"]["failed"]] == [1]
+
+
+def test_a_floor_whose_offset_cannot_be_applied_is_succeeded_and_only_the_offset_step_fails(world):
+    class ReadOnlyOffset(Created):
+        def get_Parameter(self, name):
+            return types.SimpleNamespace(IsReadOnly=True)
+
+    reach(world, ("building", "/create_surface/"))
+    world.db.Floor = types.SimpleNamespace(Create=lambda *args: ReadOnlyOffset(71))
+    reply = call(world, handler_of(world, "building", "/create_surface/"),
+                 {"elements": [dict(_FLOOR, offset=150)]})
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"]["succeeded"] == [71]
+    assert reply.data["outcome"]["failed"][0]["item"] == "0.offset"
+    assert reply.data["count"] == 1
+
+
+@pytest.mark.parametrize("route,body", [
+    ("/create_line/", {"elements": [dict(_WALL)]}),
+    ("/create_surface/", {"elements": [dict(_FLOOR)]}),
+    ("/create_level/", {"levels": [{"elevation": 3000}]}),
+])
+def test_a_rolled_back_building_route_never_claims_what_it_created(world, route, body):
+    reach(world, ("building", route))
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, "building", route), body)
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["requested"] == 1
+    assert "created" not in reply.data and "count" not in reply.data

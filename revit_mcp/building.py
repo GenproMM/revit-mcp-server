@@ -5,7 +5,10 @@ Handles creation of line-based elements (walls, beams), surface-based
 elements (floors, roofs, ceilings), and levels.
 """
 
-from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
+from .utils import (
+    get_element_name, get_element_id_value, suppress_warnings, parse_request_data,
+    commit_and_report, finalize_outcome, exception_outcome,
+)
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 from System.Collections.Generic import List
@@ -23,6 +26,11 @@ def register_building_routes(api):
         Create line-based elements (walls, beams) in the Revit model (runs on the guarded document).
         Supports batch creation via elements array.
         """
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -38,6 +46,7 @@ def register_building_routes(api):
                     data={"error": "No elements provided — pass an array of element definitions"},
                     status=400,
                 )
+            requested = len(elements)
 
             # Collect all levels and wall/beam types once for performance
             all_levels = (
@@ -87,22 +96,34 @@ def register_building_routes(api):
             created = []
             errors = []
 
+            def fail(idx, reason):
+                # One reason text, two shapes: the legacy `errors` string and the D-03
+                # outcome.failed entry (item = input index).
+                errors.append("Element {}: {}".format(idx, reason))
+                failed.append({"item": idx, "reason": reason})
+
             t = DB.Transaction(doc, "Create Line-Based Elements")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 for idx, elem in enumerate(elements):
                     try:
                         element_type = elem.get("element_type")
                         if not element_type:
-                            errors.append("Element {}: element_type is required".format(idx))
+                            fail(
+                                idx,
+                                "element_type is required",
+                            )
                             continue
 
                         start = elem.get("start_point")
                         end = elem.get("end_point")
                         if not start or not end:
-                            errors.append("Element {}: start_point and end_point are required".format(idx))
+                            fail(
+                                idx,
+                                "start_point and end_point are required",
+                            )
                             continue
 
                         # Convert mm to feet
@@ -119,8 +140,9 @@ def register_building_routes(api):
 
                         # Validate non-zero length
                         if sp.DistanceTo(ep) < 0.001:
-                            errors.append(
-                                "Element {}: Start and end points must be different (zero-length element)".format(idx)
+                            fail(
+                                idx,
+                                "Start and end points must be different (zero-length element)",
                             )
                             continue
 
@@ -133,10 +155,9 @@ def register_building_routes(api):
                             level = level_map.get(level_name)
                             if not level:
                                 available = ", ".join(sorted(level_map.keys()))
-                                errors.append(
-                                    "Element {}: Level '{}' not found. Available levels: {}".format(
-                                        idx, level_name, available
-                                    )
+                                fail(
+                                    idx,
+                                    "Level '{}' not found. Available levels: {}".format(level_name, available),
                                 )
                                 continue
                         else:
@@ -151,18 +172,18 @@ def register_building_routes(api):
                                 wall_type = wall_type_map.get(type_name)
                                 if not wall_type:
                                     available = ", ".join(sorted(wall_type_map.keys())[:10])
-                                    errors.append(
-                                        "Element {}: Wall type '{}' not found. Available types: {}".format(
-                                            idx, type_name, available
-                                        )
+                                    fail(
+                                        idx,
+                                        "Wall type '{}' not found. Available types: {}".format(type_name, available),
                                     )
                                     continue
                             else:
                                 if wall_type_map:
                                     wall_type = list(wall_type_map.values())[0]
                                 else:
-                                    errors.append(
-                                        "Element {}: No wall types available — load wall families into the project".format(idx)
+                                    fail(
+                                        idx,
+                                        "No wall types available — load wall families into the project",
                                     )
                                     continue
 
@@ -172,6 +193,11 @@ def register_building_routes(api):
                             offset_feet = offset_mm / 304.8
                             is_structural = bool(elem.get("structural", False))
 
+                            # Names are read before the create call, so once the element
+                            # exists nothing left in this branch can fail and put it in
+                            # both `succeeded` and `failed`.
+                            type_label = get_element_name(wall_type)
+                            level_label = get_element_name(level)
                             wall = DB.Wall.Create(
                                 doc,
                                 line,
@@ -183,13 +209,15 @@ def register_building_routes(api):
                                 is_structural,
                             )
 
+                            wall_id = get_element_id_value(wall)
                             created.append({
-                                "id": get_element_id_value(wall),
+                                "id": wall_id,
                                 "name": elem.get("name", ""),
-                                "type": get_element_name(wall_type),
-                                "level": get_element_name(level),
+                                "type": type_label,
+                                "level": level_label,
                                 "element_type": "wall",
                             })
+                            succeeded.append(wall_id)
 
                         elif element_type == "beam":
                             type_name = elem.get("type_name")
@@ -198,18 +226,18 @@ def register_building_routes(api):
                                 beam_type = beam_type_map.get(type_name)
                                 if not beam_type:
                                     available = ", ".join(sorted(beam_type_map.keys())[:10])
-                                    errors.append(
-                                        "Element {}: Beam type '{}' not found. Available types: {}".format(
-                                            idx, type_name, available
-                                        )
+                                    fail(
+                                        idx,
+                                        "Beam type '{}' not found. Available types: {}".format(type_name, available),
                                     )
                                     continue
                             else:
                                 if beam_type_map:
                                     beam_type = list(beam_type_map.values())[0]
                                 else:
-                                    errors.append(
-                                        "Element {}: No beam types available — load structural framing families".format(idx)
+                                    fail(
+                                        idx,
+                                        "No beam types available — load structural framing families",
                                     )
                                     continue
 
@@ -217,6 +245,8 @@ def register_building_routes(api):
                                 beam_type.Activate()
                                 doc.Regenerate()
 
+                            type_label = get_element_name(beam_type)
+                            level_label = get_element_name(level)
                             beam = doc.Create.NewFamilyInstance(
                                 line,
                                 beam_type,
@@ -224,38 +254,39 @@ def register_building_routes(api):
                                 DB.Structure.StructuralType.Beam,
                             )
 
+                            beam_id = get_element_id_value(beam)
                             created.append({
-                                "id": get_element_id_value(beam),
+                                "id": beam_id,
                                 "name": elem.get("name", ""),
-                                "type": get_element_name(beam_type),
-                                "level": get_element_name(level),
+                                "type": type_label,
+                                "level": level_label,
                                 "element_type": "beam",
                             })
+                            succeeded.append(beam_id)
 
                         else:
-                            errors.append(
-                                "Element {}: element_type '{}' not supported — use 'wall' or 'beam'".format(
-                                    idx, element_type
-                                )
+                            fail(
+                                idx,
+                                "element_type '{}' not supported — use 'wall' or 'beam'".format(element_type),
                             )
                             continue
 
                     except Exception as elem_err:
-                        errors.append("Element {}: {}".format(idx, str(elem_err)))
+                        fail(idx, str(elem_err))
                         continue
 
-                t.Commit()
+                commit_result = commit_and_report(t, swallower)
 
             except Exception as tx_err:
                 if t.HasStarted() and not t.HasEnded():
                     t.RollBack()
                 return routes.make_response(
-                    data={"error": "Transaction failed: {}".format(str(tx_err))},
+                    data={"error": "Transaction failed: {}".format(str(tx_err)),
+                          "outcome": exception_outcome(t, requested, succeeded, failed)},
                     status=500,
                 )
 
             response_data = {
-                "status": "success",
                 "created": created,
                 "count": len(created),
                 "message": "Created {} element(s)".format(len(created)),
@@ -263,12 +294,15 @@ def register_building_routes(api):
             if errors:
                 response_data["errors"] = errors
 
-            return routes.make_response(data=response_data)
+            payload, http = finalize_outcome(
+                commit_result, response_data, requested, succeeded, failed)
+            return routes.make_response(data=payload, status=http)
 
         except Exception as e:
             logger.error("Failed to create line-based elements: {}".format(str(e)))
             return routes.make_response(
-                data={"error": str(e), "traceback": traceback.format_exc()},
+                data={"error": str(e), "traceback": traceback.format_exc(),
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
                 status=500,
             )
 
@@ -287,6 +321,11 @@ def register_building_routes(api):
         Create surface-based elements (floors, roofs, ceilings) in the Revit model (runs on the guarded document).
         Supports batch creation via elements array.
         """
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -302,6 +341,7 @@ def register_building_routes(api):
                     data={"error": "No elements provided — pass an array of element definitions"},
                     status=400,
                 )
+            requested = len(elements)
 
             # Collect levels
             all_levels = (
@@ -344,30 +384,40 @@ def register_building_routes(api):
             created = []
             errors = []
 
+            def fail(idx, reason, item=None):
+                # One reason text, two shapes: the legacy `errors` string and the D-03
+                # outcome.failed entry. `item` is the input index, or "INDEX.step" for a
+                # secondary step of an element that was created (D-12).
+                errors.append("Element {}: {}".format(idx, reason))
+                failed.append({"item": idx if item is None else item, "reason": reason})
+
             t = DB.Transaction(doc, "Create Surface-Based Elements")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 for idx, elem in enumerate(elements):
                     try:
                         element_type = elem.get("element_type")
                         if not element_type:
-                            errors.append("Element {}: element_type is required".format(idx))
+                            fail(
+                                idx,
+                                "element_type is required",
+                            )
                             continue
 
                         if element_type not in ("floor", "roof", "ceiling"):
-                            errors.append(
-                                "Element {}: element_type must be 'floor', 'roof', or 'ceiling'".format(idx)
+                            fail(
+                                idx,
+                                "element_type must be 'floor', 'roof', or 'ceiling'",
                             )
                             continue
 
                         boundary = elem.get("boundary", [])
                         if len(boundary) < 3:
-                            errors.append(
-                                "Element {}: Boundary requires at least 3 points/segments, got {}".format(
-                                    idx, len(boundary)
-                                )
+                            fail(
+                                idx,
+                                "Boundary requires at least 3 points/segments, got {}".format(len(boundary)),
                             )
                             continue
 
@@ -402,10 +452,9 @@ def register_building_routes(api):
                         lp = (float(last_p1.get("x", 0)), float(last_p1.get("y", 0)), float(last_p1.get("z", 0)))
                         dist = ((fp[0] - lp[0]) ** 2 + (fp[1] - lp[1]) ** 2 + (fp[2] - lp[2]) ** 2) ** 0.5
                         if dist > 1.0:  # tolerance of 1mm
-                            errors.append(
-                                "Element {}: Boundary must form a closed polygon — last point ({}, {}, {}) does not match first point ({}, {}, {})".format(
-                                    idx, lp[0], lp[1], lp[2], fp[0], fp[1], fp[2]
-                                )
+                            fail(
+                                idx,
+                                "Boundary must form a closed polygon — last point ({}, {}, {}) does not match first point ({}, {}, {})".format(lp[0], lp[1], lp[2], fp[0], fp[1], fp[2]),
                             )
                             continue
 
@@ -416,10 +465,9 @@ def register_building_routes(api):
                             level = level_map.get(level_name)
                             if not level:
                                 available = ", ".join(sorted(level_map.keys()))
-                                errors.append(
-                                    "Element {}: Level '{}' not found. Available levels: {}".format(
-                                        idx, level_name, available
-                                    )
+                                fail(
+                                    idx,
+                                    "Level '{}' not found. Available levels: {}".format(level_name, available),
                                 )
                                 continue
                         else:
@@ -433,10 +481,9 @@ def register_building_routes(api):
                                 floor_type = floor_type_map.get(type_name)
                                 if not floor_type:
                                     available = ", ".join(sorted(floor_type_map.keys())[:10])
-                                    errors.append(
-                                        "Element {}: Floor type '{}' not found. Available: {}".format(
-                                            idx, type_name, available
-                                        )
+                                    fail(
+                                        idx,
+                                        "Floor type '{}' not found. Available: {}".format(type_name, available),
                                     )
                                     continue
                             else:
@@ -456,8 +503,9 @@ def register_building_routes(api):
                                     if floor_type is None:
                                         floor_type = list(floor_type_map.values())[0]
                                 else:
-                                    errors.append(
-                                        "Element {}: No floor types available — load floor families".format(idx)
+                                    fail(
+                                        idx,
+                                        "No floor types available — load floor families",
                                     )
                                     continue
 
@@ -481,24 +529,44 @@ def register_building_routes(api):
                             curve_loops = List[DB.CurveLoop]()
                             curve_loops.Add(curve_loop)
 
-                            floor = DB.Floor.Create(doc, curve_loops, floor_type.Id, level.Id)
-
-                            # Apply offset if specified
+                            # Parsed and named before the create call, so an element that
+                            # exists can only fail at the guarded offset step below.
                             offset_mm = float(elem.get("offset", 0))
-                            if offset_mm != 0:
-                                offset_param = floor.get_Parameter(
-                                    DB.BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM
-                                )
-                                if offset_param and not offset_param.IsReadOnly:
-                                    offset_param.Set(offset_mm / 304.8)
+                            type_label = get_element_name(floor_type)
+                            level_label = get_element_name(level)
 
+                            floor = DB.Floor.Create(doc, curve_loops, floor_type.Id, level.Id)
+                            floor_id = get_element_id_value(floor)
                             created.append({
-                                "id": get_element_id_value(floor),
+                                "id": floor_id,
                                 "name": elem.get("name", ""),
-                                "type": get_element_name(floor_type),
-                                "level": get_element_name(level),
+                                "type": type_label,
+                                "level": level_label,
                                 "element_type": element_type,
                             })
+                            succeeded.append(floor_id)
+
+                            # Apply offset if specified; a floor that exists but kept its
+                            # default offset is a failed step, not a failed floor (D-12).
+                            if offset_mm != 0:
+                                try:
+                                    offset_param = floor.get_Parameter(
+                                        DB.BuiltInParameter.FLOOR_HEIGHTABOVELEVEL_PARAM
+                                    )
+                                    if not offset_param or offset_param.IsReadOnly:
+                                        fail(
+                                            idx,
+                                            "offset parameter not found or read-only",
+                                            "{}.offset".format(idx),
+                                        )
+                                    elif offset_param.Set(offset_mm / 304.8) is False:
+                                        fail(
+                                            idx,
+                                            "offset Set() returned false",
+                                            "{}.offset".format(idx),
+                                        )
+                                except Exception as offset_err:
+                                    fail(idx, str(offset_err), "{}.offset".format(idx))
 
                         elif element_type == "roof":
                             type_name = elem.get("type_name")
@@ -507,18 +575,18 @@ def register_building_routes(api):
                                 roof_type = roof_type_map.get(type_name)
                                 if not roof_type:
                                     available = ", ".join(sorted(roof_type_map.keys())[:10])
-                                    errors.append(
-                                        "Element {}: Roof type '{}' not found. Available: {}".format(
-                                            idx, type_name, available
-                                        )
+                                    fail(
+                                        idx,
+                                        "Roof type '{}' not found. Available: {}".format(type_name, available),
                                     )
                                     continue
                             else:
                                 if roof_type_map:
                                     roof_type = list(roof_type_map.values())[0]
                                 else:
-                                    errors.append(
-                                        "Element {}: No roof types available — load roof families".format(idx)
+                                    fail(
+                                        idx,
+                                        "No roof types available — load roof families",
                                     )
                                     continue
 
@@ -541,34 +609,38 @@ def register_building_routes(api):
 
                             import clr
                             model_curves = clr.Reference[DB.ModelCurveArray]()
+                            type_label = get_element_name(roof_type)
+                            level_label = get_element_name(level)
                             roof = doc.Create.NewFootPrintRoof(
                                 curve_array, level, roof_type, model_curves
                             )
 
+                            roof_id = get_element_id_value(roof)
                             created.append({
-                                "id": get_element_id_value(roof),
+                                "id": roof_id,
                                 "name": elem.get("name", ""),
-                                "type": get_element_name(roof_type),
-                                "level": get_element_name(level),
+                                "type": type_label,
+                                "level": level_label,
                                 "element_type": "roof",
                             })
+                            succeeded.append(roof_id)
 
                     except Exception as elem_err:
-                        errors.append("Element {}: {}".format(idx, str(elem_err)))
+                        fail(idx, str(elem_err))
                         continue
 
-                t.Commit()
+                commit_result = commit_and_report(t, swallower)
 
             except Exception as tx_err:
                 if t.HasStarted() and not t.HasEnded():
                     t.RollBack()
                 return routes.make_response(
-                    data={"error": "Transaction failed: {}".format(str(tx_err))},
+                    data={"error": "Transaction failed: {}".format(str(tx_err)),
+                          "outcome": exception_outcome(t, requested, succeeded, failed)},
                     status=500,
                 )
 
             response_data = {
-                "status": "success",
                 "created": created,
                 "count": len(created),
                 "message": "Created {} element(s)".format(len(created)),
@@ -576,12 +648,15 @@ def register_building_routes(api):
             if errors:
                 response_data["errors"] = errors
 
-            return routes.make_response(data=response_data)
+            payload, http = finalize_outcome(
+                commit_result, response_data, requested, succeeded, failed)
+            return routes.make_response(data=payload, status=http)
 
         except Exception as e:
             logger.error("Failed to create surface-based elements: {}".format(str(e)))
             return routes.make_response(
-                data={"error": str(e), "traceback": traceback.format_exc()},
+                data={"error": str(e), "traceback": traceback.format_exc(),
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
                 status=500,
             )
 
@@ -600,6 +675,11 @@ def register_building_routes(api):
         Create building levels at specified elevations (runs on the guarded document).
         Supports batch creation via levels array.
         """
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -615,51 +695,67 @@ def register_building_routes(api):
                     data={"error": "No levels provided — pass an array of level definitions"},
                     status=400,
                 )
+            requested = len(levels)
 
             created = []
             errors = []
 
+            def fail(idx, reason, item=None):
+                # One reason text, two shapes: the legacy `errors` string and the D-03
+                # outcome.failed entry. `item` is the input index, or "INDEX.name" for the
+                # naming step of a level that was created (D-12).
+                errors.append("Level {}: {}".format(idx, reason))
+                failed.append({"item": idx if item is None else item, "reason": reason})
+
             t = DB.Transaction(doc, "Create Levels")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 for idx, lv in enumerate(levels):
                     try:
                         elevation_mm = lv.get("elevation")
                         if elevation_mm is None:
-                            errors.append("Level {}: elevation is required".format(idx))
+                            fail(idx, "elevation is required")
                             continue
 
                         elevation_feet = float(elevation_mm) / 304.8
                         new_level = DB.Level.Create(doc, elevation_feet)
+                        # The level exists from here on: it is succeeded and in `created`
+                        # whatever happens to its name (D-12).
+                        level_id = get_element_id_value(new_level)
+                        succeeded.append(level_id)
 
                         name = lv.get("name")
                         if name:
-                            new_level.Name = str(name)
+                            try:
+                                new_level.Name = str(name)
+                            except Exception as name_err:
+                                # The level keeps Revit's default name, which `created` reports.
+                                fail(idx, str(name_err), "{}.name".format(idx))
 
                         created.append({
-                            "id": get_element_id_value(new_level),
+                            "id": level_id,
                             "name": get_element_name(new_level),
                             "elevation_mm": float(elevation_mm),
                         })
 
                     except Exception as lv_err:
-                        errors.append("Level {}: {}".format(idx, str(lv_err)))
+                        fail(idx, str(lv_err))
                         continue
 
-                t.Commit()
+                commit_result = commit_and_report(t, swallower)
 
             except Exception as tx_err:
                 if t.HasStarted() and not t.HasEnded():
                     t.RollBack()
                 return routes.make_response(
-                    data={"error": "Transaction failed: {}".format(str(tx_err))},
+                    data={"error": "Transaction failed: {}".format(str(tx_err)),
+                          "outcome": exception_outcome(t, requested, succeeded, failed)},
                     status=500,
                 )
 
             response_data = {
-                "status": "success",
                 "created": created,
                 "count": len(created),
                 "message": "Created {} level(s)".format(len(created)),
@@ -667,12 +763,15 @@ def register_building_routes(api):
             if errors:
                 response_data["errors"] = errors
 
-            return routes.make_response(data=response_data)
+            payload, http = finalize_outcome(
+                commit_result, response_data, requested, succeeded, failed)
+            return routes.make_response(data=payload, status=http)
 
         except Exception as e:
             logger.error("Failed to create levels: {}".format(str(e)))
             return routes.make_response(
-                data={"error": str(e), "traceback": traceback.format_exc()},
+                data={"error": str(e), "traceback": traceback.format_exc(),
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
                 status=500,
             )
 

@@ -242,3 +242,157 @@ def gate_applies(method):
     if isinstance(method, _TEXT_TYPE):
         return method.strip().upper() not in UNGATED_METHODS
     return True
+
+
+# ---------------------------------------------------------------- payload integrity
+#
+# Three states (D-13): verified_match, verified_mismatch, unverifiable. Only a
+# file that was read and differs makes a mismatch; a manifest or file that could
+# not be read is "unverifiable", so an unreachable share can never be reported as
+# tampering. evaluate_integrity() is pure: revit_mcp/integrity.py does the reading
+# and hands it what it saw.
+
+INTEGRITY_MATCH = "verified_match"
+INTEGRITY_MISMATCH = "verified_mismatch"
+INTEGRITY_UNVERIFIABLE = "unverifiable"
+
+REASON_MANIFEST_MISSING = "manifest_missing"
+REASON_MANIFEST_UNREADABLE = "manifest_unreadable"
+REASON_READ_ERROR = "read_error"
+
+MANIFEST_SCHEMA = 1
+INTEGRITY_FAILURE_STATUS = 423
+
+_HEX_DIGITS = "0123456789abcdef"
+
+
+def _result(state, reason=None, modified=(), missing=(), unexpected=()):
+    """The one result shape: state, reason and three sorted, de-duplicated lists."""
+    return {
+        "state": state,
+        "reason": reason,
+        "modified": sorted(set(modified)),
+        "missing": sorted(set(missing)),
+        "unexpected": sorted(set(unexpected)),
+    }
+
+
+def unverifiable(reason):
+    """The result for a check that could not be completed, with its reason."""
+    return _result(INTEGRITY_UNVERIFIABLE, reason)
+
+
+def valid_manifest_path(key):
+    """True only for a relative, '/'-separated path that stays inside the extension.
+
+    Text, non-empty, no backslash, no colon (a drive letter), not absolute, and no
+    segment that is empty, '.' or '..'. A manifest key failing this is never opened.
+    """
+    if not isinstance(key, _TEXT_TYPE) or not key:
+        return False
+    if "\\" in key or ":" in key or key.startswith("/"):
+        return False
+    for segment in key.split("/"):
+        if segment in ("", ".", ".."):
+            return False
+    return True
+
+
+def _valid_digest(value):
+    """True for text of exactly 64 lowercase hexadecimal characters."""
+    if not isinstance(value, _TEXT_TYPE) or len(value) != 64:
+        return False
+    for char in value:
+        if char not in _HEX_DIGITS:
+            return False
+    return True
+
+
+def _manifest_files(manifest):
+    """The files map of a well-formed manifest, or None when anything is off."""
+    if not isinstance(manifest, dict):
+        return None
+    schema = manifest.get("schema")
+    if type(schema) is not int or schema != MANIFEST_SCHEMA:  # a bool is not 1 here
+        return None
+    files = manifest.get("files")
+    if not isinstance(files, dict) or not files:
+        return None
+    for key, value in files.items():
+        if not valid_manifest_path(key) or not _valid_digest(value):
+            return None
+    return files
+
+
+def evaluate_integrity(manifest, observed):
+    """The three-state verdict for a parsed manifest and what was observed; never raises.
+
+    manifest is the parsed _manifest.json or None when it is absent. observed is
+    {"hashes": {relpath: sha256}, "present_py": [relpath of every revit_mcp/*.py
+    seen], "unreadable": [relpath that could not be read]}. The result is
+    {"state", "reason", "modified", "missing", "unexpected"} with sorted lists.
+
+    A None manifest is unverifiable/manifest_missing; a malformed manifest is
+    unverifiable/manifest_unreadable; an observation of the wrong shape, or any
+    unreadable path, is unverifiable/read_error even when other files differ
+    (an unreachable file is never a mismatch). Otherwise modified (hash differs),
+    missing (not observed) and unexpected (a .py present but not listed) decide
+    verified_mismatch versus verified_match. Underscore-prefixed .py files count:
+    they are shipped code any module can import.
+    """
+    try:
+        if manifest is None:
+            return unverifiable(REASON_MANIFEST_MISSING)
+        files = _manifest_files(manifest)
+        if files is None:
+            return unverifiable(REASON_MANIFEST_UNREADABLE)
+        if (not isinstance(observed, dict)
+                or not isinstance(observed.get("hashes"), dict)
+                or not isinstance(observed.get("present_py"), list)
+                or not isinstance(observed.get("unreadable"), list)):
+            return unverifiable(REASON_READ_ERROR)
+        if observed["unreadable"]:
+            return unverifiable(REASON_READ_ERROR)
+        hashes = observed["hashes"]
+        modified = [p for p in files if p in hashes and hashes[p] != files[p]]
+        missing = [p for p in files if p not in hashes]
+        unexpected = [p for p in observed["present_py"] if p not in files]
+        if modified or missing or unexpected:
+            return _result(INTEGRITY_MISMATCH, None, modified, missing, unexpected)
+        return _result(INTEGRITY_MATCH)
+    except Exception:
+        return unverifiable(REASON_READ_ERROR)
+
+
+def _text_items(values):
+    """The text items of a list, tuple or set, sorted by code point; [] for anything else."""
+    if not isinstance(values, (list, tuple, set, frozenset)):
+        return []
+    return sorted(set(v for v in values if isinstance(v, _TEXT_TYPE)))
+
+
+def mismatch_files(result):
+    """Sorted union of modified, missing and unexpected; [] for a malformed result."""
+    if not isinstance(result, dict):
+        return []
+    names = []
+    for key in ("modified", "missing", "unexpected"):
+        names.extend(_text_items(result.get(key)))
+    return sorted(set(names))
+
+
+def integrity_failure(files):
+    """(body, status) of the HTTP 423 refusal naming the files that differ.
+
+    files is a list, tuple or set of relative names; its text items are sorted into the
+    body, and anything else gives an empty list. The names carry no file content.
+    """
+    body = {
+        "error": (
+            "Mutation rejected: Revit extension files differ from the published "
+            "manifest. Reinstall the extension from the share and restart Revit."
+        ),
+        "integrity": INTEGRITY_MISMATCH,
+        "files": _text_items(files),
+    }
+    return body, INTEGRITY_FAILURE_STATUS

@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Serialization and configurable addressing** - Every call from this server except `/status/` queues instead of racing, `/status/` stays responsive throughout, and the Revit port this server talks to is a deployment setting instead of a hardcoded constant — one server process per Revit instance; choosing a Revit per call is Phase 2 (completed 2026-10-14)
 - [x] **Phase 2: Live identity, ambiguity refusal, and multi-document addressing** - Every response names the document and process that handled it, two listeners on one port produce an explicit refusal instead of a coin-flip, and an engineer can list, address, and switch between documents open in one Revit session (completed 2026-10-23)
 - [x] **Phase 3: Secret gate and payload integrity (unit-verified)** - The shared-secret compare and the file-manifest integrity check are built and unit-tested on both runtimes, plus the build pipeline that generates the secret and the manifest, ready to wire in (completed 2026-10-23)
-- [ ] **Phase 4: Honest outcomes on every mutating route** - Every mutating route, including the two known stragglers, reports what actually happened in Revit rather than an assumed success
+- [x] **Phase 4: Honest outcomes on every mutating route** - Every mutating route, including the two known stragglers, reports what actually happened in Revit rather than an assumed success (completed 2026-10-23)
 - [ ] **Phase 5: Live secret gate and integrity enforcement** - The Phase 3 secret gate and integrity check are wired into the live chokepoint and binding
 - [ ] **Phase 6: Structured audit log of true outcomes** - Every mutation lands in a local, rotation-capped JSONL log carrying the same honest outcome the client saw, without leaking the secret
 - [ ] **Phase 7: Repository-owned mutation safety and human approval** - Редактируемые правила, объяснение риска и одноразовое подтверждение опасных операций реализованы в этом репозитории; Hermes Fork не изменяется, Jev необязателен и не ослабляет правила
@@ -186,7 +186,7 @@ Plans:
   3. A batch operation run against a mix of valid and invalid element ids returns the succeeded and skipped/failed ids alongside each other, not only a count.
   4. A batch operation's partial failure produces a status distinguishable both from full success and from full failure — exercised live against at least one batch route with an intentionally-invalid id mixed in.
 
-**Plans:** 11/11 plans executed
+**Plans:** 11/11 plans complete
 
 Plans:
 
@@ -283,7 +283,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Serialization and configurable addressing | 7/7 | Complete    | 2026-10-14 |
 | 2. Live identity, ambiguity refusal, and multi-document addressing | 20/20 | Complete    | 2026-10-23 |
 | 3. Secret gate and payload integrity (unit-verified) | 9/9 | Complete    | 2026-10-23 |
-| 4. Honest outcomes on every mutating route | 11/11 | In Progress|  |
+| 4. Honest outcomes on every mutating route | 11/11 | Complete    | 2026-10-23 |
 | 5. Live secret gate and integrity enforcement | 0/TBD | Not started | - |
 | 6. Structured audit log of true outcomes | 0/TBD | Not started | - |
 | 7. Repository-owned mutation safety and human approval | 0/TBD | Not planned | - |

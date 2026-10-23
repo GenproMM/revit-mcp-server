@@ -66,10 +66,10 @@
 
 ### Честный результат (TRUTH)
 
-- [ ] **TRUTH-01**: Все мутирующие маршруты сообщают реальный `TransactionStatus`, а не предполагаемый успех
-- [ ] **TRUTH-02**: `delete_elements` и `export_ifc` переведены на `commit_and_report` — закрытие двух известных оставшихся пропусков
-- [ ] **TRUTH-03**: Пакетные операции возвращают пропущенные и сбойные элементы рядом с успешными, а не только счётчик
-- [ ] **TRUTH-04**: Частичный отказ пакетной операции имеет собственный явный статус, отличимый и от успеха, и от полного отказа
+- [x] **TRUTH-01**: Все мутирующие маршруты сообщают реальный `TransactionStatus`, а не предполагаемый успех
+- [x] **TRUTH-02**: `delete_elements` и `export_ifc` переведены на `commit_and_report` — закрытие двух известных оставшихся пропусков
+- [x] **TRUTH-03**: Пакетные операции возвращают пропущенные и сбойные элементы рядом с успешными, а не только счётчик
+- [x] **TRUTH-04**: Частичный отказ пакетной операции имеет собственный явный статус, отличимый и от успеха, и от полного отказа
 
 ### Аудит (AUDIT)
 
@@ -154,10 +154,10 @@
 | INTG-06 | Phase 3 | Complete |
 | INTG-07 | Phase 3 | Complete |
 | INTG-08 | Phase 3 | Complete |
-| TRUTH-01 | Phase 4 | Pending |
-| TRUTH-02 | Phase 4 | Pending |
-| TRUTH-03 | Phase 4 | Pending |
-| TRUTH-04 | Phase 4 | Pending |
+| TRUTH-01 | Phase 4 | Complete |
+| TRUTH-02 | Phase 4 | Complete |
+| TRUTH-03 | Phase 4 | Complete |
+| TRUTH-04 | Phase 4 | Complete |
 | IDENT-01 | Phase 2 | Complete |
 | IDENT-02 | Phase 2 | Complete |
 | IDENT-03 | Phase 2 | Complete |

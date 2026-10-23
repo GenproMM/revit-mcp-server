@@ -298,3 +298,63 @@ def _assert_py38_clean(relpath):
 
 def test_secret_tool_parses_as_python_38():
     _assert_py38_clean(os.path.join("deploy", "secret_tool.py"))
+
+
+# --- scripts/dev_secret.py and the ignore rules ----------------------------
+
+
+@pytest.fixture(scope="module")
+def dev_secret():
+    return _load("scripts_dev_secret", os.path.join("scripts", "dev_secret.py"))
+
+
+def test_dev_secret_creates_once_and_never_prints(dev_secret, tmp_path, capsys):
+    repo = tmp_path / "checkout"
+    target = repo / "revit_mcp" / "_bridge_secret"
+    assert dev_secret.main(["--repo", str(repo)]) == 0
+    first = _read(target)
+    assert TOKEN.match(first)
+    assert dev_secret.main(["--repo", str(repo)]) == 0
+    assert _read(target) == first
+    captured = capsys.readouterr()
+    assert first.decode("ascii") not in captured.out + captured.err
+    assert "created" in captured.out
+    assert "exists, left unchanged" in captured.out
+
+
+def test_dev_secret_invalid_existing_fails_and_keeps_file(dev_secret, tmp_path, capsys):
+    target = tmp_path / "revit_mcp" / "_bridge_secret"
+    _write(target, b"short")
+    assert dev_secret.main(["--repo", str(tmp_path)]) == 1
+    assert _read(target) == b"short"
+    assert "ERROR:" in capsys.readouterr().err
+
+
+def test_dev_secret_default_repo_is_parent_of_scripts():
+    source = open(os.path.join(REPO, "scripts", "dev_secret.py"), encoding="utf-8").read()
+    assert "ensure_secret(" in source
+    assert "_bridge_secret" in source
+
+
+def test_dev_secret_parses_as_python_38():
+    _assert_py38_clean(os.path.join("scripts", "dev_secret.py"))
+
+
+def _gitignore_lines():
+    with open(os.path.join(REPO, ".gitignore"), encoding="utf-8") as handle:
+        return [line.strip() for line in handle.read().splitlines()]
+
+
+def test_gitignore_lists_both_artifacts_as_whole_lines():
+    lines = _gitignore_lines()
+    assert "_bridge_secret" in lines
+    assert "_manifest.json" in lines
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_gitignore_check_ignore_reports_both_ignored():
+    for name in ("revit_mcp/_bridge_secret", "_manifest.json"):
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", name], cwd=REPO, capture_output=True
+        )
+        assert result.returncode == 0, "{} is not git-ignored".format(name)

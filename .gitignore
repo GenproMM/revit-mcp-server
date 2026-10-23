@@ -31,3 +31,7 @@ gsd-core/
 *.canvas
 workspace.json
 workspace-mobile.json
+
+# Shared-secret and integrity-manifest build artifacts (Phase 3): never commit them.
+_bridge_secret
+_manifest.json

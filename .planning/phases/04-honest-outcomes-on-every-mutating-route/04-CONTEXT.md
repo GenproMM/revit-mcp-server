@@ -87,6 +87,20 @@
   поэлементным `continue` (не `delete_elements`, см. D-05); конкретный маршрут выбирает
   планировщик из `building`/`tags`/`colors`.
 
+### Уточнения после исследования (2026-10-23, /gsd-plan-phase 4)
+- **D-12:** Элемент создан, но вторичный шаг не удался (свойства `place_family`, размеры
+  `create_duct`, стиль линии в `detail`, имя `create_level`) → каждый неудавшийся шаг идёт в
+  `outcome.failed` с `item` = имя шага (например `"line_style"`), созданный id — в `succeeded`;
+  по D-04 результат **200 `partial`**. Эти маршруты сознательно меняют `success` на `partial`.
+- **D-13:** `/execute_code/` тоже несёт блок `outcome` (`requested: null`, `succeeded: []`,
+  `failed: []`, реальный `transaction_status`) — одна схема для фазы 6; закреплённый набор ключей в
+  `test_routes_view_code_identity.py` дополняется `"outcome"`.
+- **D-14:** Ответ 500 любого маршрута с транзакцией несёт блок `outcome` с реальным
+  `transaction_status` (исключение после `Commit()` должно показывать `Committed`, а не скрывать
+  изменение модели). `GetStatus()` — в `try/except`, при сбое `null`.
+- **D-15:** `create_mep_system`: если `new_system` равен `None`, транзакция откатывается (не
+  фиксируется пустой) и маршрут отвечает **422 `failed`** с причиной.
+
 ### Claude's Discretion
 - В каком из чистых модулей живёт `classify_outcome`.
 - Имя Revit-зависимого построителя ответа и порядок миграции модулей.

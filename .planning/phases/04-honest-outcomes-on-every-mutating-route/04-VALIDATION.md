@@ -56,6 +56,29 @@ Filled in by the planner per task; the requirement-level map is:
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
+### Per-task map (filled by the planner, 2026-10-23)
+
+Every task also runs `uv run pytest tests/unit -q` before its commit. AST gate = the one-line
+`ast.walk` command in the task's acceptance criteria (no `.Commit` call, no discarded
+`suppress_warnings`, no `{**a}` dict unpacking) printing `AST_GATE clean`.
+
+| Task | Wave | Requirement | Test Type | Automated Command | Status |
+|------|------|-------------|-----------|-------------------|--------|
+| 04-01 T1 (tracer) | 1 | TRUTH-03, TRUTH-04 | unit, route to renderer | `uv run pytest tests/unit/test_routes_mep_parameter_identity.py -q -k "tag_elements and partial"` | ⬜ pending |
+| 04-01 T2 | 1 | TRUTH-04, TRUTH-01 | pure unit | `uv run pytest tests/unit/test_textutils.py tests/unit/test_format_response.py tests/unit/test_conventions.py -q` | ⬜ pending |
+| 04-01 T3 | 1 | TRUTH-01 | unit (fake pyRevit) | `uv run pytest tests/unit/test_routes_mep_parameter_identity.py -q -k tag_elements` | ⬜ pending |
+| 04-02 T1-T3 | 2 | TRUTH-01, TRUTH-03, TRUTH-04 | unit (fake pyRevit) + AST gate | `uv run pytest tests/unit/test_routes_mep_parameter_identity.py -q` | ⬜ pending |
+| 04-03 T1-T2 | 2 | TRUTH-01, TRUTH-03, TRUTH-04 | unit (fake pyRevit) + AST gate | `uv run pytest tests/unit/test_routes_analysis_color_identity.py -q` | ⬜ pending |
+| 04-04 T1-T2 | 2 | TRUTH-02, TRUTH-01 | unit (fake pyRevit) + AST gate | `uv run pytest tests/unit/test_routes_document_interop_identity.py -q` | ⬜ pending |
+| 04-05 T1-T2 | 2 | TRUTH-01 | unit (fake pyRevit) + AST gate | `uv run pytest tests/unit/test_routes_view_code_identity.py -q` | ⬜ pending |
+| 04-06 T1-T3 | 3 | TRUTH-01, TRUTH-03, TRUTH-04 | unit (fake pyRevit) + AST gate | `uv run pytest tests/unit/test_routes_document_interop_identity.py -q` | ⬜ pending |
+| 04-07 T1-T2 | 3 | TRUTH-01, TRUTH-03, TRUTH-04 | unit (fake pyRevit) + AST gate | `uv run pytest tests/unit/test_routes_analysis_color_identity.py -q` | ⬜ pending |
+| 04-10 T1-T2 | 3 | TRUTH-01..04 (instrument) | offline unit | `uv run pytest tests/unit/test_phase4_live_outcomes.py -q` | ⬜ pending |
+| 04-08 T1 | 4 | TRUTH-01 (D-02) | static (AST) | `uv run pytest tests/unit/test_conventions.py -q` | ⬜ pending |
+| 04-08 T2 | 4 | TRUTH-01 (D-02) | scaffold generation + conventions | SCAFFOLD command in 04-08 Task 2 | ⬜ pending |
+| 04-09 T1-T3 | 4 | TRUTH-03, TRUTH-04 | docstring contract | `uv run pytest tests/unit/test_outcome_docstrings.py -q` | ⬜ pending |
+| 04-11 T1-T2 | 5 | TRUTH-01..04 | live, human, one-shot | `uv run python tests/test_phase4_live_outcomes.py classify RAW.json` | ⬜ pending |
+
 ---
 
 ## Wave 0 Requirements
@@ -73,7 +96,7 @@ Filled in by the planner per task; the requirement-level map is:
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
 | Real `TransactionStatus` reaches `outcome` (single-element, batch, export) | TRUTH-01, TRUTH-02 | Needs live Revit + pyRevit Routes after a full restart | One listener on 48884; scratch unsaved document; `modify_element`, `export_ifc` to scratch path; never save |
-| Partial on a mixed valid/invalid batch, visible in tool text | TRUTH-03, TRUTH-04 | Needs live Revit | `tag_elements` with `[valid id, 999999999]` in a plan view → 200 `partial`, PARTIAL banner with the bad id; one-shot, clean up via `delete_elements` |
+| Partial on a mixed valid/invalid batch, visible in tool text | TRUTH-03, TRUTH-04 | Needs live Revit | `tag_elements` with `[valid id, 999999999]` in a plan view → 200 `partial`, PARTIAL banner with the bad id; one-shot once any POST is sent (a preflight STOP with `POSTS_SENT=0` sent nothing and is rerun to a fresh `--out`), clean up via `delete_elements` |
 
 ---
 

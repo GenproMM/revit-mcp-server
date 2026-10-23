@@ -186,7 +186,35 @@ Plans:
   3. A batch operation run against a mix of valid and invalid element ids returns the succeeded and skipped/failed ids alongside each other, not only a count.
   4. A batch operation's partial failure produces a status distinguishable both from full success and from full failure — exercised live against at least one batch route with an intentionally-invalid id mixed in.
 
-**Plans**: TBD
+**Plans:** 11 plans
+
+Plans:
+
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Tracer: tag_elements mixed batch end to end (pure outcome helpers in textutils, commit_and_report, finalize_outcome, PARTIAL SUCCESS in format_response), helper contract and renderer tests, rollback/422/500 outcome
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-02-PLAN.md — mep/parameter world: mep (D-12 dimensions, D-15 empty system), rooms, structure, set_parameter outcome, world invariants
+- [ ] 04-03-PLAN.md — analysis/color world repair (TransactionStatus, commit_status) and building, annotation, detail migrations
+- [ ] 04-04-PLAN.md — TRUTH-02: delete_elements (D-05) and export_ifc (Export Boolean) onto commit_and_report; modify_element classified; link_file, save_document outcome
+- [ ] 04-05-PLAN.md — view/code world: transform_elements, create_view, set_active_view, open_model, execute_code outcome (D-13)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-06-PLAN.md — documentation (sheet, schedule, export_document) and placement (place_family, load_family, edit_family never reloads after a rollback)
+- [ ] 04-07-PLAN.md — colors: per-element override failures as outcome.failed, colour routes pinned to the invariants
+- [ ] 04-10-PLAN.md — Live gate instrument: one-shot tests/test_phase4_live_outcomes.py with offline-tested classifier
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-08-PLAN.md — D-02 lock-in: conventions checks (no Commit outside commit_and_report, swallower kept), scaffolds, CONTRIBUTING.md, CLAUDE.md
+- [ ] 04-09-PLAN.md — Tool docstrings state only the PARTIAL SUCCESS / 422 / 409 replies each route can return; docstring contract test (required and forbidden phrases) over all 31 mutation tools
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 04-11-PLAN.md — Live gate (human-run, one-shot once a write is sent; a zero-POST preflight stop is rerun, after a full Revit restart): modify_element, tag_elements partial and 422, export_ifc, delete_elements
 
 ### Phase 5: Live secret gate and integrity enforcement
 

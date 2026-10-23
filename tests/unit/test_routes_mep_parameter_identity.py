@@ -183,7 +183,9 @@ class RouteDocument(_Touchable):
         self._world.record("attr", self, name)
         if self._world.explode:
             raise RuntimeError("document access failed: " + name)
-        hook = self._world.hooks.get((self.label, name)) or self._world.hooks.get((None, name))
+        if name in self._world.attr_overrides:
+            return self._world.attr_overrides[name]
+        hook =self._world.hooks.get((self.label, name)) or self._world.hooks.get((None, name))
         if hook is not None:
             return lambda *args, **kwargs: hook(self, *args, **kwargs)
         return MagicMock(name=name)
@@ -296,6 +298,10 @@ class World(object):
         self.events = []
         self.explode = False
         self.hooks = {}
+        # A document attribute that must answer a configured object (not a recorded
+        # MagicMock), such as ``doc.Create``; consulted before ``hooks``.
+        self.attr_overrides = {}
+        self.transactions = []
         self.collector_items = []
         self.commit_status = "Committed"
         self.break_start = set()
@@ -360,6 +366,7 @@ def make_db(world):
             self.doc = doc
             self.started = False
             self.status = "Uninitialized"
+            world.transactions.append(self)
 
         def Start(self):
             if world.explode or getattr(self.doc, "label", None) in world.break_start:
@@ -553,12 +560,74 @@ def call(world, fn, body=None, **extra):
     return fn(**dict((name, available[name]) for name in parameters if name in available))
 
 
+class StepParam(object):
+    """A parameter a secondary step writes: read-only or raising on demand (D-12)."""
+
+    StorageType = "String"
+    HasValue = True
+
+    def __init__(self, read_only=False, raises=None, value="", area=0.0):
+        self.IsReadOnly = read_only
+        self._raises = raises
+        self._value = value
+        self._area = area
+        self.sets = []
+
+    def Set(self, value):
+        if self._raises is not None:
+            raise self._raises
+        self.sets.append(value)
+        self._value = value
+        return True
+
+    def AsString(self):
+        return self._value
+
+    def AsDouble(self):
+        return self._area
+
+
+class StepElement(object):
+    """A created element (duct, pipe, system, room) whose parameters a test configures.
+
+    ``lookups`` records (name, commits seen so far) so a test can prove a read happened
+    only after a committed commit."""
+
+    def __init__(self, world, ident, params=None):
+        self._world = world
+        self.Id = types.SimpleNamespace(Value=ident)
+        self.Name = "Created"
+        self._params = params or {}
+        self.lookups = []
+
+    def LookupParameter(self, name):
+        self.lookups.append((name, len(self._world.kinds("commit"))))
+        return self._params.get(name)
+
+
+class StepLine(object):
+    def __init__(self, ident):
+        self.Id = types.SimpleNamespace(Value=ident)
+
+
+def override_create(world, **methods):
+    """Make ``doc.Create`` answer a configured object: each keyword is a Create method
+    name mapped to the callable that implements it."""
+    create = MagicMock(name="Create")
+    for name, fn in methods.items():
+        getattr(create, name).side_effect = fn
+    world.attr_overrides["Create"] = create
+    return create
+
+
 def arm(world, items=(), missing=()):
     """Collector results and the element GetElement answers, for a success path.
 
     ``missing`` lists element ids GetElement answers None for (an id that is not in the
-    model); every other id is a taggable element carrying that id."""
+    model); every other id is a taggable element carrying that id. ``doc.Create`` answers
+    two room separation lines, so create_room_separation reaches a real success."""
     world.collector_items = list(items)
+    override_create(world, NewRoomBoundaryLines=lambda *args: [StepLine(501), StepLine(502)])
 
     def get_element(doc, eid):
         value = getattr(eid, "Value", None)
@@ -813,9 +882,11 @@ def test_a_guarded_transaction_that_cannot_start_changes_nothing_and_names_the_d
 
 
 EXPECTED_KEYS = {
-    ("mep", "/create_duct/"): ["duct_id", "duct_type", "level", "message", "status", "system_type"],
-    ("mep", "/create_pipe/"): ["level", "message", "pipe_id", "pipe_type", "status", "system_type"],
-    ("mep", "/create_mep_system/"): ["element_count", "message", "status", "system_id",
+    ("mep", "/create_duct/"): ["duct_id", "duct_type", "level", "message", "outcome", "status",
+                               "system_type"],
+    ("mep", "/create_pipe/"): ["level", "message", "outcome", "pipe_id", "pipe_type", "status",
+                               "system_type"],
+    ("mep", "/create_mep_system/"): ["element_count", "message", "outcome", "status", "system_id",
                                      "system_name", "system_type"],
     ("parameters", "/set_parameter/"): ["element_id", "message", "new_value", "old_value",
                                         "parameter_name", "status", "transaction_status"],
@@ -1087,3 +1158,196 @@ def test_tag_elements_500_after_a_commit_names_committed_and_keeps_what_was_tagg
     assert reply.data["outcome"]["transaction_status"] == "Committed"
     assert reply.data["outcome"]["succeeded"] == [5]
     assert world.kinds("rollback") == [], "a committed transaction must not be rolled back"
+
+
+
+# ----------------------------------- mep: honest outcomes (D-03, D-12, D-14, D-15; plan 04-02)
+
+
+def mep_call(world, route, body, items=()):
+    # A test configures GetElement / doc.Create first; arm() must not overwrite them.
+    hook = world.hooks.get((None, "GetElement"))
+    create = world.attr_overrides.get("Create")
+    arm(world, items)
+    if hook is not None:
+        world.hooks[(None, "GetElement")] = hook
+    if create is not None:
+        world.attr_overrides["Create"] = create
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    return call(world, handler_of(world, "mep", route), body)
+
+
+def create_answers(world, kind, created):
+    """DB.Mechanical.Duct.Create / DB.Plumbing.Pipe.Create answer ``created``."""
+    if kind == "duct":
+        world.db.Mechanical = MagicMock(name="DB.Mechanical")
+        world.db.Mechanical.Duct.Create.return_value = created
+    else:
+        world.db.Plumbing = MagicMock(name="DB.Plumbing")
+        world.db.Plumbing.Pipe.Create.return_value = created
+
+
+DIMENSION_CASES = [
+    pytest.param(lambda: StepParam(read_only=True), "parameter is read-only", id="read-only"),
+    pytest.param(lambda: None, "parameter not found", id="missing"),
+    pytest.param(lambda: StepParam(raises=RuntimeError("bad")), "bad", id="raises"),
+]
+
+DUCT_OR_PIPE = [
+    pytest.param("duct", "/create_duct/", "duct_id", "D", id="duct"),
+    pytest.param("pipe", "/create_pipe/", "pipe_id", "P", id="pipe"),
+]
+
+
+@pytest.mark.parametrize("kind,route,id_key,item_name", DUCT_OR_PIPE)
+@pytest.mark.parametrize("make_param,reason", DIMENSION_CASES)
+def test_a_duct_or_pipe_whose_diameter_cannot_be_set_is_a_partial_naming_the_step(
+        world, kind, route, id_key, item_name, make_param, reason):
+    created = StepElement(world, 77, {"Diameter": make_param()})
+    create_answers(world, kind, created)
+    reply = mep_call(world, route, dict(_POINTS, diameter=200), [_named(item_name)])
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data[id_key] == 77
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed",
+        "requested": 1,
+        "succeeded": [77],
+        "failed": [{"item": "diameter", "reason": reason}],
+        "revit_failures": [],
+    }
+    assert "=== PARTIAL SUCCESS ===" in format_response(reply.data)
+
+
+def test_a_duct_with_writable_width_and_height_is_a_success_with_nothing_failed(world):
+    width, height = StepParam(), StepParam()
+    create_answers(world, "duct", StepElement(world, 77, {"Width": width, "Height": height}))
+    reply = mep_call(world, "/create_duct/", dict(_POINTS, width=300, height=150), [_named("D")])
+    assert reply.status == 200 and reply.data["status"] == "success", reply.data
+    assert reply.data["outcome"]["failed"] == [] and reply.data["outcome"]["succeeded"] == [77]
+    assert width.sets == [pytest.approx(300 * (1.0 / 304.8))]
+    assert height.sets == [pytest.approx(150 * (1.0 / 304.8))]
+
+
+def test_a_duct_whose_width_is_read_only_still_sets_the_height_and_reports_only_the_width(world):
+    height = StepParam()
+    create_answers(world, "duct", StepElement(
+        world, 77, {"Width": StepParam(read_only=True), "Height": height}))
+    reply = mep_call(world, "/create_duct/", dict(_POINTS, width=300, height=150), [_named("D")])
+    assert reply.status == 200 and reply.data["status"] == "partial"
+    assert reply.data["outcome"]["failed"] == [
+        {"item": "width", "reason": "parameter is read-only"}]
+    assert reply.data["outcome"]["succeeded"] == [77]
+    assert len(height.sets) == 1
+
+
+@pytest.mark.parametrize("kind,route,id_key,item_name", DUCT_OR_PIPE)
+def test_a_pipe_or_duct_without_a_dimension_request_is_a_plain_success(
+        world, kind, route, id_key, item_name):
+    create_answers(world, kind, StepElement(world, 77))
+    reply = mep_call(world, route, dict(_POINTS), [_named(item_name)])
+    assert reply.status == 200 and reply.data["status"] == "success"
+    assert reply.data["outcome"]["succeeded"] == [77] and reply.data["outcome"]["failed"] == []
+    assert reply.data[id_key] == 77
+
+
+MEP_ROLLBACK_ROWS = [
+    pytest.param("/create_duct/", dict(_POINTS), [_named("D")], "duct_id", id="duct"),
+    pytest.param("/create_pipe/", dict(_POINTS), [_named("P")], "pipe_id", id="pipe"),
+    pytest.param("/create_mep_system/",
+                 {"system_type": "mechanical", "system_name": "S", "element_ids": [1]},
+                 [], "system_id", id="mep_system"),
+]
+
+
+@pytest.mark.parametrize("route,body,items,id_key", MEP_ROLLBACK_ROWS)
+def test_a_rolled_back_duct_pipe_or_mep_system_is_a_409_with_nothing_succeeded(
+        world, route, body, items, id_key):
+    world.commit_status = "RolledBack"
+    reply = mep_call(world, route, body, items)
+    assert reply.status == 409 and reply.data["status"] == "rolled_back"
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == []
+    assert id_key not in reply.data
+
+
+class _Unassigned(object):
+    """An element with one connector that belongs to no system yet."""
+
+    def __init__(self, ident=1):
+        self.Id = types.SimpleNamespace(Value=ident)
+        self.ConnectorManager = types.SimpleNamespace(
+            Connectors=[types.SimpleNamespace(MEPSystem=None)])
+
+
+MEP_SYSTEM_BODY = {"system_type": "mechanical", "system_name": "S", "element_ids": [1]}
+
+
+def test_create_mep_system_that_yields_no_system_rolls_back_and_answers_422(world):
+    world.hooks[(None, "GetElement")] = lambda doc, eid: _Unassigned()
+    override_create(world, NewMechanicalSystem=lambda *args: None)
+    reply = mep_call(world, "/create_mep_system/", MEP_SYSTEM_BODY)
+    assert reply.status == 422
+    assert reply.data["status"] == "failed" and reply.data["error"]
+    outcome = reply.data["outcome"]
+    assert outcome["transaction_status"] == "RolledBack"
+    assert outcome["requested"] == 1 and outcome["succeeded"] == []
+    assert [entry["item"] for entry in outcome["failed"]] == ["system"]
+    assert outcome["failed"][0]["reason"].startswith("Revit created no mechanical system")
+    assert world.kinds("rollback") and world.kinds("commit") == []
+    assert "system_id" not in reply.data
+
+
+def test_create_mep_system_with_every_connector_assigned_is_still_a_500_with_an_outcome(world):
+    world.hooks[(None, "GetElement")] = lambda doc, eid: FakeElement(world, 1, with_system=False)
+    reply = mep_call(world, "/create_mep_system/", MEP_SYSTEM_BODY)
+    assert reply.status == 500 and "already assigned" in reply.data["error"]
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["requested"] == 1
+
+
+def renamed_system_world(world, name_param):
+    """The element already belongs to system 901, whose name parameter is ``name_param``."""
+    system = StepElement(world, 901, {"System Name": name_param})
+    member = types.SimpleNamespace(
+        Id=types.SimpleNamespace(Value=1),
+        ConnectorManager=types.SimpleNamespace(
+            Connectors=[types.SimpleNamespace(MEPSystem=system)]))
+    world.hooks[(None, "GetElement")] = lambda doc, eid: system if eid.Value == 901 else member
+
+
+def test_create_mep_system_rename_with_a_read_only_name_is_a_partial_naming_the_step(world):
+    renamed_system_world(world, StepParam(read_only=True))
+    reply = mep_call(world, "/create_mep_system/", MEP_SYSTEM_BODY)
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"]["succeeded"] == [901]
+    assert reply.data["outcome"]["failed"] == [
+        {"item": "system_name", "reason": "parameter is read-only"}]
+    assert reply.data["system_id"] == 901
+
+
+def test_create_mep_system_rename_with_a_writable_name_is_a_success_written_once(world):
+    name = StepParam()
+    renamed_system_world(world, name)
+    reply = mep_call(world, "/create_mep_system/", MEP_SYSTEM_BODY)
+    assert reply.status == 200 and reply.data["status"] == "success", reply.data
+    assert reply.data["outcome"]["succeeded"] == [901]
+    assert reply.data["outcome"]["failed"] == []
+    assert name.sets == ["S"]
+
+
+@pytest.mark.parametrize("name_param,status,failed", [
+    (StepParam(read_only=True), "partial", [{"item": "system_name",
+                                            "reason": "parameter is read-only"}]),
+    (StepParam(), "success", []),
+], ids=["read-only", "writable"])
+def test_a_newly_created_mep_system_reports_its_name_step(world, name_param, status, failed):
+    world.hooks[(None, "GetElement")] = lambda doc, eid: _Unassigned()
+    override_create(world, NewMechanicalSystem=lambda *args: StepElement(
+        world, 88, {"System Name": name_param}))
+    reply = mep_call(world, "/create_mep_system/", MEP_SYSTEM_BODY)
+    assert reply.status == 200 and reply.data["status"] == status, reply.data
+    assert reply.data["outcome"]["succeeded"] == [88]
+    assert reply.data["outcome"]["failed"] == failed
+    assert reply.data["system_id"] == 88

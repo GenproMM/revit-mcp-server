@@ -4,7 +4,11 @@ MEP Module for Revit MCP
 Handles duct, pipe, and MEP system creation
 """
 
-from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings, parse_request_data
+from .utils import (
+    get_element_name, get_element_id_value, make_element_id, suppress_warnings,
+    parse_request_data, commit_and_report, finalize_outcome, build_outcome,
+    exception_outcome, transaction_status_of,
+)
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
@@ -15,11 +19,36 @@ logger = logging.getLogger(__name__)
 MM_TO_FEET = 1.0 / 304.8
 
 
+def _set_step(failed, item, lookup, make_value):
+    """Run one secondary Set() step and record why it did not happen (D-12).
+
+    A step the request asked for must never vanish silently: a parameter that is
+    missing, read-only, raises on Set or answers False becomes a `failed` entry named
+    after the step, which turns the reply into a partial. The primary element (the duct,
+    the pipe, the system) is already in `succeeded` and stays there.
+    """
+    try:
+        param = lookup()
+        if not param:
+            failed.append({"item": item, "reason": "parameter not found"})
+        elif param.IsReadOnly:
+            failed.append({"item": item, "reason": "parameter is read-only"})
+        elif param.Set(make_value()) is False:
+            failed.append({"item": item, "reason": "Set() returned false"})
+    except Exception as step_err:
+        failed.append({"item": item, "reason": str(step_err)})
+
+
 def register_mep_routes(api):
     """Register all MEP routes with the API"""
 
     def _create_duct(doc, request):
         """Create a duct between two points."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -123,9 +152,10 @@ def register_mep_routes(api):
                     status=500,
                 )
 
+            requested = 1
             t = DB.Transaction(doc, "Create Duct via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 sys_type_id = target_system_type.Id if target_system_type else DB.ElementId.InvalidElementId
@@ -137,39 +167,43 @@ def register_mep_routes(api):
                     start,
                     end,
                 )
+                # Read the id while the element is valid; after a rollback it is not.
+                duct_id = get_element_id_value(duct)
+                succeeded.append(duct_id)
 
-                # Set diameter or dimensions if specified
+                # Set diameter or dimensions if specified; each is its own step (D-12)
                 diameter = data.get("diameter")
                 width = data.get("width")
                 height = data.get("height")
 
                 if diameter:
-                    d_param = duct.LookupParameter("Diameter")
-                    if d_param and not d_param.IsReadOnly:
-                        d_param.Set(float(diameter) * MM_TO_FEET)
+                    _set_step(failed, "diameter",
+                              lambda: duct.LookupParameter("Diameter"),
+                              lambda: float(diameter) * MM_TO_FEET)
 
                 if width:
-                    w_param = duct.LookupParameter("Width")
-                    if w_param and not w_param.IsReadOnly:
-                        w_param.Set(float(width) * MM_TO_FEET)
+                    _set_step(failed, "width",
+                              lambda: duct.LookupParameter("Width"),
+                              lambda: float(width) * MM_TO_FEET)
 
                 if height:
-                    h_param = duct.LookupParameter("Height")
-                    if h_param and not h_param.IsReadOnly:
-                        h_param.Set(float(height) * MM_TO_FEET)
+                    _set_step(failed, "height",
+                              lambda: duct.LookupParameter("Height"),
+                              lambda: float(height) * MM_TO_FEET)
 
-                t.Commit()
-
-                return routes.make_response(
-                    data={
-                        "status": "success",
-                        "duct_id": get_element_id_value(duct),
+                commit_result = commit_and_report(t, swallower)
+                reply = {}
+                if commit_result["committed"]:
+                    reply = {
+                        "duct_id": duct_id,
                         "system_type": get_element_name(target_system_type) if target_system_type else "None",
                         "duct_type": get_element_name(target_duct_type),
                         "level": get_element_name(target_level),
                         "message": "Created duct on level '{}'".format(get_element_name(target_level)),
                     }
-                )
+                payload, http = finalize_outcome(
+                    commit_result, reply, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -180,7 +214,9 @@ def register_mep_routes(api):
             logger.error("Failed to create duct: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/create_duct/", methods=["POST"])
@@ -195,6 +231,11 @@ def register_mep_routes(api):
 
     def _create_pipe(doc, request):
         """Create a pipe between two points."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -296,9 +337,10 @@ def register_mep_routes(api):
                     status=500,
                 )
 
+            requested = 1
             t = DB.Transaction(doc, "Create Pipe via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 sys_type_id = target_system_type.Id if target_system_type else DB.ElementId.InvalidElementId
@@ -310,26 +352,30 @@ def register_mep_routes(api):
                     start,
                     end,
                 )
+                # Read the id while the element is valid; after a rollback it is not.
+                pipe_id = get_element_id_value(pipe)
+                succeeded.append(pipe_id)
 
-                # Set diameter if specified
+                # Set diameter if specified; its own step (D-12)
                 diameter = data.get("diameter")
                 if diameter:
-                    d_param = pipe.LookupParameter("Diameter")
-                    if d_param and not d_param.IsReadOnly:
-                        d_param.Set(float(diameter) * MM_TO_FEET)
+                    _set_step(failed, "diameter",
+                              lambda: pipe.LookupParameter("Diameter"),
+                              lambda: float(diameter) * MM_TO_FEET)
 
-                t.Commit()
-
-                return routes.make_response(
-                    data={
-                        "status": "success",
-                        "pipe_id": get_element_id_value(pipe),
+                commit_result = commit_and_report(t, swallower)
+                reply = {}
+                if commit_result["committed"]:
+                    reply = {
+                        "pipe_id": pipe_id,
                         "system_type": get_element_name(target_system_type) if target_system_type else "None",
                         "pipe_type": get_element_name(target_pipe_type),
                         "level": get_element_name(target_level),
                         "message": "Created pipe on level '{}'".format(get_element_name(target_level)),
                     }
-                )
+                payload, http = finalize_outcome(
+                    commit_result, reply, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -340,7 +386,9 @@ def register_mep_routes(api):
             logger.error("Failed to create pipe: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/create_pipe/", methods=["POST"])
@@ -355,6 +403,11 @@ def register_mep_routes(api):
 
     def _create_mep_system(doc, request):
         """Create a mechanical or piping system."""
+        # Hoisted so the 500 reply can say what really happened (D-14).
+        t = None
+        requested = None
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -397,9 +450,10 @@ def register_mep_routes(api):
                             status=404,
                         )
 
+            requested = 1
             t = DB.Transaction(doc, "Create MEP System via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 new_system = None
@@ -436,11 +490,12 @@ def register_mep_routes(api):
                     sys_id = list(existing_systems)[0]
                     new_system = doc.GetElement(make_element_id(sys_id))
                     if new_system:
-                        name_param = new_system.LookupParameter("System Name")
-                        if not name_param:
-                            name_param = new_system.LookupParameter("Comments")
-                        if name_param and not name_param.IsReadOnly:
-                            name_param.Set(system_name)
+                        renamed = new_system
+                        _set_step(
+                            failed, "system_name",
+                            lambda: (renamed.LookupParameter("System Name")
+                                     or renamed.LookupParameter("Comments")),
+                            lambda: system_name)
                 else:
                     # Try to create a new system with unused connectors
                     first_connector = None
@@ -477,34 +532,55 @@ def register_mep_routes(api):
                         return routes.make_response(
                             data={
                                 "error": "All connectors are already assigned to systems and could not be renamed.",
+                                "outcome": exception_outcome(t, requested, succeeded, failed),
                             },
                             status=500,
                         )
 
-                # Set system name
-                if new_system:
-                    name_param = new_system.LookupParameter("System Name")
-                    if name_param and not name_param.IsReadOnly:
-                        name_param.Set(system_name)
+                    # Name the system Revit just created (the rename branch above
+                    # already ran its own name step).
+                    if new_system:
+                        created = new_system
+                        _set_step(
+                            failed, "system_name",
+                            lambda: created.LookupParameter("System Name"),
+                            lambda: system_name)
 
-                t.Commit()
-
-                if new_system:
+                if not new_system:
+                    # Nothing to group: undo instead of committing an empty
+                    # transaction, and say so (D-15).
+                    t.RollBack()
+                    reason = "Revit created no {} system from the given elements".format(system_type)
                     return routes.make_response(
                         data={
-                            "status": "success",
-                            "system_id": get_element_id_value(new_system),
-                            "system_name": system_name,
-                            "system_type": system_type,
-                            "element_count": len(element_ids),
-                            "message": "Created {} system '{}'".format(system_type, system_name),
-                        }
+                            "status": "failed",
+                            "error": reason,
+                            "message": reason,
+                            "outcome": build_outcome(
+                                transaction_status_of(t), requested, [],
+                                [{"item": "system", "reason": reason}],
+                                list(swallower.failures) if swallower is not None else []),
+                        },
+                        status=422,
                     )
-                else:
-                    return routes.make_response(
-                        data={"error": "Failed to create {} system".format(system_type)},
-                        status=500,
-                    )
+
+                # Read the id while the element is valid; after a rollback it is not.
+                system_id = get_element_id_value(new_system)
+                succeeded.append(system_id)
+
+                commit_result = commit_and_report(t, swallower)
+                reply = {}
+                if commit_result["committed"]:
+                    reply = {
+                        "system_id": system_id,
+                        "system_name": system_name,
+                        "system_type": system_type,
+                        "element_count": len(element_ids),
+                        "message": "Created {} system '{}'".format(system_type, system_name),
+                    }
+                payload, http = finalize_outcome(
+                    commit_result, reply, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -515,7 +591,9 @@ def register_mep_routes(api):
             logger.error("Failed to create MEP system: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/create_mep_system/", methods=["POST"])

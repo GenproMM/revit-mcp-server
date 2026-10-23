@@ -200,6 +200,12 @@ class World(object):
         self.attr_overrides = {}
         self.transactions = []
         self.collector_items = []
+        # (category object, "types" | "instances" | None) -> collector factories; a query
+        # not listed here answers collector_items.
+        self.results = {}
+        self.create_methods = {}
+        self.elements = {}
+        self.refless = set()
         self.commit_status = "Committed"
         self.break_start = set()
         self.db = None
@@ -303,22 +309,36 @@ def make_db(world):
             world.record("collector", doc)
             if world.explode:
                 raise RuntimeError("collector could not be created")
+            self._category = None
+            self._kind = None
 
         def _items(self):
-            return [make(world) for make in world.collector_items]
+            factories = world.results.get((self._category, self._kind), world.collector_items)
+            return [make(world) for make in factories]
+
+        def _narrow(self, **fields):
+            for key, value in fields.items():
+                setattr(self, key, value)
+            return self
 
         def __getattr__(self, name):
             if name.startswith("_"):
                 raise AttributeError(name)
             if name == "ToElements":
                 return lambda: _Elements(self._items())
+            if name == "OfCategory":
+                return lambda category: self._narrow(_category=category)
+            if name == "OfClass":
+                return lambda cls: self._narrow(_kind="types")
+            if name == "WhereElementIsNotElementType":
+                return lambda: self._narrow(_kind="instances")
             return lambda *args, **kwargs: self
 
         def __iter__(self):
             return iter(self._items())
 
         def __len__(self):
-            return len(world.collector_items)
+            return len(self._items())
 
         def __getitem__(self, index):
             return self._items()[index]
@@ -339,6 +359,7 @@ def make_db(world):
     # Assigned once, so what a route compares against is the same object on every access
     # (a fresh _DB.__getattr__ mock per access would never equal the Commit result).
     db.TransactionStatus = types.SimpleNamespace(Committed="Committed", RolledBack="RolledBack")
+    db.BuiltInCategory = MagicMock(name="DB.BuiltInCategory")
     return db
 
 
@@ -390,6 +411,7 @@ def world(monkeypatch):
     collections_mod.Generic = generic
     system = types.ModuleType("System")
     system.Collections = collections_mod
+    system.Int64 = int  # make_element_id builds DB.ElementId(System.Int64(n))
     monkeypatch.setitem(sys.modules, "System", system)
     monkeypatch.setitem(sys.modules, "System.Collections", collections_mod)
     monkeypatch.setitem(sys.modules, "System.Collections.Generic", generic)
@@ -516,23 +538,130 @@ _WALL = {"element_type": "wall", "start_point": {"x": 0, "y": 0}, "end_point": {
 _FLOOR = {"element_type": "floor",
           "boundary": [{"x": 0, "y": 0}, {"x": 1000, "y": 0}, {"x": 1000, "y": 1000}]}
 
+
+
+def override_create(world, **methods):
+    """Make ``doc.Create`` answer a configured object; methods accumulate across calls."""
+    world.create_methods.update(methods)
+    create = MagicMock(name="Create")
+    for name, fn in world.create_methods.items():
+        getattr(create, name).side_effect = fn
+    world.attr_overrides["Create"] = create
+    return create
+
+
+class FakeCurve(object):
+    def __init__(self, x):
+        self.x = x
+
+    def Evaluate(self, parameter, normalized):
+        return XYZ(self.x, 0.0, 0.0)
+
+
+class FakeWall(object):
+    """An element GetElement or a collector answers for the annotation routes: a wall
+    with a location curve and, unless told otherwise, a geometry reference."""
+
+    def __init__(self, ident, x=0.0, located=True, reference=True):
+        self.Id = types.SimpleNamespace(Value=ident)
+        self.Category = None
+        self.Location = types.SimpleNamespace(Curve=FakeCurve(x)) if located else None
+        self._reference = reference
+
+    def GetReferenceByName(self, name):
+        return types.SimpleNamespace(tag="reference") if self._reference else None
+
+    def get_Geometry(self, options):
+        return []
+
+
+def _wall(ident, **kwargs):
+    return lambda world: FakeWall(ident, **kwargs)
+
+
+def _tag(target):
+    """An existing wall tag that points at the wall with id ``target``."""
+    return lambda world: types.SimpleNamespace(
+        Id=types.SimpleNamespace(Value=700 + target),
+        TaggedLocalElementId=types.SimpleNamespace(Value=target))
+
+
+class FakeView(object):
+    Id = types.SimpleNamespace(Value=5)
+    Name = "Plan A"
+    IsTemplate = False
+    ViewType = "FloorPlan"
+
+
+class _RefArray(object):
+    def __init__(self):
+        self.items = []
+
+    def Append(self, ref):
+        self.items.append(ref)
+
+    @property
+    def Size(self):
+        return len(self.items)
+
+
+class DimensionCreated(Created):
+    ValueString = "1000 mm"
+
+
+class DetailCurve(Created):
+    """A created detail curve whose LineStyle assignment can be made to fail."""
+
+    def __init__(self, ident, style_raises=None):
+        Created.__init__(self, ident)
+        self._style_raises = style_raises
+        self.style = None
+
+    def GetLineStyleIds(self):
+        return []
+
+    @property
+    def LineStyle(self):
+        return self.style
+
+    @LineStyle.setter
+    def LineStyle(self, value):
+        if self._style_raises is not None:
+            raise self._style_raises
+        self.style = value
+
+
+class _SubCategory(object):
+    def __init__(self, name):
+        self.Name = name
+
+    def GetGraphicsStyle(self, kind):
+        return types.SimpleNamespace(Id=types.SimpleNamespace(Value=7001))
+
+
+def line_styles(world, *names):
+    """doc.Settings.Categories answers an Lines category with the given sub-categories."""
+    line_category = types.SimpleNamespace(SubCategories=[_SubCategory(n) for n in names])
+    world.attr_overrides["Settings"] = types.SimpleNamespace(
+        Categories=types.SimpleNamespace(get_Item=lambda category: line_category))
+
+
 # Routes that open a transaction on the document and reach a real HTTP 200:
 # (collector items the route finds, body). Plan 04-07 adds the colour routes.
 TRANSACTING = {
     ("building", "/create_line/"): ([_named("L1")], {"elements": [dict(_WALL)]}),
     ("building", "/create_surface/"): ([_named("L1")], {"elements": [dict(_FLOOR)]}),
     ("building", "/create_level/"): ([], {"levels": [{"elevation": 3000, "name": "L1"}]}),
+    ("annotation", "/create_dimensions/"): ([], {"element_ids": [1, 2]}),
+    ("annotation", "/tag_walls/"): (
+        {("OST_WallTags", "types"): [_named("Wall Tag")],
+         ("OST_Walls", "instances"): [_wall(31, x=0.0)],
+         ("OST_WallTags", "instances"): []},
+        {}),
+    ("detail", "/create_detail_line/"): (
+        [], {"start_point": {"x": 0, "y": 0, "z": 0}, "end_point": {"x": 1000, "y": 0, "z": 0}}),
 }
 TRANSACTING_IDS = ["{}:{}".format(module, route) for module, route in TRANSACTING]
-
-
-def override_create(world, **methods):
-    """Make ``doc.Create`` answer a configured object."""
-    create = MagicMock(name="Create")
-    for name, fn in methods.items():
-        getattr(create, name).side_effect = fn
-    world.attr_overrides["Create"] = create
-    return create
 
 
 def arm(world, items=()):
@@ -540,14 +669,45 @@ def arm(world, items=()):
 
     Every DB attribute a route compares or calls is assigned once here: the fake DB hands
     out a fresh MagicMock on each access of an unassigned name."""
-    world.collector_items = list(items)
+    if isinstance(items, dict):
+        world.collector_items = []
+        world.results = dict(
+            ((getattr(world.db.BuiltInCategory, category), kind), list(factories))
+            for (category, kind), factories in items.items())
+    else:
+        world.collector_items = list(items)
     ids = itertools.count(61)
     world.db.XYZ = XYZ
     world.db.Line = MagicMock(name="DB.Line")
     world.db.Wall = types.SimpleNamespace(Create=lambda *args: Created(next(ids)))
     world.db.Floor = types.SimpleNamespace(Create=lambda *args: Created(next(ids)))
     world.db.Level = types.SimpleNamespace(Create=lambda *args: Created(next(ids)))
-    override_create(world, NewFootPrintRoof=lambda *args: Created(next(ids)))
+    override_create(world,
+                    NewFootPrintRoof=lambda *args: Created(next(ids)),
+                    NewDimension=lambda *args: DimensionCreated(81),
+                    NewDetailCurve=lambda *args: DetailCurve(91))
+    # Annotation routes: a plan view to work in, ids that carry their value, elements that
+    # can be dimensioned, a tag-capable factory and line styles.
+    world.attr_overrides["ActiveView"] = FakeView()
+    world.db.ViewType = types.SimpleNamespace(
+        FloorPlan="FloorPlan", CeilingPlan="CeilingPlan", Section="Section",
+        Elevation="Elevation", Detail="Detail", EngineeringPlan="EngineeringPlan",
+        AreaPlan="AreaPlan", DraftingView="DraftingView")
+    world.db.ReferenceArray = _RefArray
+    world.db.ElementId = MagicMock(
+        name="DB.ElementId", side_effect=lambda value: types.SimpleNamespace(Value=int(value)))
+    world.db.IndependentTag = types.SimpleNamespace(
+        Create=lambda *args: Created(900 + next(ids)))
+    line_styles(world, "Thin Lines", "Wide Lines")
+
+    def get_element(doc, eid):
+        value = getattr(eid, "Value", None)
+        if value in world.elements:
+            return world.elements[value]
+        return FakeWall(value if isinstance(value, int) else 1, x=float(value or 0) * 10.0,
+                        reference=value not in world.refless)
+
+    world.hooks[(None, "GetElement")] = get_element
 
 
 def reach(world, key):
@@ -1018,3 +1178,181 @@ def test_a_rolled_back_building_route_never_claims_what_it_created(world, route,
     assert reply.data["outcome"]["succeeded"] == []
     assert reply.data["outcome"]["requested"] == 1
     assert "created" not in reply.data and "count" not in reply.data
+
+
+# ------------------------------------------------- honest outcomes (plan 04-03, Task 2)
+
+TAG_WALLS = ("annotation", "/tag_walls/")
+DIMENSIONS = ("annotation", "/create_dimensions/")
+DETAIL_LINE = ("detail", "/create_detail_line/")
+_WALL_TAGS_TYPES = ("OST_WallTags", "types")
+_WALLS = ("OST_Walls", "instances")
+_WALL_TAGS_PLACED = ("OST_WallTags", "instances")
+NO_CURVE = "Wall has no location curve to anchor a tag"
+
+
+def tag_walls_world(world, walls, existing=()):
+    world.results = {}
+    arm(world, {_WALL_TAGS_TYPES: [_named("Wall Tag")], _WALLS: walls,
+                _WALL_TAGS_PLACED: list(existing)})
+    world.open("Only", "C:/Models/Only.rvt", active=True)
+    world.tokens()
+
+
+def tag_walls_call(world, walls, existing=()):
+    tag_walls_world(world, walls, existing)
+    return call(world, handler_of(world, *TAG_WALLS), {})
+
+
+def test_tag_walls_with_a_tagged_a_taggable_and_a_curveless_wall_is_a_partial(world):
+    reply = tag_walls_call(
+        world, [_wall(31), _wall(32, x=10.0), _wall(33, located=False)], existing=[_tag(31)])
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    outcome = reply.data["outcome"]
+    assert outcome["requested"] == 2
+    assert outcome["succeeded"] == [32]
+    assert outcome["failed"] == [{"item": 33, "reason": NO_CURVE}]
+    assert reply.data["walls_already_tagged"] == 1 and reply.data["tags_placed"] == 1
+    assert reply.data["walls_total"] == 3
+    assert reply.data["skipped"] == [{"wall_id": 33, "reason": NO_CURVE}]
+    text = format_response(without_attribution(reply.data))
+    assert "=== PARTIAL SUCCESS ===" in text and NO_CURVE in text
+
+
+def test_tag_walls_where_every_attempted_wall_fails_is_a_422(world):
+    reply = tag_walls_call(world, [_wall(33, located=False), _wall(34, located=False)])
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    outcome = reply.data["outcome"]
+    assert outcome["requested"] == 2 and outcome["succeeded"] == []
+    assert [entry["item"] for entry in outcome["failed"]] == [33, 34]
+    assert reply.data["tags_placed"] == 0
+
+
+def test_tag_walls_where_every_wall_is_already_tagged_is_a_plain_success_of_nothing(world):
+    reply = tag_walls_call(world, [_wall(31), _wall(32)], existing=[_tag(31), _tag(32)])
+    assert reply.status == 200 and reply.data["status"] == "success", reply.data
+    assert reply.data["outcome"]["requested"] == 0
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["outcome"]["failed"] == []
+    assert reply.data["walls_already_tagged"] == 2 and reply.data["tags_placed"] == 0
+
+
+def test_tag_walls_whose_tag_cannot_be_created_names_the_wall_and_the_reason(world):
+    tag_walls_world(world, [_wall(31), _wall(32)])
+
+    def create(*args):
+        if not hasattr(create, "done"):
+            create.done = True
+            raise RuntimeError("view is locked")
+        return Created(950)
+
+    world.db.IndependentTag = types.SimpleNamespace(Create=create)
+    reply = call(world, handler_of(world, *TAG_WALLS), {})
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"]["failed"] == [{"item": 31, "reason": "view is locked"}]
+    assert reply.data["outcome"]["succeeded"] == [32]
+
+
+def dimensions_call(world, body, refless=()):
+    reach(world, DIMENSIONS)
+    world.refless = set(refless)
+    return call(world, handler_of(world, *DIMENSIONS), body)
+
+
+def test_create_dimensions_with_two_referenced_elements_is_a_success_naming_the_dimension(world):
+    reply = dimensions_call(world, {"element_ids": [1, 2]})
+    assert reply.status == 200 and reply.data["status"] == "success", reply.data
+    assert reply.data["outcome"]["requested"] == 1
+    assert reply.data["outcome"]["succeeded"] == [81] and reply.data["outcome"]["failed"] == []
+    assert reply.data["count"] == 1 and reply.data["created"][0]["id"] == 81
+
+
+def test_create_dimensions_when_revit_makes_no_dimension_is_a_422_naming_the_step(world):
+    reach(world, DIMENSIONS)
+    override_create(world, NewDimension=lambda *args: None)
+    reply = call(world, handler_of(world, *DIMENSIONS), {"element_ids": [1, 2]})
+    assert reply.status == 422 and reply.data["status"] == "failed" and reply.data["error"]
+    assert reply.data["outcome"]["succeeded"] == []
+    assert reply.data["outcome"]["failed"] == [
+        {"item": "dimension", "reason": "NewDimension returned no dimension"}]
+    assert reply.data["count"] == 0
+
+
+def test_create_dimensions_with_one_element_that_yields_no_reference_is_a_partial(world):
+    reply = dimensions_call(world, {"element_ids": [1, 2, 3]}, refless=[2])
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"]["succeeded"] == [81]
+    assert [entry["item"] for entry in reply.data["outcome"]["failed"]] == [2]
+    assert reply.data["outcome"]["failed"][0]["reason"].startswith("no geometry reference")
+    assert reply.data["count"] == 1
+
+
+def test_create_dimensions_with_fewer_than_two_references_is_still_a_400_before_any_transaction(world):
+    reply = dimensions_call(world, {"element_ids": [1, 2]}, refless=[2])
+    assert reply.status == 400 and "outcome" not in reply.data
+    assert world.kinds("transaction") == []
+
+
+def detail_call(world, body=None):
+    reach(world, DETAIL_LINE)
+    row = TRANSACTING[DETAIL_LINE][1]
+    return call(world, handler_of(world, *DETAIL_LINE), dict(row, **(body or {})))
+
+
+def test_create_detail_line_with_a_missing_line_style_is_a_partial_naming_the_style(world):
+    reply = detail_call(world, {"line_style": "Missing"})
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"] == {
+        "transaction_status": "Committed",
+        "requested": 1,
+        "succeeded": [91],
+        "failed": [{"item": "line_style", "reason": "line style 'Missing' not found"}],
+        "revit_failures": [],
+    }
+    assert reply.data["line_id"] == 91 and reply.data["view_name"] == "Plan A"
+
+
+def test_create_detail_line_with_a_known_line_style_is_a_success(world):
+    reply = detail_call(world, {"line_style": "Wide Lines"})
+    assert reply.status == 200 and reply.data["status"] == "success", reply.data
+    assert reply.data["outcome"]["failed"] == []
+
+
+def test_create_detail_line_without_a_line_style_is_a_success(world):
+    reply = detail_call(world)
+    assert reply.status == 200 and reply.data["status"] == "success", reply.data
+    assert sorted(without_attribution(reply.data)) == [
+        "line_id", "message", "outcome", "status", "view_name"]
+
+
+def test_create_detail_line_whose_style_cannot_be_applied_reports_the_reason(world):
+    reach(world, DETAIL_LINE)
+    override_create(world, NewDetailCurve=lambda *args: DetailCurve(
+        92, style_raises=RuntimeError("style is locked")))
+    row = TRANSACTING[DETAIL_LINE][1]
+    reply = call(world, handler_of(world, *DETAIL_LINE), dict(row, line_style="Wide Lines"))
+    assert reply.status == 200 and reply.data["status"] == "partial", reply.data
+    assert reply.data["outcome"]["succeeded"] == [92]
+    assert reply.data["outcome"]["failed"] == [{"item": "line_style", "reason": "style is locked"}]
+
+
+def test_create_detail_line_that_yields_no_curve_keeps_its_rollback_and_500_and_gains_an_outcome(world):
+    reach(world, DETAIL_LINE)
+    override_create(world, NewDetailCurve=lambda *args: None)
+    row = TRANSACTING[DETAIL_LINE][1]
+    reply = call(world, handler_of(world, *DETAIL_LINE), dict(row))
+    assert reply.status == 500 and reply.data["error"] == "Failed to create detail line"
+    assert world.kinds("rollback") and world.kinds("commit") == []
+    assert reply.data["outcome"]["transaction_status"] == "RolledBack"
+    assert reply.data["outcome"]["succeeded"] == [] and reply.data["outcome"]["requested"] == 1
+
+
+@pytest.mark.parametrize("key", [DIMENSIONS, TAG_WALLS, DETAIL_LINE],
+                         ids=["create_dimensions", "tag_walls", "create_detail_line"])
+def test_a_rolled_back_annotation_route_never_claims_what_it_created(world, key):
+    body = reach(world, key)
+    world.commit_status = "RolledBack"
+    reply = call(world, handler_of(world, *key), body)
+    assert reply.status == 409 and reply.data["status"] == "rolled_back", reply.data
+    assert reply.data["outcome"]["succeeded"] == []
+    for legacy in ("created", "count", "tags_placed", "line_id", "walls_total"):
+        assert legacy not in reply.data

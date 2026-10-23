@@ -4,7 +4,10 @@ Annotation Module for Revit MCP
 Handles dimensions and wall tagging
 """
 
-from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings, parse_request_data
+from .utils import (
+    get_element_name, get_element_id_value, make_element_id, suppress_warnings,
+    parse_request_data, commit_and_report, finalize_outcome, exception_outcome,
+)
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
@@ -20,6 +23,12 @@ def register_annotation_routes(api):
 
     def _create_dimensions(doc, request):
         """Create dimension annotations in the current view (runs on the guarded document)."""
+        # Hoisted so the 500 reply can say what really happened (D-14). One dimension is
+        # requested per call, however many elements it spans.
+        t = None
+        requested = 1
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -78,7 +87,10 @@ def register_annotation_routes(api):
                         status=404,
                     )
 
-                # Try to get a reference from the element
+                # Try to get a reference from the element. An element that adds none is
+                # a failed input (TRUTH-01), not a silent skip.
+                refs_before = ref_array.Size
+                no_reference = "no geometry reference found"
                 try:
                     # For walls, get the location line reference
                     if hasattr(elem, "Location") and elem.Location:
@@ -116,6 +128,10 @@ def register_annotation_routes(api):
                     logger.warning("Could not get reference for element {}: {}".format(
                         eid, str(ref_err)
                     ))
+                    no_reference = "no geometry reference: {}".format(str(ref_err))
+
+                if ref_array.Size == refs_before:
+                    failed.append({"item": eid, "reason": no_reference})
 
             if ref_array.Size < 2:
                 return routes.make_response(
@@ -125,7 +141,7 @@ def register_annotation_routes(api):
 
             t = DB.Transaction(doc, "Create Dimensions via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 created = []
@@ -174,27 +190,34 @@ def register_annotation_routes(api):
                     except Exception:
                         pass
 
+                    # Read the id while the element is valid; after a rollback it is not.
+                    dim_id = get_element_id_value(dim)
                     created.append({
-                        "id": get_element_id_value(dim),
+                        "id": dim_id,
                         "elements_dimensioned": element_ids,
                         "value": dim_value or "N/A",
                     })
+                    succeeded.append(dim_id)
+                else:
+                    failed.append({"item": "dimension",
+                                   "reason": "NewDimension returned no dimension"})
 
-                t.Commit()
+                commit_result = commit_and_report(t, swallower)
 
                 message = "Created {} dimension annotation{} in the current view".format(
                     len(created),
                     "s" if len(created) != 1 else ""
                 )
 
-                return routes.make_response(
-                    data={
-                        "status": "success",
+                payload, http = finalize_outcome(
+                    commit_result,
+                    {
                         "created": created,
                         "count": len(created),
                         "message": message,
-                    }
-                )
+                    },
+                    requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -205,7 +228,9 @@ def register_annotation_routes(api):
             logger.error("Failed to create dimensions: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/create_dimensions/", methods=["POST"])
@@ -220,6 +245,12 @@ def register_annotation_routes(api):
 
     def _tag_walls(doc, request):
         """Tag all untagged walls in the current view (runs on the guarded document)."""
+        # Hoisted so the 500 reply can say what really happened (D-14). `requested` counts
+        # the walls the route attempts: walls that already carry a tag are not attempted.
+        t = None
+        requested = 0
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -299,12 +330,18 @@ def register_annotation_routes(api):
 
             t = DB.Transaction(doc, "Tag Walls via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 tags_placed = 0
                 walls_already_tagged = 0
                 skipped = []
+
+                def skip(wall_id, reason):
+                    # One reason text, two shapes: the legacy `skipped` entry and the
+                    # D-03 outcome.failed entry.
+                    skipped.append({"wall_id": wall_id, "reason": reason})
+                    failed.append({"item": wall_id, "reason": reason})
 
                 # Activate tag symbol
                 if not target_tag.IsActive:
@@ -316,15 +353,13 @@ def register_annotation_routes(api):
                     if wall_id_val in tagged_wall_ids:
                         walls_already_tagged += 1
                         continue
+                    requested += 1
 
                     # Get wall midpoint for tag placement
                     try:
                         loc = wall.Location
                         if not loc or not hasattr(loc, "Curve"):
-                            skipped.append({
-                                "wall_id": wall_id_val,
-                                "reason": "Wall has no location curve to anchor a tag",
-                            })
+                            skip(wall_id_val, "Wall has no location curve to anchor a tag")
                             continue
 
                         curve = loc.Curve
@@ -344,11 +379,9 @@ def register_annotation_routes(api):
 
                         if tag:
                             tags_placed += 1
+                            succeeded.append(wall_id_val)
                         else:
-                            skipped.append({
-                                "wall_id": wall_id_val,
-                                "reason": "IndependentTag.Create returned no tag",
-                            })
+                            skip(wall_id_val, "IndependentTag.Create returned no tag")
                     except Exception as tag_err:
                         # Surface the reason instead of silently swallowing it —
                         # an opaque "tagged 0 walls" is undebuggable for users.
@@ -356,10 +389,10 @@ def register_annotation_routes(api):
                         logger.warning("Could not tag wall {}: {}".format(
                             wall_id_val, reason
                         ))
-                        skipped.append({"wall_id": wall_id_val, "reason": reason})
+                        skip(wall_id_val, reason)
                         continue
 
-                t.Commit()
+                commit_result = commit_and_report(t, swallower)
 
                 walls_total = len(walls)
                 message = "Tagged {} wall{} ({} already tagged, {} failed, {} total in view)".format(
@@ -371,7 +404,6 @@ def register_annotation_routes(api):
                 )
 
                 response_data = {
-                    "status": "success",
                     "tags_placed": tags_placed,
                     "walls_already_tagged": walls_already_tagged,
                     "walls_total": walls_total,
@@ -380,7 +412,9 @@ def register_annotation_routes(api):
                 if skipped:
                     response_data["skipped"] = skipped
 
-                return routes.make_response(data=response_data)
+                payload, http = finalize_outcome(
+                    commit_result, response_data, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -391,7 +425,9 @@ def register_annotation_routes(api):
             logger.error("Failed to tag walls: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/tag_walls/", methods=["POST"])

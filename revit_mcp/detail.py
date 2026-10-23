@@ -4,7 +4,10 @@ Detail Module for Revit MCP
 Handles detail line creation for view-specific annotation
 """
 
-from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data
+from .utils import (
+    get_element_name, get_element_id_value, suppress_warnings, parse_request_data,
+    commit_and_report, finalize_outcome, exception_outcome,
+)
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
@@ -20,6 +23,12 @@ def register_detail_routes(api):
 
     def _create_detail_line(doc, request):
         """Create a detail line in a view (runs on the guarded document)."""
+        # Hoisted so the 500 reply can say what really happened (D-14). One line is
+        # requested per call.
+        t = None
+        requested = 1
+        succeeded = []
+        failed = []
         try:
             if not doc:
                 return routes.make_response(
@@ -69,7 +78,8 @@ def register_detail_routes(api):
                 ]
                 if vt not in allowed_types:
                     return routes.make_response(
-                        data={"error": "Cannot create detail line — the specified view is not a plan or detail view."},
+                        data={"error": "Cannot create detail line — the specified view is not a plan or detail view.",
+                              "outcome": exception_outcome(t, requested, succeeded, failed)},
                         status=500,
                     )
             except Exception:
@@ -90,7 +100,7 @@ def register_detail_routes(api):
 
             t = DB.Transaction(doc, "Create Detail Line via MCP")
             t.Start()
-            suppress_warnings(t)
+            swallower = suppress_warnings(t)
 
             try:
                 detail_curve = doc.Create.NewDetailCurve(target_view, line)
@@ -98,9 +108,15 @@ def register_detail_routes(api):
                 if not detail_curve:
                     t.RollBack()
                     return routes.make_response(
-                        data={"error": "Failed to create detail line"},
+                        data={"error": "Failed to create detail line",
+                              "outcome": exception_outcome(t, requested, succeeded, failed)},
                         status=500,
                     )
+
+                # Read while the element is valid; after a rollback it is not. From here
+                # on the line exists, so a style problem is a failed step, not a failed line.
+                line_id = get_element_id_value(detail_curve)
+                succeeded.append(line_id)
 
                 # Set line style if specified
                 line_style = data.get("line_style")
@@ -115,28 +131,39 @@ def register_detail_routes(api):
                         except Exception:
                             pass
 
+                        style_applied = False
                         if line_cat:
                             for sub_cat in line_cat.SubCategories:
                                 if get_element_name(sub_cat) == line_style:
                                     # Get the GraphicsStyle for this category
                                     gs_id = sub_cat.GetGraphicsStyle(DB.GraphicsStyleType.Projection).Id
                                     detail_curve.LineStyle = doc.GetElement(gs_id)
+                                    style_applied = True
                                     break
+                        if not style_applied:
+                            failed.append({
+                                "item": "line_style",
+                                "reason": "line style '{}' not found".format(line_style),
+                            })
                     except Exception as style_err:
                         logger.debug("Could not set line style: {}".format(str(style_err)))
+                        failed.append({"item": "line_style", "reason": str(style_err)})
 
-                t.Commit()
+                commit_result = commit_and_report(t, swallower)
 
-                actual_view_name = get_element_name(target_view)
-
-                return routes.make_response(
-                    data={
-                        "status": "success",
-                        "line_id": get_element_id_value(detail_curve),
+                # Read only after the committed check: after a rollback the view and the
+                # line are not safe to touch (Pitfall 2).
+                data = {}
+                if commit_result["committed"]:
+                    actual_view_name = get_element_name(target_view)
+                    data = {
+                        "line_id": line_id,
                         "view_name": actual_view_name,
                         "message": "Created detail line in view '{}'".format(actual_view_name),
                     }
-                )
+                payload, http = finalize_outcome(
+                    commit_result, data, requested, succeeded, failed)
+                return routes.make_response(data=payload, status=http)
 
             except Exception as tx_error:
                 if t.HasStarted() and not t.HasEnded():
@@ -147,7 +174,9 @@ def register_detail_routes(api):
             logger.error("Failed to create detail line: {}".format(str(e)))
             error_trace = traceback.format_exc()
             return routes.make_response(
-                data={"error": str(e), "traceback": error_trace}, status=500
+                data={"error": str(e), "traceback": error_trace,
+                      "outcome": exception_outcome(t, requested, succeeded, failed)},
+                status=500
             )
 
     @api.route("/create_detail_line/", methods=["POST"])

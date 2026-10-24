@@ -374,6 +374,88 @@ def test_main_writes_a_manifest_the_reader_accepts(tree, make_manifest, capsys):
     assert not os.path.exists(os.path.join(repo, "_manifest.json"))
 
 
+# ------------------------------------------------------------- --check (plan 05-08)
+
+
+def _snapshot(root):
+    """{relative path: (size, mtime_ns)} of every file under root, plus the directories."""
+    seen = {}
+    for folder, dirs, names in os.walk(root):
+        for name in dirs:
+            seen[os.path.relpath(os.path.join(folder, name), root) + os.sep] = None
+        for name in names:
+            path = os.path.join(folder, name)
+            stat = os.stat(path)
+            seen[os.path.relpath(path, root)] = (stat.st_size, stat.st_mtime_ns)
+    return seen
+
+
+@needs_git
+def test_check_verified_match_prints_state_and_returns_zero(tree, make_manifest, capsys):
+    repo, dest = tree
+    assert make_manifest.main(["--repo", repo, "--dest", dest]) == 0
+    capsys.readouterr()
+    assert make_manifest.main(["--check", "--dest", dest]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0].startswith("INTEGRITY verified_match")
+
+
+@needs_git
+def test_check_mismatch_names_modified_and_unexpected_files(tree, make_manifest, capsys):
+    repo, dest = tree
+    assert make_manifest.main(["--repo", repo, "--dest", dest]) == 0
+    capsys.readouterr()
+    _write(dest, "revit_mcp/beta.py", u"# changed after the manifest\n")
+    _write(dest, "revit_mcp/_zz.py", u"x = 1\n")
+    assert make_manifest.main(["--check", "--dest", dest]) == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("INTEGRITY verified_mismatch")
+    assert "MODIFIED revit_mcp/beta.py" in lines
+    assert "UNEXPECTED revit_mcp/_zz.py" in lines
+
+
+@needs_git
+def test_check_missing_file_is_reported_as_missing(tree, make_manifest, capsys):
+    repo, dest = tree
+    assert make_manifest.main(["--repo", repo, "--dest", dest]) == 0
+    capsys.readouterr()
+    os.remove(os.path.join(dest, "revit_mcp", "beta.py"))
+    assert make_manifest.main(["--check", "--dest", dest]) == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("INTEGRITY verified_mismatch")
+    assert "MISSING revit_mcp/beta.py" in lines
+
+
+@needs_git
+def test_check_without_a_manifest_is_unverifiable_and_fails(tree, make_manifest, capsys):
+    _, dest = tree
+    assert make_manifest.main(["--check", "--dest", dest]) == 1
+    assert capsys.readouterr().out.splitlines()[0] == "INTEGRITY unverifiable manifest_missing"
+
+
+@needs_git
+def test_check_writes_nothing(tree, make_manifest, capsys):
+    repo, dest = tree
+    assert make_manifest.main(["--repo", repo, "--dest", dest]) == 0
+    _write(dest, "revit_mcp/_zz.py", u"x = 1\n")
+    before = _snapshot(dest)
+    repo_before = _snapshot(repo)
+    assert make_manifest.main(["--check", "--dest", dest]) == 1
+    assert make_manifest.main(["--check", "--repo", repo, "--dest", repo]) == 1
+    assert _snapshot(dest) == before
+    assert _snapshot(repo) == repo_before
+
+
+@needs_git
+def test_check_ignores_the_repo_argument(tree, make_manifest, tmp_path, capsys):
+    repo, dest = tree
+    assert make_manifest.main(["--repo", repo, "--dest", dest]) == 0
+    capsys.readouterr()
+    nowhere = str(tmp_path / "not-a-repo")
+    assert make_manifest.main(["--check", "--repo", nowhere, "--dest", dest]) == 0
+    assert capsys.readouterr().out.startswith("INTEGRITY verified_match")
+
+
 # ------------------------------------------------------------- grammar
 
 

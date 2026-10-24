@@ -427,9 +427,14 @@ def test_publish_order_lines_strictly_increasing():
         ("config", lambda ln: ln.startswith('call "%~dp0config.cmd"')),
         ("find-python", lambda ln: ln.startswith('call "%~dp0find-python.cmd"')),
         ("pyexe guard", lambda ln: ln.startswith("if not defined MCP_PYEXE")),
-        ("revit_mcp robocopy", lambda ln: ln.lower().startswith('robocopy "%repo%\\revit_mcp"')),
+        ("revit_mcp robocopy", lambda ln: ln.lower().startswith('robocopy "%repo%\\revit_mcp" "%stage%\\revit_mcp"')),
         ("secret stage", lambda ln: 'secret_tool.py" stage' in ln),
         ("manifest", lambda ln: 'make_manifest.py" --repo' in ln),
+        ("manifest check", lambda ln: 'make_manifest.py" --check' in ln),
+        ("secret verify", lambda ln: 'secret_tool.py" verify' in ln),
+        ("live aside", lambda ln: ln.lower().startswith('move "%live%" "%outgoing%"')),
+        ("outgoing to prev", lambda ln: ln.lower().startswith('move "%outgoing%" "%prev%"')),
+        ("stage to live", lambda ln: ln.lower().startswith('move "%stage%" "%live%"')),
         ("installer robocopy",
          lambda ln: ln.lower().startswith('robocopy "%~dp0." "%mcp_share_root%\\install"')),
     ]
@@ -463,32 +468,73 @@ def test_publish_order_stage_and_manifest_arguments():
     stage = lines[_find(lines, lambda ln: 'secret_tool.py" stage' in ln, "stage")]
     assert stage.startswith('"%MCP_PYEXE%" "%~dp0secret_tool.py" stage')
     assert '--secret-file "%MCP_SECRET_FILE%"' in stage
-    assert '--dest "%DEST%\\revit_mcp\\_bridge_secret"' in stage
+    assert '--dest "%STAGE%\\revit_mcp\\_bridge_secret"' in stage
     assert "|| (echo ERROR:" in stage and "exit /b 1)" in stage
     manifest = lines[_find(lines, lambda ln: 'make_manifest.py" --repo' in ln, "manifest")]
     assert manifest.startswith('"%MCP_PYEXE%" "%~dp0make_manifest.py"')
     assert '--repo "%REPO%"' in manifest
-    assert '--dest "%DEST%"' in manifest
+    assert '--dest "%STAGE%"' in manifest
     assert "|| (echo ERROR:" in manifest and "exit /b 1)" in manifest
 
 
-def test_publish_order_nothing_copied_into_dest_after_manifest():
+def test_publish_order_gate_arguments_and_failure():
+    lines = _cmd_lines(PUBLISH_CMD)
+    check = lines[_find(lines, lambda ln: 'make_manifest.py" --check' in ln, "check")]
+    assert check.startswith('"%MCP_PYEXE%" "%~dp0make_manifest.py" --check')
+    assert '--dest "%STAGE%"' in check
+    assert "|| (echo ERROR:" in check and "exit /b 1)" in check
+    verify = lines[_find(lines, lambda ln: 'secret_tool.py" verify' in ln, "verify")]
+    assert verify.startswith('"%MCP_PYEXE%" "%~dp0secret_tool.py" verify')
+    assert '--secret-file "%MCP_SECRET_FILE%"' in verify
+    assert '--artifact "%STAGE%\\revit_mcp\\_bridge_secret"' in verify
+    assert "|| (echo ERROR:" in verify and "exit /b 1)" in verify
+
+
+def test_publish_order_nothing_copied_into_stage_after_manifest():
     lines = _cmd_lines(PUBLISH_CMD)
     after = _find(lines, lambda ln: 'make_manifest.py" --repo' in ln, "manifest")
     for i, ln in _code_lines(lines):
         if i <= after:
             continue
         verb = ln.split(None, 1)[0].lower()
-        if verb in ("copy", "robocopy", "xcopy", "move"):
-            assert "%dest%" not in _logical(lines, i).lower(), "line {} writes into DEST".format(i + 1)
+        if verb in ("copy", "robocopy", "xcopy"):
+            assert "%stage%" not in _logical(lines, i).lower(), "line {} writes into STAGE".format(i + 1)
 
 
-def test_publish_order_dest_derivation():
+def test_publish_order_nothing_is_copied_into_the_live_folder():
     lines = _cmd_lines(PUBLISH_CMD)
-    assigns = [ln for ln in lines if ln.lower().startswith('set "dest=')]
-    assert assigns == ['set "DEST=%MCP_SHARE_ROOT%\\ext\\%MCP_EXT_NAME%"']
+    for i, ln in _code_lines(lines):
+        verb = ln.split(None, 1)[0].lower()
+        if verb in ("copy", "robocopy", "xcopy", "mkdir", "md"):
+            assert "%live%" not in _logical(lines, i).lower(), "line {} writes into LIVE".format(i + 1)
+
+
+def test_publish_order_live_stage_prev_derivation():
+    lines = _cmd_lines(PUBLISH_CMD)
+    assigns = [ln for ln in lines if ln.lower().startswith(('set "live=', 'set "stage=', 'set "prev='))]
+    assert assigns == [
+        'set "LIVE=%MCP_SHARE_ROOT%\\ext\\%MCP_EXT_NAME%"',
+        'set "STAGE=%MCP_SHARE_ROOT%\\ext-staging\\%MCP_EXT_NAME%"',
+        'set "PREV=%MCP_SHARE_ROOT%\\ext-previous\\%MCP_EXT_NAME%"',
+    ]
+    assert not [ln for ln in lines if ln.lower().startswith('set "dest=')]
+    assert not [ln for ln in _code_lines(lines) if "%dest%" in ln[1].lower()]
     installer = lines[_find(lines, lambda ln: ln.lower().startswith('robocopy "%~dp0."'), "installer")]
     assert '"%MCP_SHARE_ROOT%\\install"' in installer
+
+
+def test_publish_order_stale_stage_is_removed_before_the_build():
+    lines = _cmd_lines(PUBLISH_CMD)
+    stale = _find(lines, lambda ln: ln.lower().startswith('if exist "%stage%" rmdir /s /q "%stage%"'), "stale")
+    first = _find(lines, lambda ln: ln.lower().startswith('copy /y "%repo%\\extension.json"'), "first copy")
+    assert stale < first
+
+
+def test_publish_order_live_moves_aside_before_anything_is_deleted():
+    lines = _cmd_lines(PUBLISH_CMD)
+    aside = _find(lines, lambda ln: ln.lower().startswith('move "%live%" "%outgoing%"'), "aside")
+    discard = _find(lines, lambda ln: ln.lower().startswith('if exist "%prev%" rmdir /s /q "%prev%"'), "discard")
+    assert aside < discard
 
 
 def test_publish_cmd_is_crlf_and_ascii_additions():
@@ -514,7 +560,10 @@ def _assert_scratch(env, tmp_path):
     targets = [
         ("MCP_SHARE_ROOT", share),
         ("MCP_SECRET_FILE", env.get("MCP_SECRET_FILE", "")),
-        ("DEST", os.path.join(share, "ext", env.get("MCP_EXT_NAME", ""))),
+        ("LIVE", os.path.join(share, "ext", env.get("MCP_EXT_NAME", ""))),
+        ("STAGE", os.path.join(share, "ext-staging", env.get("MCP_EXT_NAME", ""))),
+        ("PREV", os.path.join(share, "ext-previous", env.get("MCP_EXT_NAME", ""))),
+        ("REJECTED", os.path.join(share, "ext-rejected", env.get("MCP_EXT_NAME", ""))),
         ("installer target", os.path.join(share, "install")),
     ]
     for label, path in targets:
@@ -546,36 +595,95 @@ def test_publish_smoke_guard_rejects_real_share(tmp_path):
         _assert_scratch(escaping, tmp_path)
 
 
-@pytest.mark.skipif(
+needs_windows_publish = pytest.mark.skipif(
     sys.platform != "win32" or shutil.which("git") is None or shutil.which("robocopy") is None,
     reason="needs Windows, git and robocopy",
 )
+
+
+def _run_cmd(env, tmp_path, script):
+    """Run a deploy script on the scratch share and never let it print the secret."""
+    _assert_scratch(env, tmp_path)  # before anything is spawned: the scripts move and rmdir
+    result = subprocess.run(
+        ["cmd", "/c", script], cwd=REPO, env=env, capture_output=True, timeout=180,
+    )
+    out = result.stdout + result.stderr
+    if os.path.isfile(env["MCP_SECRET_FILE"]):
+        assert _read(env["MCP_SECRET_FILE"]) not in out, "the script printed the secret"
+    return result.returncode, out.decode("utf-8", "replace")
+
+
+def _publish(env, tmp_path):
+    return _run_cmd(env, tmp_path, r"deploy\publish-extension.cmd")
+
+
+def _folders(env):
+    """(live, stage, prev, rejected) folders of the scratch share."""
+    share, name = env["MCP_SHARE_ROOT"], env["MCP_EXT_NAME"]
+    return tuple(os.path.join(share, folder, name)
+                 for folder in ("ext", "ext-staging", "ext-previous", "ext-rejected"))
+
+
+def _tree_digest(root):
+    """{relative path: sha256 of the bytes} for every file under root (bytes, not normalized)."""
+    import hashlib
+    digest = {}
+    for folder, _, names in os.walk(root):
+        for name in names:
+            path = os.path.join(folder, name)
+            digest[os.path.relpath(path, root)] = hashlib.sha256(_read(path)).hexdigest()
+    return dict(sorted(digest.items()))
+
+
+@needs_windows_publish
 def test_publish_smoke_scratch_share(tmp_path):
     env = _scratch_publish_env(tmp_path)
-    _assert_scratch(env, tmp_path)  # before anything is spawned: the script rmdirs DEST
+    _assert_scratch(env, tmp_path)
 
     guarded = [os.path.join(REPO, "_manifest.json"),
                os.path.join(REPO, "revit_mcp", "_manifest.json")]
     existed = [os.path.exists(path) for path in guarded]
 
-    result = subprocess.run(
-        ["cmd", "/c", r"deploy\publish-extension.cmd"],
-        cwd=REPO, env=env, capture_output=True, timeout=180,
-    )
-    out = result.stdout + result.stderr
-    if os.path.isfile(env["MCP_SECRET_FILE"]):
-        assert _read(env["MCP_SECRET_FILE"]) not in out, "the publish printed the secret"
-    assert result.returncode == 0, out.decode("utf-8", "replace")[-2000:]
+    code, out = _publish(env, tmp_path)
+    assert code == 0, out[-2000:]
     secret_value = _read(env["MCP_SECRET_FILE"])
 
-    ext = os.path.join(env["MCP_SHARE_ROOT"], "ext", env["MCP_EXT_NAME"])
-    assert _read(os.path.join(ext, "revit_mcp", "_bridge_secret")) == secret_value
-    assert os.path.isfile(os.path.join(ext, "_manifest.json"))
-    verdict = integrity.check_integrity(ext)
+    live, stage, prev, _ = _folders(env)
+    assert _read(os.path.join(live, "revit_mcp", "_bridge_secret")) == secret_value
+    assert os.path.isfile(os.path.join(live, "_manifest.json"))
+    verdict = integrity.check_integrity(live)
     assert verdict["state"] == trust.INTEGRITY_MATCH, verdict
-    for _, dirs, _ in os.walk(ext):
+    for _, dirs, _ in os.walk(live):
         assert "__pycache__" not in dirs
+    assert not os.path.exists(stage), "the staged tree was not moved into place"
+    assert not os.path.exists(prev), "a first publish has no previous version"
     assert [os.path.exists(path) for path in guarded] == existed
+
+
+@needs_windows_publish
+def test_publish_second_run_keeps_the_first_build_in_ext_previous(tmp_path):
+    env = _scratch_publish_env(tmp_path)
+    live, stage, prev, _ = _folders(env)
+
+    code, out = _publish(env, tmp_path)
+    assert code == 0, out[-2000:]
+    first_manifest = _read(os.path.join(live, "_manifest.json"))
+    # A file outside the integrity scope identifies the first build without touching its verdict.
+    with open(os.path.join(live, "first-build.marker"), "wb") as handle:
+        handle.write(b"first")
+
+    code, out = _publish(env, tmp_path)
+    assert code == 0, out[-2000:]
+
+    assert not os.path.exists(stage)
+    assert os.path.isfile(os.path.join(prev, "first-build.marker")), "ext-previous is not the first build"
+    assert not os.path.exists(os.path.join(live, "first-build.marker")), "ext is not the second build"
+    assert _read(os.path.join(prev, "_manifest.json")) == first_manifest
+    assert "ext-previous" in out and "rollback-extension.cmd" in out
+    for tree in (live, prev):
+        verdict = integrity.check_integrity(tree)
+        assert verdict["state"] == trust.INTEGRITY_MATCH, (tree, verdict)
+    assert not os.path.exists(prev + ".outgoing")
 
 
 # --- build-payload.cmd order, gate.py pair check, CLAUDE.md (plan 03-07) ----

@@ -3,21 +3,44 @@ phase: 05-live-secret-gate-and-integrity-enforcement
 plan: 13
 subsystem: phase-5-live-gate
 tags: [live-gate, secret, integrity, match-stage]
-status: gap-found
+status: complete
 plan_head_before: 118fc3c9b4898d6302081303a6b0c29c97d0633e
-commits: 0
+commits: 3
 actuals:
   tokens: 0
-  tasks: 2
-  commits: 0
+  tasks: 3
+  commits: 3
 completed: 2026-10-24
 ---
 
-# Plan 05-13 Summary: live match stage (verdict PHASE5_GATE_STOP, gap recorded)
+# Plan 05-13 Summary: live match stage (verdict PHASE5_GATE_OK, PASS)
 
-**The match stage ran against one real Revit 2024 with one throwaway project. The secret gate behaved correctly on the wire (missing and wrong secret refused with 401, matching secret created a level), but the tested classifier returned PHASE5_GATE_STOP with three reasons that point at defects in the gate script's own step design and parsing, not at the product. The plan is NOT marked complete; 05-14 must not start.**
+**The match stage passed on the third attempt: one real Revit 2024, one throwaway project, secret and integrity both matching. A missing or wrong secret is refused with 401 on every mutation path tried, a matching secret creates a level, the open POST read ignores the envelope as designed, and the model-visible tools agree. The two earlier attempts are kept below because the first stopped in preflight and the second stopped on two defects in the runner, not in the product.**
 
-## Verdict
+## Verdict (attempt 3, authoritative)
+
+```
+PHASE5_GATE_OK
+STAGE=match
+POSTS_SENT=7
+This stage is consumed and must not be run again.
+```
+
+Record: `C:/Temp/phase5/S1-match-3.json` (outside the repository). Created level: `P5_P_CREATE_20261024T185550` (id 286664, 1400 mm, transaction `Committed`).
+
+## History of the three attempts
+
+| Attempt | Record | Outcome |
+|---------|--------|---------|
+| 1 | `S1-match.json` | Preflight STOP, `POSTS_SENT=0`: no document open (Revit Home screen, `/documents/` empty, `/status/` 503). Nothing was sent. |
+| 2 | `S1-match-2.json` | `PHASE5_GATE_STOP`, `POSTS_SENT=7`, three REASON lines caused by two defects in the runner (details below). The product behaved correctly (401s, authenticated create committed). |
+| 3 | `S1-match-3.json` | `PHASE5_GATE_OK`, `POSTS_SENT=7`, after the runner fix in commit `9aa9876`. |
+
+**One-shot exception.** The match stage is one-shot by design (a write step must never repeat). Attempt 3 reran it only because the runner, not the product, had stopped attempt 2, and the user explicitly approved this single rerun ("go") as a documented exception, with a fresh `--out`. The stage is consumed again and must not be run a third time.
+
+### Attempt 2: the two runner defects (fixed in `9aa9876`)
+
+Console output of attempt 2 (verbatim, exit 1):
 
 ```
 PHASE5_GATE_STOP
@@ -29,100 +52,103 @@ REASON=steps.b_wrong.text: expected Error: 401 - mismatch
 This stage is consumed and must not be run again.
 ```
 
-The match stage is consumed (POSTS_SENT=7). It was not rerun.
+1. The `/document_levels/` steps (`r_levels_open`, `r_levels_wrong`) posted `{}` without a `document` selector. The real route requires one ("a read never chooses a default") and answered 400 `document-selector-required`. Fix: the steps now send the document selector read from `/documents/`.
+2. `_error_body` parsed the whole tool text as JSON, but the model-visible text carries a trailing `Verified Revit process: ...` line, so the parse failed for `b_wrong`. Fix: it tolerates the trailer line.
+
+Neither defect touched the gate, the integrity check or the tools.
 
 ## Task results
 
 | Task | Result |
 |------|--------|
-| 1 Preconditions and temporary manifest | Done earlier (no commit): git-ignored `_manifest.json` (34 files, 118fc3c9b489), `revit_mcp/_bridge_secret` created, `INTEGRITY verified_match`, unit suite green. |
-| 2 User restarts Revit, opens one project | User replied "ready" (one listener row, 127.0.0.1:48884, Revit PID 29620). |
-| 3 Match stage | Attempt 1: preflight stop, POSTS_SENT=0. Attempt 2 (after the user opened a project): ran, POSTS_SENT=7, PHASE5_GATE_STOP. |
+| 1 Preconditions and temporary manifest | Done earlier; regenerated for attempt 3 (see below). `revit_mcp/_bridge_secret` is unchanged (the live Revit loaded it). |
+| 2 User restarts Revit, opens one project | User replied "ready" (one listener, Revit PID 29620; project "Проект1" opened before attempt 2). |
+| 3 Match stage | Attempt 3 PHASE5_GATE_OK, POSTS_SENT=7. |
 
-## Console output of every run
+## Console output of attempt 3 (verbatim)
 
-### Run 1, `--out C:/Temp/phase5/S1-match.json` (summarised from the prior agent's report)
-
-Preflight stop, no document was open (Revit Home screen; `/documents/` empty, `/status/` 503).
-`PHASE5_GATE_STOP`, `POSTS_SENT=0`, `stop_reason "GET /status/ did not return 200"`.
-Preflight facts recorded in the file: secret configured, fingerprints equal (`6b6cfa6a`), integrity `verified_match`, bind `loopback_only`, health `healthy`, 24 domains, one listener (PID 29620).
-
-### Run 2, `uv run python tests/test_phase5_live_gate.py run --stage match --out C:/Temp/phase5/S1-match-2.json` (verbatim, exit 1)
+### Manifest regeneration
 
 ```
-PHASE5_GATE_STOP
+WARNING: developer manifest written into the repository root; delete .\_manifest.json after the live check
+MANIFEST written: .\_manifest.json (34 files, commit 9aa98764bea6)
+INTEGRITY verified_match -
+```
+
+`git status --porcelain -- _manifest.json revit_mcp/_bridge_secret` printed nothing (both git-ignored). `dev_secret.py` was not rerun.
+
+### Run, `uv run python tests/test_phase5_live_gate.py run --stage match --out C:/Temp/phase5/S1-match-3.json` (exit 0)
+
+```
+PHASE5_GATE_OK
 STAGE=match
 POSTS_SENT=7
-REASON=steps.r_levels_open.http: expected 200
-REASON=steps.r_levels_wrong.http: expected 200
-REASON=steps.b_wrong.text: expected Error: 401 - mismatch
 This stage is consumed and must not be run again.
 ```
 
-### Classify, `classify --stage match C:/Temp/phase5/S1-match-2.json` (exit 1)
+### Classify, `classify --stage match C:/Temp/phase5/S1-match-3.json` (exit 0)
 
-Same five lines as above (token, STAGE, POSTS_SENT, the three REASON lines). The plan's verify command named `S1-match.json`; that file is the POSTS_SENT=0 preflight record and was classified by the prior agent as a stop. The authoritative record is `S1-match-2.json`.
+```
+PHASE5_GATE_OK
+STAGE=match
+POSTS_SENT=7
+```
 
 ### scan-secret
 
 ```
-scan-secret C:/Temp/phase5/S1-match-2.json  -> SECRET_ABSENT (exit 0)
-scan-secret C:/Temp/phase5/S1-match.json    -> SECRET_ABSENT (exit 0)
+scan-secret C:/Temp/phase5/S1-match-3.json  -> SECRET_ABSENT (exit 0)
 ```
 
-### restore (no `--module`)
+For the earlier records: `S1-match.json` and `S1-match-2.json` were also `SECRET_ABSENT`. This SUMMARY contains fingerprints only.
 
-```
-RESTORED clean
-```
-Exit 0. The temporary `_manifest.json` is now removed (`ls` confirms it is gone). `revit_mcp/_bridge_secret` is left in place (git-ignored, developer secret, created once by design).
+## Listener and document checks (before attempt 3, run by the executor)
 
-## Record paths and listener checks
+- `Get-NetTCPConnection -LocalPort 48884 -State Listen`: exactly one row, `127.0.0.1:48884`, State Listen, OwningProcess 29620.
+- `GET /genpro_revit_mcp/documents/`: `status success`, `count 1`, title "Проект1", `active true`, `saved false`, `path ""`, document `doc1.9b96d960df03.1`, Revit 2024, PID 29620, port 48884, session `f4d0e0e0-3f41-4200-9af7-716667cb1b4f`.
+- The orchestrator independently re-ran after the script: `classify` (PHASE5_GATE_OK, STAGE=match, POSTS_SENT=7), `scan-secret` (SECRET_ABSENT), `make_manifest --check` (INTEGRITY verified_match) and the listener count (1).
 
-- `C:/Temp/phase5/S1-match.json` (POSTS_SENT=0, no document open).
-- `C:/Temp/phase5/S1-match-2.json` (POSTS_SENT=7, authoritative). Both are outside the repository.
-- Listener check before the run (executed by me): `Get-NetTCPConnection -LocalPort 48884 -State Listen` gave exactly one row, `127.0.0.1:48884`, OwningProcess 29620.
-- Document check before the run (executed by me): `GET /documents/` returned `count: 1`, title "Проект1", `saved: false`, `path: ""`, document `doc1.9b96d960df03.1`, Revit 2024, PID 29620, port 48884, session `f4d0e0e0-3f41-4200-9af7-716667cb1b4f`.
-- The script's own preflight in run 2 agreed: listeners `[29620]`, `documents: 1`, `status_http: 200`, bridge fingerprint `6b6cfa6a`.
-
-## What the record shows (7 POSTs)
+## What the record shows (attempt 3, 7 POSTs)
 
 | Step | Route | Result |
 |------|-------|--------|
-| n_missing | `/create_level/` direct, no `_mcp` | 401, `auth: missing`, "shared secret missing" (correct refusal) |
-| n_mismatch | `/create_level/` direct, wrong secret | 401, `auth: mismatch` (correct refusal) |
-| n_code | `/execute_code/` direct, no `_mcp` | 401, `auth: missing` (correct refusal) |
-| r_levels_open | `/document_levels/` direct, body `{}` | HTTP 400, `error_code: document-selector-required` |
-| r_levels_wrong | `/document_levels/` direct, wrong secret | HTTP 400, same `document-selector-required` body (wrong secret did not produce 401: open POST read ignores the envelope, as designed) |
-| b_wrong | `create_level` tool with a wrong secret | text `Error: 401 - {"error": "Mutation rejected: shared secret mismatch", "auth": "mismatch", ...}` followed by a second line `Verified Revit process: PID 29620; Revit 2024; port 48884; session f4d0e0e0-...` |
-| p_create | `create_level` tool, matching secret | 200, `Created 1 level(s)`, id 286663, name `P5_P_CREATE_20261024T184804`, elevation 1400 mm, transaction `Committed` |
-| p_levels | `/list_levels/` direct | 200, 3 levels, includes `P5_P_CREATE_20261024T184804` (id 286663) |
-| s_status | `get_revit_status` tool | recorded (see record); classifier raised no reason for it |
+| n_missing | `/create_level/` direct, no `_mcp` | 401, `auth: missing`, "Mutation rejected: shared secret missing" |
+| n_mismatch | `/create_level/` direct, wrong secret | 401, `auth: mismatch`, "Mutation rejected: shared secret mismatch" |
+| n_code | `/execute_code/` direct, no `_mcp` | 401, `auth: missing` |
+| r_levels_open | `/document_levels/` direct, with document selector | 200, `active_before` equals `active_after` (`doc1.9b96d960df03.1`) |
+| r_levels_wrong | `/document_levels/` direct, wrong secret, with selector | 200, same document identity (open POST read ignores the envelope, as designed) |
+| b_wrong | `create_level` tool with a wrong secret | text `Error: 401 - {... "Mutation rejected: shared secret mismatch", "auth": "mismatch" ...}` (trailer line tolerated) |
+| p_create | `create_level` tool, matching secret | 200, `Created 1 level(s)`, id 286664, `P5_P_CREATE_20261024T185550`, 1400 mm, `outcome.transaction_status` `Committed`, requested 1, succeeded [286664], failed [] |
+| p_levels | `/list_levels/` direct | 200, 4 levels, includes both `P5_P_CREATE_*` levels |
+| s_status | `get_revit_status` tool | health `healthy`, 24 domains, `integrity.state verified_match` (missing/modified/unexpected empty), PID 29620, port 48884 |
 
-Criterion 1 (a matching secret mutates) and the refusal half of criterion 3 (missing and mismatched secrets are refused with 401 before any document access) are evidenced on the wire. The three stop reasons are all about steps the script itself designed:
+The rejected-name levels (`P5_N_MISSING_*`, `P5_N_MISMATCH_*`, `P5_M_CREATE_*`) were generated as inputs but never created; the refused calls changed nothing.
 
-## Gaps (the three STOP reasons)
+## MCP corroboration (D-13, by the orchestrator, after the script exited, reads only)
 
-1. **`steps.r_levels_open.http` and `steps.r_levels_wrong.http` (script defect).** `tests/test_phase5_live_gate.py` line ~561-562 POSTs `/document_levels/` with `{}` and `{"_mcp": {...}}` and the classifier demands HTTP 200. The real route requires a `document` selector when it is not given ("A read never chooses a default"; Phase 2 invariant) and answers 400 `document-selector-required`, listing exactly one candidate (`doc1.9b96d960df03.1`). The read route is open and reached its selector validation, so the evidence that matters (an open POST read is not gated by the secret) is present, but the step's body should carry `{"document": "<id from /documents/>"}` and the offline fake in `tests/unit/test_phase5_live_gate.py` apparently modelled a 200 for an empty body. The same defect exists in the `corrupt` stage (`r_levels_open`, line ~575, and the check at line ~263), so that stage would also stop on it.
-2. **`steps.b_wrong.text` (classifier parse defect).** `_error_body(text, 401)` (line 73-81) does `json.loads(text[len(prefix):])`, but the model-visible tool text carries a trailing `\nVerified Revit process: ...` line (Phase 2 process-identity footer) so the JSON parse fails and the step is classed as wrong although the text starts with `Error: 401 - ` and states `auth: mismatch`. The helper must parse only the first line (or the first JSON object).
+`get_revit_status` text (verbatim, no secret in it):
 
-None of the three points at a product defect in the gate, the integrity check or the tools. They are defects in the 05-12 script/test pair (offline fakes did not reproduce the real `/document_levels/` 400 or the identity footer). A script fix plus a new live run needs a fresh stage; the match stage's one-shot rule means the user decides how to re-run (the stage is consumed in this record, not in the product).
+```
+Status: active | Health: healthy | API: genpro_revit_mcp | Document: Проект1 | Revit Available: True | Bind: loopback_only | Domains Registered: 24 | Integrity: {'modified': [], 'unexpected': [], 'state': 'verified_match', 'missing': [], 'reason': None} | Process Identity: {'revit_version': '2024', 'pid': 29620, 'actual_port': 48884} | Secret: {'configured': True, 'fingerprint': '6b6cfa6a'} | Verified Revit process: PID 29620; Revit 2024; port 48884 | Shared secret: both halves hold the same secret (fingerprint 6b6cfa6a). | MCP target: 127.0.0.1:48884
+```
 
-## MCP corroboration (not performed)
+`list_levels` text (as relayed by the orchestrator):
 
-The live rules required `get_revit_status` and `list_levels` through the session's `revit` MCP tools after the script exited. This executor session had no revit MCP tool available (only file/shell/skill tools; no deferred-tool search surfaced them), so those two calls were NOT made and no MCP text is recorded. MCP server origin (plan step 6): not reported by the user, and nothing could be inferred from MCP read texts because none were obtained. The script's own tool steps (`b_wrong`, `p_create`, `s_status`) exercised the production tools through the injected bridge and are the only tool-level evidence.
+```
+Total Levels: 4: 'Уровень 1' (id 311, 0 mm), 'P5_P_CREATE_20261024T184804' (id 286663, 1400 mm, from the consumed attempt 2), 'P5_P_CREATE_20261024T185550' (id 286664, 1400 mm, this run's authenticated create), 'Уровень 2' (id 694, 4000 mm). None of the rejected names (P5_N_MISSING_*, P5_N_MISMATCH_*, P5_M_CREATE_*) is listed. Process: PID 29620; Revit 2024; port 48884.
+```
 
-As a clearly labelled substitute (a plain read-only GET, not an MCP call) I fetched `GET /genpro_revit_mcp/status/` after the run: `status active`, `health healthy`, `bind loopback_only`, `secret {configured: true, fingerprint: 6b6cfa6a}`, `integrity.state verified_match` (no modified/missing/unexpected), `domains_registered 24`, PID 29620, session `f4d0e0e0-...`. No secret value appears in any of these texts.
+MCP server origin: not reported by the user. The MCP text contains the Phase 5 line "Shared secret: both halves hold the same secret", so the session server runs the current bridge from this repository, not a stale installed payload. This executor made no MCP call; the corroboration above came from the orchestrator's session.
 
 ## Side effects left in the throwaway project
 
-`P5_P_CREATE_20261024T184804` (id 286663, 1400 mm) was created in the unsaved project "Проект1" by design. Nothing was saved; Revit was not restarted, pyRevit not reloaded, no other model opened. It disappears when the throwaway project is closed unsaved.
+Two test levels remain in the unsaved project "Проект1": `P5_P_CREATE_20261024T184804` (id 286663, attempt 2) and `P5_P_CREATE_20261024T185550` (id 286664, attempt 3), both 1400 mm. Nothing was saved; Revit was not restarted, pyRevit not reloaded, no other model opened. Both disappear when the throwaway project is closed unsaved.
 
 ## Deviations from Plan
 
-- [Process] The plan's verify `classify` names `S1-match.json`; the real evidence is `S1-match-2.json` because attempt 1 stopped in preflight (POSTS_SENT=0), which the plan itself anticipates.
-- [Process] MCP corroboration not done (tools unavailable to the executor), see above.
-- No code, test or product file was changed by this plan.
+- [Process] The runner needed two fixes (commit `9aa9876`, `fix(05-12)`) before the stage could return a verdict; the match stage was run a second time under the user-approved one-time exception described above.
+- [Process] The plan's verify names `S1-match.json`; the authoritative record is `S1-match-3.json` (attempt 1 stopped in preflight, attempt 2 on runner defects).
+- No product file was changed by this plan. The only code change was the runner fix `9aa9876`.
 
 ## Known Stubs
 
@@ -130,16 +156,16 @@ None.
 
 ## Threat Flags
 
-None. T-05-56: `scan-secret` returned `SECRET_ABSENT` for both records; this SUMMARY contains fingerprints only.
+None. T-05-56: `scan-secret` returned `SECRET_ABSENT` for every record.
 
 ## State after this plan
 
-- `_manifest.json` removed by `restore` (RESTORED clean). 05-14 needs it, but 05-14 is not to start; regenerate it with the plan 05-13 Task 1 procedure if the sequence is resumed.
-- Phase 5 live sequence halted here for the user's decision: fix the two script defects (a `document` selector in the `/document_levels/` steps; first-line parse in `_error_body`) with matching offline tests, then re-run the match stage under a new decision.
-- The plan is not marked complete in ROADMAP/STATE.
+- The temporary `_manifest.json` is intentionally still present in the repository root (git-ignored) because plan 05-14 needs it. Until 05-15 the developer must not edit tracked files under `revit_mcp/`, `startup.py` or `extension.json`: any edit makes the manifest disagree with the tree and blocks the developer's own mutations (423).
+- `revit_mcp/_bridge_secret` is unchanged and must stay so while this Revit session runs.
+- 05-14 may start. Revit PID 29620 must not be restarted or reloaded before it.
 
 ## Self-Check: PASSED
 
-- `C:/Temp/phase5/S1-match.json` and `S1-match-2.json` exist; both `SECRET_ABSENT`.
-- `restore` printed `RESTORED clean`; `_manifest.json` is absent.
-- `commits: 0` measured against `plan_head_before` 118fc3c; no code changes (documentation-only plan outcome).
+- `C:/Temp/phase5/S1-match-3.json` exists; classify PHASE5_GATE_OK, scan-secret SECRET_ABSENT.
+- `make_manifest --check` printed `INTEGRITY verified_match`; listener count 1.
+- `commits: 3` measured against `plan_head_before` 118fc3c: `a92f675`, `9aa9876`, and this summary commit.

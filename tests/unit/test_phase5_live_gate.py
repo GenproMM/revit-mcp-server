@@ -9,6 +9,9 @@ import copy
 import importlib.util
 import json
 import os
+import shutil
+import subprocess
+import types
 
 import pytest
 
@@ -242,3 +245,297 @@ def test_phase_accepts_exactly_one_ok_record_per_stage():
 def test_canned_records_round_trip_json_without_losing_acceptance():
     for stage, factory in (("match", match_ok), ("corrupt", corrupt_ok), ("cleanup", cleanup_ok)):
         assert proc.classify_stage(stage, json.loads(json.dumps(factory())))["verdict"] == "ok"
+
+
+class _Reply(object):
+    def __init__(self, status, body):
+        self.status_code = status
+        self._body = body
+        self.text = json.dumps(body, sort_keys=True)
+
+    def json(self):
+        return self._body
+
+
+class _Client(object):
+    def __init__(self, stage, post_failure=None):
+        self.stage = stage
+        self.post_failure = post_failure
+        self.posts = []
+        self.gets = []
+        self.accepted = ""
+
+    async def get(self, path):
+        self.gets.append(path)
+        if path.endswith("/status/"):
+            return _Reply(200, _status(self.stage))
+        if path.endswith("/documents/"):
+            return _Reply(200, {"documents": [{"id": 1}]})
+        if path.endswith("/list_levels/"):
+            return _Reply(200, {"levels": [{"name": self.accepted}] if self.stage != "corrupt" else []})
+        raise AssertionError("unexpected GET {}".format(path))
+
+    async def post(self, path, content, headers):
+        body = json.loads(content)
+        self.posts.append((path, body, headers))
+        if self.post_failure and len(self.posts) == self.post_failure:
+            raise RuntimeError("planned direct failure")
+        route = path.rsplit("/genpro_revit_mcp", 1)[-1]
+        if route in ("/create_level/", "/execute_code/"):
+            envelope = body.get("_mcp")
+            if envelope is None:
+                return _Reply(401, _auth("missing"))
+            return _Reply(401, _auth("mismatch"))
+        if route == "/document_levels/":
+            return _Reply(200, {"levels": []})
+        raise AssertionError("unexpected POST {}".format(path))
+
+    async def aclose(self):
+        return None
+
+
+class _Bridge(object):
+    def __init__(self, stage):
+        self.stage = stage
+        self._secret_cache = None
+        self.reset_calls = 0
+        self.posts = []
+        self.gets = []
+        async def getting(endpoint, *args, **kwargs):
+            return await self._get(endpoint, *args, **kwargs)
+        getting.revit_target = "revit1"
+        getting.discover_targets = lambda: []
+        getting.secret_fingerprint = self.loaded_secret_fingerprint
+        self.revit_get = getting
+        self.revit_post = self._post
+        self.revit_image = None
+
+    @staticmethod
+    def secret_fingerprint(value):
+        return "wrong-fingerprint" if value == proc.WRONG_SECRET else FP
+
+    @staticmethod
+    def loaded_secret_fingerprint():
+        return FP
+
+    @staticmethod
+    def listener_snapshot(ports):
+        return {ports[0]: [4242]}
+
+    def reset_secret_cache(self):
+        self.reset_calls += 1
+        self._secret_cache = None
+
+    async def _get(self, endpoint, *args, **kwargs):
+        self.gets.append(endpoint)
+        if endpoint == "/status/":
+            return _status(self.stage)
+        raise AssertionError("unexpected bridge GET {}".format(endpoint))
+
+    async def _post(self, endpoint, data, *args, **kwargs):
+        self.posts.append((endpoint, data, self._secret_cache))
+        if self.stage == "corrupt":
+            return "Error: 423 - " + json.dumps(_integrity(), sort_keys=True)
+        if self._secret_cache == proc.WRONG_SECRET:
+            return "Error: 401 - " + json.dumps(_auth("mismatch"), sort_keys=True)
+        levels = data.get("levels") if isinstance(data, dict) else None
+        if isinstance(levels, list) and levels:
+            self.client.accepted = levels[0]["name"]
+        return _success()
+
+
+def _args(tmp_path, stage="match", module=None):
+    return types.SimpleNamespace(stage=stage, out=str(tmp_path / "record.json"), port=48884, module=module)
+
+
+def _state(stage):
+    return {"secret_file_present": True, "manifest_present": stage != "cleanup",
+            "probe_present": stage == "corrupt", "module_clean": stage != "corrupt", "module_exists": True}
+
+
+def _run_with_fakes(monkeypatch, tmp_path, stage="match", module=None, client=None, bridge=None):
+    client = client or _Client(stage)
+    bridge = bridge or _Bridge(stage)
+    bridge.client = client
+    monkeypatch.setattr(proc, "_bridge", lambda: bridge)
+    monkeypatch.setattr(proc, "_direct_client", lambda port: client)
+    monkeypatch.setattr(proc, "_repo_state", lambda current, selected: _state(current))
+    client.accepted = "P5_P_CREATE_"
+    if stage != "match":
+        monkeypatch.setattr(proc, "_valid_module", lambda repo, selected, require_clean=True: None)
+    return proc.main(["run", "--stage", stage, "--out", str(tmp_path / "record.json"), "--port", "48884"] + ([] if module is None else ["--module", module])), client, bridge, tmp_path / "record.json"
+
+
+def test_run_match_records_real_tools_and_direct_wire_contract(monkeypatch, tmp_path, capsys):
+    code, client, bridge, record_path = _run_with_fakes(monkeypatch, tmp_path)
+    captured = capsys.readouterr()
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert code == 0, proc.classify_stage("match", record)
+    assert proc.classify_stage("match", record)["verdict"] == "ok"
+    assert proc.SENTINEL_OK in captured.out and "STAGE=match" in captured.out and "POSTS_SENT=7" in captured.out
+    assert record["posts_sent"] == 7 and bridge.reset_calls == 1
+    assert all(headers["Content-Type"] == "text/plain; charset=utf-8" for _path, _body, headers in client.posts)
+    assert "_mcp" not in client.posts[0][1] and "_mcp" not in client.posts[2][1]
+    assert client.posts[1][1]["_mcp"] == {"secret": proc.WRONG_SECRET}
+    assert client.posts[4][1]["_mcp"] == {"secret": proc.WRONG_SECRET}
+
+
+@pytest.mark.parametrize("stage,module,expected", [("corrupt", MODULE, 4), ("cleanup", MODULE, 1)])
+def test_run_other_stages_classify_ok(monkeypatch, tmp_path, capsys, stage, module, expected):
+    code, _client, _bridge, record_path = _run_with_fakes(monkeypatch, tmp_path, stage, module)
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert code == 0 and record["posts_sent"] == expected
+    assert proc.classify_stage(stage, record)["verdict"] == "ok"
+    assert "POSTS_SENT={}".format(expected) in capsys.readouterr().out
+
+
+def test_run_preflight_stop_persists_zero_post_record(monkeypatch, tmp_path, capsys):
+    client = _Client("match")
+    bridge = _Bridge("match")
+    bridge.listener_snapshot = lambda ports: {ports[0]: [1, 2]}
+    code, client, _bridge, record_path = _run_with_fakes(monkeypatch, tmp_path, client=client, bridge=bridge)
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    captured = capsys.readouterr()
+    assert code == 1 and record["posts_sent"] == 0 and not client.posts
+    assert proc.SENTINEL_STOP in captured.out and "POSTS_SENT=0" in captured.out and proc.MSG_NO_WRITE in captured.out
+
+
+@pytest.mark.parametrize("change", ["exists", "inside", "missing-dir", "secret", "wrong-fingerprint", "stage"])
+def test_run_refusals_do_not_write_or_request(monkeypatch, tmp_path, change):
+    bridge = _Bridge("match")
+    client = _Client("match")
+    args = _args(tmp_path)
+    if change == "exists":
+        (tmp_path / "record.json").write_text("already", encoding="utf-8")
+    elif change == "inside":
+        args.out = os.path.join(proc.REPO_ROOT, "forbidden-evidence.json")
+    elif change == "missing-dir":
+        args.out = str(tmp_path / "missing" / "record.json")
+    elif change == "secret":
+        monkeypatch.setattr(proc, "_repo_state", lambda stage, module: dict(_state(stage), secret_file_present=False))
+    elif change == "wrong-fingerprint":
+        bridge.loaded_secret_fingerprint = lambda: "wrong-fingerprint"
+    elif change == "stage":
+        monkeypatch.setattr(proc, "_repo_state", lambda stage, module: dict(_state(stage), manifest_present=False))
+    monkeypatch.setattr(proc, "_bridge", lambda: bridge)
+    monkeypatch.setattr(proc, "_direct_client", lambda port: client)
+    code = proc._cmd_run
+    assert proc.main(["run", "--stage", "match", "--out", args.out]) == 2
+    assert not client.gets and not client.posts
+    assert not os.path.exists(args.out) or change == "exists"
+
+
+def test_run_continues_after_counted_direct_post_failure(monkeypatch, tmp_path):
+    client = _Client("match", post_failure=1)
+    code, client, _bridge, record_path = _run_with_fakes(monkeypatch, tmp_path, client=client)
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert code == 1 and record["posts_sent"] == 7
+    assert record["steps"]["n_missing"]["sent"] is True
+    assert "RuntimeError" in record["steps"]["n_missing"]["error"]
+    assert len(client.posts) == 5
+
+
+def _run_git(args, repo):
+    result = subprocess.run(["git"] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, check=False)
+    return result.returncode, result.stdout.strip(), result.stderr.strip()
+
+
+def _init_repo(tmp_path):
+    if not shutil.which("git"):
+        pytest.skip("git is unavailable")
+    repo = tmp_path / "repo"
+    (repo / "revit_mcp").mkdir(parents=True)
+    (repo / ".gitignore").write_text("_manifest.json\n", encoding="utf-8")
+    (repo / "revit_mcp" / "detail.py").write_bytes(b"# -*- coding: utf-8 -*-\nvalue = 1\n")
+    (repo / "revit_mcp" / "crlf.py").write_bytes(b"# -*- coding: utf-8 -*-\r\nvalue = 1\r\n")
+    _run_git(["init"], str(repo))
+    _run_git(["config", "user.email", "tests@example.invalid"], str(repo))
+    _run_git(["config", "user.name", "Tests"], str(repo))
+    _run_git(["add", "."], str(repo))
+    _run_git(["commit", "-m", "fixture"], str(repo))
+    (repo / "_manifest.json").write_text("{}\n", encoding="utf-8")
+    return repo
+
+
+def test_corrupt_cmd_and_restore_preserve_only_named_module(tmp_path):
+    repo = _init_repo(tmp_path)
+    proc.corrupt(str(repo), MODULE)
+    source = (repo / MODULE).read_bytes()
+    assert source.endswith(b"restore with tests/test_phase5_live_gate.py restore\n")
+    assert (repo / proc.PROBE_FILE).read_bytes().startswith(b"# -*- coding: utf-8 -*-\n")
+    assert _run_git(["status", "--porcelain"], str(repo))[1].splitlines() == ["M revit_mcp/detail.py", "?? revit_mcp/_zz_probe.py"]
+    assert proc.restore(str(repo), MODULE) == []
+    assert not (repo / "_manifest.json").exists() and not (repo / proc.PROBE_FILE).exists()
+    assert _run_git(["status", "--porcelain"], str(repo))[1] == ""
+    assert proc.restore(str(repo), MODULE) == []
+
+
+def test_corrupt_preserves_crlf_and_refuses_unsafe_states(tmp_path):
+    repo = _init_repo(tmp_path)
+    proc.corrupt(str(repo), "revit_mcp/crlf.py")
+    assert b"\r\n# phase5 live gate:" in (repo / "revit_mcp" / "crlf.py").read_bytes()
+    assert proc.restore(str(repo), "revit_mcp/crlf.py") == []
+    with pytest.raises(ValueError): proc.corrupt(str(repo), "revit_mcp/_private.py")
+    with pytest.raises(ValueError): proc.corrupt(str(repo), "tools/x.py")
+    (repo / "revit_mcp" / "detail.py").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(ValueError): proc.corrupt(str(repo), MODULE)
+
+
+def test_corrupt_refuses_missing_manifest_or_existing_probe(tmp_path):
+    repo = _init_repo(tmp_path)
+    (repo / "_manifest.json").unlink()
+    with pytest.raises(ValueError, match="manifest"):
+        proc.corrupt(str(repo), MODULE)
+    (repo / "_manifest.json").write_text("{}\n", encoding="utf-8")
+    probe = repo / proc.PROBE_FILE
+    probe.write_text("# existing\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="probe"):
+        proc.corrupt(str(repo), MODULE)
+
+
+def test_restore_incomplete_when_git_cannot_restore(monkeypatch, tmp_path):
+    repo = _init_repo(tmp_path)
+    proc.corrupt(str(repo), MODULE)
+    original = proc._git
+
+    def failing(args, current):
+        if args[:1] == ["checkout"]:
+            return 1, "", "planned failure"
+        return original(args, current)
+
+    monkeypatch.setattr(proc, "_git", failing)
+    reasons = proc.restore(str(repo), MODULE)
+    assert any("detail.py" in item for item in reasons)
+
+
+class _SecretBridge(object):
+    def __init__(self, secret): self.secret = secret
+    def load_secret(self): return self.secret
+
+
+def test_scan_secret_has_exact_status_without_secret_output(tmp_path, capsys):
+    secret = "a-secret-that-must-not-print"
+    clean = tmp_path / "clean.json"; clean.write_text("{}", encoding="utf-8")
+    found = tmp_path / "found.json"; found.write_text("x {} y".format(secret), encoding="utf-8")
+    absent = _SecretBridge(None)
+    assert proc.scan_secret([str(clean)], _SecretBridge(secret)) == (0, None)
+    assert proc.scan_secret([str(found)], _SecretBridge(secret)) == (1, str(found))
+    assert proc.scan_secret([str(clean)], absent) == (2, None)
+    assert secret not in capsys.readouterr().out + capsys.readouterr().err
+
+
+def test_scan_secret_command_prints_only_status_tokens(monkeypatch, tmp_path, capsys):
+    secret = "secret-never-in-console"
+    clean = tmp_path / "clean.json"; clean.write_text("{}", encoding="utf-8")
+    found = tmp_path / "found.json"; found.write_text(secret, encoding="utf-8")
+    monkeypatch.setattr(proc, "_bridge", lambda: _SecretBridge(secret))
+    assert proc.main(["scan-secret", str(clean)]) == 0
+    assert capsys.readouterr().out.strip() == "SECRET_ABSENT"
+    assert proc.main(["scan-secret", str(found)]) == 1
+    output = capsys.readouterr().out.strip()
+    assert output == "SECRET_FOUND {}".format(found)
+    assert secret not in output
+    monkeypatch.setattr(proc, "_bridge", lambda: _SecretBridge(None))
+    assert proc.main(["scan-secret", str(clean)]) == 2
+    assert capsys.readouterr().out.strip() == "SECRET_UNAVAILABLE"

@@ -3,19 +3,28 @@
 
 This older-tier standalone CPython 3.11+ script does no work at import, defines no
 ``test_*`` functions, makes no request, and never reads, logs, prints, persists, or
-sends a shared secret. Pytest collects only ``tests/unit``.
+sends a shared secret except that ``scan-secret`` loads it through ``bridge.load_secret``.
+Pytest collects only ``tests/unit``.
 
 Commands: ``template``, ``run``, ``classify``, ``classify-phase``, ``corrupt``,
-``restore``, and ``scan-secret``. Plans 05-12 completes run and maintenance commands.
-Output is PHASE5_GATE_OK or PHASE5_GATE_STOP. Exit status is 0 (ok), 1 (stop), or 2
-(usage). POSTS_SENT=0 means preflight stopped before a write and permits a fresh-output
-rerun after correction; POSTS_SENT>=1 consumes that stage permanently. Later operators
-fully restart Revit with no model, open one unsaved project in its UI, confirm exactly
-one listener, and make no concurrent MCP calls while this procedure runs.
+``restore``, and ``scan-secret``. Output is PHASE5_GATE_OK or PHASE5_GATE_STOP.
+Exit status is 0 (ok), 1 (stop), or 2 (usage). POSTS_SENT=0 means preflight stopped
+before a write and permits a fresh-output rerun; POSTS_SENT>=1 consumes that stage
+permanently. Do not make concurrent MCP calls while this procedure runs.
+
+Operator order: 05-13 runs ``scripts/dev_secret.py``,
+``deploy/make_manifest.py --allow-repo-dest --repo . --dest .``, restarts Revit, then
+runs ``run --stage match``. 05-14 runs ``corrupt --module revit_mcp/<module>.py``,
+restarts Revit, runs ``run --stage corrupt``, then ``restore --module``. 05-15 restarts
+Revit, runs ``run --stage cleanup``, ``classify-phase``, then ``scan-secret`` on every
+record. Each live write stage is one-shot.
 """
 import argparse
+import asyncio
+import datetime
 import json
 import os
+import subprocess
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -314,6 +323,8 @@ def _outside_repo(path):
 def _save(path, record):
     if os.path.exists(path): raise ValueError("record already exists")
     if not _outside_repo(path): raise ValueError("record path is inside repository")
+    directory = os.path.dirname(os.path.abspath(path))
+    if not os.path.isdir(directory): raise ValueError("record directory does not exist")
     with open(path, "x", encoding="utf-8", newline="\n") as handle: json.dump(record, handle, indent=2, sort_keys=True); handle.write("\n")
 
 
@@ -326,10 +337,327 @@ def _print(result):
     for reason in result["reasons"]: print("REASON={}".format(reason))
 
 
+MSG_NO_WRITE = "Nothing was written; the stage may be rerun with a fresh --out after correcting the stop reason."
+MSG_CONSUMED = "This stage is consumed and must not be run again."
+
+
 class _UsageError(Exception): pass
+
+
+class _FakeMCP(object):
+    """Small real-registration target: tools receive the same decorators as FastMCP."""
+    def __init__(self): self.tools = {}
+
+    def tool(self):
+        def decorate(func):
+            self.tools[func.__name__] = func
+            return func
+        return decorate
+
 
 class _Parser(argparse.ArgumentParser):
     def error(self, message): raise _UsageError(message)
+
+
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _plain(value):
+    """Copy a reply for evidence without retaining an envelope or other custom type."""
+    if isinstance(value, dict): return dict((str(k), _plain(v)) for k, v in value.items() if k != "_mcp")
+    if isinstance(value, (list, tuple)): return [_plain(v) for v in value]
+    if value is None or isinstance(value, (bool, int, float, str)): return value
+    return str(value)
+
+
+def _bridge():
+    """Lazy production bridge import: no transport or secret work occurs at script import."""
+    if REPO_ROOT not in sys.path: sys.path.insert(0, REPO_ROOT)
+    import bridge
+    return bridge
+
+
+def _direct_client(port):
+    """The direct HTTP seam for non-tool checks; tests replace it with a mock client."""
+    import httpx
+    return httpx.AsyncClient(base_url="http://127.0.0.1:{}".format(port), timeout=30.0)
+
+
+def _git(args, repo):
+    completed = subprocess.run(["git"] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
+
+
+def _valid_module(repo, module, require_clean=True):
+    if not isinstance(module, str) or not module.startswith("revit_mcp/") or not module.endswith(".py") or "/_" in module:
+        return "--module must be a tracked non-private revit_mcp/<name>.py"
+    code, _out, _err = _git(["ls-files", "--error-unmatch", "--", module], repo)
+    if code != 0: return "--module is not tracked: {}".format(module)
+    if require_clean:
+        code, out, _err = _git(["status", "--porcelain", "--", module], repo)
+        if code != 0 or out: return "--module has uncommitted changes: {}".format(module)
+    return None
+
+
+def _repo_state(stage, module, repo=REPO_ROOT):
+    manifest = os.path.join(repo, "_manifest.json")
+    probe = os.path.join(repo, PROBE_FILE.replace("/", os.sep))
+    module_path = os.path.join(repo, module.replace("/", os.sep)) if module else None
+    if module is None:
+        clean = True
+    else:
+        code, out, _err = _git(["status", "--porcelain", "--", module], repo)
+        clean = code == 0 and not out
+    return {"secret_file_present": os.path.isfile(os.path.join(repo, "revit_mcp", "_bridge_secret")),
+            "manifest_present": os.path.isfile(manifest), "probe_present": os.path.isfile(probe),
+            "module_clean": clean, "module_exists": bool(module_path and os.path.isfile(module_path))}
+
+
+def _stage_state_reason(stage, state):
+    required = {"match": (True, False, True), "corrupt": (True, True, False),
+                "cleanup": (False, False, True)}[stage]
+    current = (state["manifest_present"], state["probe_present"], state["module_clean"])
+    return None if current == required else "repository state does not fit {}".format(stage)
+
+
+def _run_refusal(args, bridge):
+    if not _is_int(args.port) or not 1 <= args.port <= 65535: return "--port must be 1..65535"
+    if not _text(args.out): return "--out must not be blank"
+    if os.path.exists(args.out): return "--out already exists"
+    if not _outside_repo(args.out): return "--out lies inside repository"
+    if not os.path.isdir(os.path.dirname(os.path.abspath(args.out))): return "--out directory is missing"
+    if args.stage != "match":
+        problem = _valid_module(REPO_ROOT, args.module, require_clean=args.stage == "cleanup")
+        if problem: return problem
+    elif args.module is not None: return "match does not accept --module"
+    state = _repo_state(args.stage, args.module)
+    if not state["secret_file_present"]: return "revit_mcp/_bridge_secret is absent"
+    fingerprint = bridge.loaded_secret_fingerprint()
+    if fingerprint == bridge.secret_fingerprint(WRONG_SECRET): return "WRONG_SECRET equals bridge secret fingerprint"
+    return _stage_state_reason(args.stage, state)
+
+
+def _record_step(record, label, kind, route, body, reply=None, error=None, http=None):
+    record["steps"][label] = {"kind": kind, "route": route, "sent": True, "http": http,
+                               "body": _plain(reply) if isinstance(reply, dict) else None,
+                               "text": reply if isinstance(reply, str) else json.dumps(_plain(reply), sort_keys=True),
+                               "error": error}
+    return record["steps"][label]
+
+
+def _response_json(response):
+    try: return response.json()
+    except (ValueError, TypeError): return None
+
+
+async def _direct_step(client, record, label, method, route, body=None):
+    if route not in ALLOWED_ENDPOINTS: raise ValueError("endpoint not allowed: {}".format(route))
+    sent = method == "POST"
+    if sent: record["posts_sent"] += 1
+    try:
+        if method == "GET": response = await client.get("/genpro_revit_mcp" + route)
+        else: response = await client.post("/genpro_revit_mcp" + route, content=json.dumps(body or {}), headers={"Content-Type": "text/plain; charset=utf-8"})
+        value = _response_json(response)
+        text = response.text if isinstance(response.text, str) else str(response.text)
+        step = {"kind": "direct", "route": route, "sent": True, "http": response.status_code,
+                "body": _plain(value), "text": text, "error": None}
+    except Exception as ex:
+        step = {"kind": "direct", "route": route, "sent": True, "http": None, "body": None,
+                "text": "", "error": "{}: {}".format(type(ex).__name__, ex)}
+    record["steps"][label] = step
+    return step
+
+
+async def _toolset(bridge, record):
+    import tools
+    fake = _FakeMCP()
+    replies = {}
+
+    async def posting(endpoint, data, *args, **kwargs):
+        record["posts_sent"] += 1
+        reply = await bridge.revit_post(endpoint, data, *args, **kwargs)
+        replies[("POST", endpoint)] = reply
+        return reply
+
+    async def getting(endpoint, *args, **kwargs):
+        reply = await bridge.revit_get(endpoint, *args, **kwargs)
+        replies[("GET", endpoint)] = reply
+        return reply
+
+    for name in ("revit_target", "discover_targets", "secret_fingerprint"):
+        if hasattr(bridge.revit_get, name):
+            setattr(getting, name, getattr(bridge.revit_get, name))
+    tools.register_tools(fake, getting, posting, getattr(bridge, "revit_image", None))
+    return fake.tools, replies
+
+
+def _tool_http(route, reply):
+    if not isinstance(reply, dict):
+        return None
+    if route == "/status/" or reply.get("status") in ("success", "partial"):
+        return 200
+    return None
+
+
+async def _tool_step(record, replies, label, route, func, *args, **kwargs):
+    try:
+        text = await func(*args, **kwargs)
+        method = "GET" if route == "/status/" else "POST"
+        reply = replies.get((method, route))
+        record["steps"][label] = {"kind": "tool", "route": route, "sent": True,
+                                   "http": _tool_http(route, reply), "body": _plain(reply) if isinstance(reply, dict) else None,
+                                   "text": text, "error": None}
+    except Exception as ex:
+        record["steps"][label] = {"kind": "tool", "route": route, "sent": True, "http": None,
+                                   "body": None, "text": "", "error": "{}: {}".format(type(ex).__name__, ex)}
+    return record["steps"][label]
+
+
+async def _live_preflight(bridge, client, args, record):
+    pre = record["preflight"]
+    try:
+        response = await client.get("/genpro_revit_mcp/status/")
+        pre["status_http"] = response.status_code
+        pre["status"] = _response_json(response)
+    except Exception as ex:
+        return "status request failed: {}: {}".format(type(ex).__name__, ex)
+    try: owners = bridge.listener_snapshot([args.port]).get(args.port)
+    except Exception: owners = None
+    pre["listeners"] = list(owners) if isinstance(owners, list) else owners
+    pre["bridge_fingerprint"] = bridge.loaded_secret_fingerprint()
+    pre["repo"] = _repo_state(args.stage, args.module)
+    state_reason = _stage_state_reason(args.stage, pre["repo"])
+    if state_reason is not None:
+        return state_reason
+    if response.status_code != 200: return "GET /status/ did not return 200"
+    if not (isinstance(owners, list) and len(owners) == 1 and _is_int(owners[0])): return "expected exactly one listener"
+    try:
+        documents = await client.get("/genpro_revit_mcp/documents/")
+        payload = _response_json(documents)
+        found = payload.get("documents") if isinstance(payload, dict) else None
+        pre["documents"] = len(found) if isinstance(found, list) else None
+        pre["document"] = found[0] if isinstance(found, list) and len(found) == 1 else None
+    except Exception as ex:
+        return "documents request failed: {}: {}".format(type(ex).__name__, ex)
+    if pre["documents"] != 1: return "expected exactly one document"
+    return None
+
+
+def _names(stage):
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S")
+    return {"p_create": "P5_P_CREATE_{}".format(stamp), "n_missing": "P5_N_MISSING_{}".format(stamp),
+            "n_mismatch": "P5_N_MISMATCH_{}".format(stamp), "m_create": "P5_M_CREATE_{}".format(stamp)}
+
+
+async def _run_steps(bridge, client, args, record):
+    names = record["inputs"]["names"]
+    tools, replies = await _toolset(bridge, record)
+    if args.stage == "match":
+        await _direct_step(client, record, "n_missing", "POST", "/create_level/", {"levels": [{"name": names["n_missing"], "elevation": 1100.0}]})
+        await _direct_step(client, record, "n_mismatch", "POST", "/create_level/", {"_mcp": {"secret": WRONG_SECRET}, "levels": [{"name": names["n_mismatch"], "elevation": 1200.0}]})
+        await _direct_step(client, record, "n_code", "POST", "/execute_code/", {"code": "pass"})
+        await _direct_step(client, record, "r_levels_open", "POST", "/document_levels/", {})
+        await _direct_step(client, record, "r_levels_wrong", "POST", "/document_levels/", {"_mcp": {"secret": WRONG_SECRET}})
+        try:
+            bridge._secret_cache = WRONG_SECRET
+            await _tool_step(record, replies, "b_wrong", "/create_level/", tools["create_level"], levels=[{"name": names["n_mismatch"], "elevation": 1300.0}])
+        finally:
+            bridge.reset_secret_cache()
+        await _tool_step(record, replies, "p_create", "/create_level/", tools["create_level"], levels=[{"name": names["p_create"], "elevation": 1400.0}])
+        await _direct_step(client, record, "p_levels", "GET", "/list_levels/")
+        await _tool_step(record, replies, "s_status", "/status/", tools["get_revit_status"])
+    elif args.stage == "corrupt":
+        await _direct_step(client, record, "n_missing", "POST", "/create_level/", {"levels": [{"name": names["m_create"], "elevation": 1500.0}]})
+        await _tool_step(record, replies, "m_create", "/create_level/", tools["create_level"], levels=[{"name": names["m_create"], "elevation": 1600.0}])
+        await _tool_step(record, replies, "m_code", "/execute_code/", tools["execute_revit_code"], code="pass")
+        await _direct_step(client, record, "r_levels_open", "POST", "/document_levels/", {})
+        await _direct_step(client, record, "p_levels", "GET", "/list_levels/")
+        await _tool_step(record, replies, "s_status", "/status/", tools["get_revit_status"])
+    else:
+        await _tool_step(record, replies, "p_create", "/create_level/", tools["create_level"], levels=[{"name": names["p_create"], "elevation": 1700.0}])
+        await _direct_step(client, record, "p_levels", "GET", "/list_levels/")
+        await _tool_step(record, replies, "s_status", "/status/", tools["get_revit_status"])
+
+
+async def _cmd_run(args):
+    bridge = _bridge()
+    refusal = _run_refusal(args, bridge)
+    if refusal:
+        print("USAGE: {}".format(refusal), file=sys.stderr)
+        return 2
+    record = evidence_template(args.stage)
+    record["started_at"] = _now()
+    record["inputs"].update({"port": args.port, "stamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S"),
+                             "module": args.module, "names": _names(args.stage)})
+    record["posts_sent"] = 0
+    client = _direct_client(args.port)
+    try:
+        reason = await _live_preflight(bridge, client, args, record)
+        if reason is None: await _run_steps(bridge, client, args, record)
+        else: record["stop_reason"] = reason
+    except Exception as ex:
+        record["stop_reason"] = "unexpected {}: {}".format(type(ex).__name__, ex)
+    finally:
+        close = getattr(client, "aclose", None)
+        if close is not None: await close()
+    _save(args.out, record)
+    result = classify_stage(args.stage, record)
+    _print(result)
+    if record["posts_sent"] == 0: print(MSG_NO_WRITE)
+    else: print(MSG_CONSUMED)
+    return 0 if result["verdict"] == VERDICT_OK else 1
+
+
+def corrupt(repo, module):
+    """Create the D-12 modified and unexpected files, refusing unrelated local work."""
+    if not os.path.isfile(os.path.join(repo, "_manifest.json")): raise ValueError("_manifest.json is absent")
+    if os.path.exists(os.path.join(repo, PROBE_FILE.replace("/", os.sep))): raise ValueError("probe already exists")
+    problem = _valid_module(repo, module)
+    if problem: raise ValueError(problem)
+    path = os.path.join(repo, module.replace("/", os.sep))
+    with open(path, "rb") as handle: source = handle.read()
+    ending = b"\r\n" if b"\r\n" in source else b"\n"
+    line = b"# phase5 live gate: deliberate integrity mismatch (D-12); restore with tests/test_phase5_live_gate.py restore"
+    with open(path, "ab") as handle: handle.write(ending + line + ending)
+    probe = os.path.join(repo, PROBE_FILE.replace("/", os.sep))
+    with open(probe, "wb") as handle: handle.write(b'# -*- coding: utf-8 -*-\n"Unexpected Phase 5 live-gate probe; never imported."\n')
+
+
+def restore(repo, module=None):
+    """Remove temporary integrity evidence and restore only the optional named tracked module."""
+    reasons = []
+    for relative in ("_manifest.json", "_manifest.json.tmp", PROBE_FILE):
+        path = os.path.join(repo, relative.replace("/", os.sep))
+        try:
+            if os.path.lexists(path): os.remove(path)
+        except OSError as ex: reasons.append("{}: {}".format(relative, ex))
+    if module is not None:
+        problem = _valid_module(repo, module, require_clean=False)
+        if problem: reasons.append(problem)
+        else:
+            code, _out, err = _git(["checkout", "--", module], repo)
+            if code != 0: reasons.append("{}: {}".format(module, err or "git checkout failed"))
+    checks = [PROBE_FILE]
+    if module is not None: checks.append(module)
+    for relative in checks:
+        code, out, _err = _git(["status", "--porcelain", "--", relative], repo)
+        if code != 0 or out: reasons.append("{} remains modified".format(relative))
+    if os.path.exists(os.path.join(repo, "_manifest.json")): reasons.append("_manifest.json remains")
+    return reasons
+
+
+def scan_secret(paths, bridge=None):
+    bridge = _bridge() if bridge is None else bridge
+    secret = bridge.load_secret()
+    if secret is None: return 2, None
+    for path in paths:
+        try:
+            with open(path, "rb") as handle: text = handle.read().decode("utf-8", "replace")
+        except OSError: return 2, None
+        if secret in text: return 1, path
+    return 0, None
 
 
 def main(argv=None):
@@ -338,7 +666,10 @@ def main(argv=None):
         template = commands.add_parser("template"); template.add_argument("--stage", choices=STAGES, required=True)
         classify = commands.add_parser("classify"); classify.add_argument("--stage", choices=STAGES, required=True); classify.add_argument("record")
         phase = commands.add_parser("classify-phase"); phase.add_argument("records", nargs=3)
-        for name in ("run", "corrupt", "restore", "scan-secret"): commands.add_parser(name)
+        run = commands.add_parser("run"); run.add_argument("--stage", choices=STAGES, required=True); run.add_argument("--out", required=True); run.add_argument("--port", type=int, default=48884); run.add_argument("--module")
+        corrupt_cmd = commands.add_parser("corrupt"); corrupt_cmd.add_argument("--module", required=True)
+        restore_cmd = commands.add_parser("restore"); restore_cmd.add_argument("--module")
+        scan = commands.add_parser("scan-secret"); scan.add_argument("files", nargs="+")
         args = parser.parse_args(argv)
         if args.command == "template": print(json.dumps(evidence_template(args.stage), indent=2, sort_keys=True)); return 0
         if args.command == "classify": result = classify_stage(args.stage, _load(args.record)); _print(result); return 0 if result["verdict"] == VERDICT_OK else 1
@@ -346,7 +677,19 @@ def main(argv=None):
             result = classify_phase([_load(path) for path in args.records]); print(SENTINEL_OK if result["verdict"] == VERDICT_OK else SENTINEL_STOP)
             for item in result["stages"]: print("STAGE={} VERDICT={} POSTS_SENT={}".format(item["stage"], item["verdict"], item["posts_sent"] if item["posts_sent"] is not None else "unknown"))
             return 0 if result["verdict"] == VERDICT_OK else 1
-        raise _UsageError("{} is not implemented until plan 05-12".format(args.command))
+        if args.command == "run": return asyncio.run(_cmd_run(args))
+        if args.command == "corrupt":
+            corrupt(REPO_ROOT, args.module); print("CORRUPTED modified={} unexpected={}".format(args.module, PROBE_FILE)); return 0
+        if args.command == "restore":
+            reasons = restore(REPO_ROOT, args.module)
+            if not reasons: print("RESTORED clean"); return 0
+            print("RESTORE_INCOMPLETE: {}".format("; ".join(reasons)), file=sys.stderr); return 1
+        if args.command == "scan-secret":
+            code, found = scan_secret(args.files)
+            if code == 0: print("SECRET_ABSENT")
+            elif code == 1: print("SECRET_FOUND {}".format(found))
+            else: print("SECRET_UNAVAILABLE")
+            return code
     except (OSError, ValueError, json.JSONDecodeError, _UsageError) as ex:
         print("USAGE: {}".format(ex), file=sys.stderr); return 2
 

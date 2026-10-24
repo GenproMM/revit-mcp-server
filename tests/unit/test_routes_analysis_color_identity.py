@@ -45,6 +45,7 @@ REGISTRARS = {
     "analysis": "register_analysis_routes",
     "annotation": "register_annotation_routes",
     "building": "register_building_routes",
+    "clash": "register_clash_routes",
     "colors": "register_color_routes",
     "detail": "register_detail_routes",
 }
@@ -70,6 +71,17 @@ READS = {
     ("analysis", "/model_statistics/", "GET"): None,
     ("colors", "/list_category_parameters/", "POST"): {"category_name": "Walls"},
 }
+
+# Phase 5 (05-02): clash.py is one more registrar of this suite. Its single route is an
+# open POST read: no document selector, never gated, only the envelope is stripped.
+CLASH_READS = {
+    ("clash", "/clash_check/", "POST"): {},
+}
+
+# The four POST reads of the suite (they carry the envelope but are never refused).
+POST_READS = dict((key, body) for key, body in READS.items() if key[2] == "POST")
+POST_READS.update(CLASH_READS)
+POST_READ_IDS = ["{}:{}".format(key[0], key[1]) for key in POST_READS]
 
 MUTATION_IDS = ["{}:{}".format(module, route) for module, route in MUTATIONS]
 
@@ -378,7 +390,7 @@ class HostAppTrap(object):
         raise AssertionError("HOST_APP." + name + " was read; use the injected uiapp")
 
 
-ROUTE_MODULES = ("utils", "analysis", "annotation", "building", "colors", "detail")
+ROUTE_MODULES = ("utils", "analysis", "annotation", "building", "clash", "colors", "detail")
 
 
 @pytest.fixture
@@ -791,6 +803,8 @@ def test_every_registered_route_is_classified(world, module_name):
     registered = set(load(world, module_name))
     expected = set((route, "POST") for (module, route) in MUTATIONS if module == module_name)
     expected |= set((route, method) for (module, route, method) in READS if module == module_name)
+    expected |= set((route, method)
+                    for (module, route, method) in CLASH_READS if module == module_name)
     assert registered == expected, (
         "classify every route of revit_mcp/{}.py as a mutation or a read here".format(module_name))
 
@@ -1176,6 +1190,51 @@ def test_with_an_integrity_mismatch_a_mutation_is_423_before_any_side_effect(
     reply = call(world, handler_of(world, *key), request=request)
     _assert_gate_refusal(world, reply, 423)
     assert reply.data["files"] == ["revit_mcp/detail.py"]
+
+
+# ------------------------------- Phase 5 (05-02): the four open POST reads strip, never refuse
+#
+# /ai_filter/, /material_quantities/, /list_category_parameters/ and /clash_check/ stay
+# available whatever the request carries (SEC-05); their handlers only drop the reserved
+# key so it never reaches the route's own parse (SEC-06).
+
+OPEN_READ_VARIANTS = [
+    ("no-envelope", None),
+    ("wrong-secret", WRONG_SECRET),
+    ("valid-secret", TEST_SECRET),
+]
+
+
+def _assert_open(world, reply, request, sent_envelope):
+    assert reply.status not in (401, 423), reply.data
+    assert world.guard_calls == []
+    data = request.data
+    assert data is not None
+    assert b"_mcp" not in data and TEST_SECRET.encode("utf-8") not in data
+    assert WRONG_SECRET.encode("utf-8") not in data
+    if sent_envelope:
+        assert isinstance(json.loads(data.decode("utf-8")), dict)
+    assert TEST_SECRET not in repr(reply.data) and WRONG_SECRET not in repr(reply.data)
+
+
+@pytest.mark.parametrize("variant", OPEN_READ_VARIANTS, ids=[v[0] for v in OPEN_READ_VARIANTS])
+@pytest.mark.parametrize("key", list(POST_READS), ids=POST_READ_IDS)
+def test_an_open_read_needs_no_secret_and_never_sees_the_envelope(world, key, variant):
+    _name, secret = variant
+    module_name, route, method = key
+    request = types.SimpleNamespace(data=enveloped_body(POST_READS[key], secret=secret))
+    reply = call(world, handler_of(world, module_name, route, method), request=request)
+    _assert_open(world, reply, request, sent_envelope=secret is not None)
+
+
+@pytest.mark.parametrize("key", list(POST_READS), ids=POST_READ_IDS)
+def test_open_reads_work_when_the_gate_state_is_uninitialized(world, monkeypatch, key):
+    from revit_mcp import security
+    monkeypatch.setattr(security, "_STATE", None)
+    module_name, route, method = key
+    request = types.SimpleNamespace(data=enveloped_body(POST_READS[key]))
+    reply = call(world, handler_of(world, module_name, route, method), request=request)
+    _assert_open(world, reply, request, sent_envelope=True)
 
 
 # ------------------------------------------------------------------- helper contracts

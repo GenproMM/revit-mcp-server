@@ -4,7 +4,10 @@ r"""Write the integrity manifest of a published extension copy.
     "%MCP_PYEXE%" "%~dp0make_manifest.py" --repo "%REPO%" --dest "%DEST%"
 
 Run at publish time, after the files have been copied to DEST. It writes
-DEST\_manifest.json (and nothing else, and never inside the git working tree):
+DEST\_manifest.json (and nothing else, and never inside the git working tree, with one
+exception: ``--allow-repo-dest`` accepts DEST equal to the repository root, and only
+when ``git check-ignore`` reports _manifest.json ignored there, so the file can never
+be committed; it exists for the developer check of a junction-loaded extension, D-11):
 
     {"schema": 1, "generated_at": "...Z", "commit": "<40 hex>",
      "files": {"revit_mcp/x.py": "<sha256 hex>", ...}}
@@ -97,23 +100,48 @@ def current_commit(repo, run=subprocess.run):
     return sha
 
 
-def _refuse_repo_dest(repo, dest):
-    """Refuse a destination that is, or lies inside, the git working tree."""
+def _refuse_repo_dest(repo, dest, allow=False, run=subprocess.run):
+    """Refuse a destination that is, or lies inside, the git working tree.
+
+    With ``allow`` (D-11) the one accepted in-repo destination is the repository root,
+    and only while git ignores _manifest.json there; any other in-repo path, or an
+    un-ignored root, is still refused.
+    """
     real_repo = os.path.normcase(os.path.realpath(repo))
     real_dest = os.path.normcase(os.path.realpath(dest))
     try:
         inside = os.path.commonpath([real_repo, real_dest]) == real_repo
     except ValueError:  # different drives
         inside = False
-    if inside:
+    if not inside:
+        return
+    if not allow:
         raise ManifestError(
             "refusing to write a manifest into the git working tree (INTG-08)"
         )
+    if real_dest != real_repo:
+        raise ManifestError(
+            "--allow-repo-dest accepts only the repository root, not a folder inside "
+            "it (INTG-08)"
+        )
+    try:
+        done = run(
+            ["git", "-C", repo, "check-ignore", "-q", "--", MANIFEST_NAME],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        done = None
+    if done is None or done.returncode != 0:
+        raise ManifestError(
+            "refusing: {} would not be git-ignored in {} and could be committed "
+            "(INTG-08)".format(MANIFEST_NAME, repo)
+        )
 
 
-def build_manifest(repo, dest, commit=None, now=None, run=subprocess.run):
+def build_manifest(repo, dest, commit=None, now=None, run=subprocess.run,
+                   allow_repo_dest=False):
     """The manifest dict for the published copy in ``dest`` of the checkout ``repo``."""
-    _refuse_repo_dest(repo, dest)
+    _refuse_repo_dest(repo, dest, allow=allow_repo_dest, run=run)
     tracked = tracked_files(repo, run=run)
     files = {}
     for relpath in tracked:
@@ -195,17 +223,27 @@ def main(argv=None):
     parser.add_argument("--check", action="store_true",
                         help="write nothing: print the integrity state of the published tree in "
                              "--dest and exit 0 only for verified_match (--repo is ignored)")
+    parser.add_argument("--allow-repo-dest", action="store_true",
+                        help="D-11 developer check only: write _manifest.json into the "
+                             "repository root of a junction-loaded extension; refused "
+                             "unless the file is git-ignored there")
     args = parser.parse_args(argv)
     if args.check:
         return check_tree(args.dest)
     try:
-        manifest = build_manifest(args.repo, args.dest)
+        manifest = build_manifest(args.repo, args.dest,
+                                  allow_repo_dest=args.allow_repo_dest)
         path = write_manifest(args.dest, manifest)
     except (ManifestError, OSError) as exc:
         sys.stderr.write("ERROR: {}\n".format(exc))
         return 1
     print("MANIFEST written: {} ({} files, commit {})".format(
         path, len(manifest["files"]), manifest["commit"][:12]))
+    if args.allow_repo_dest:
+        sys.stderr.write(
+            "WARNING: developer manifest written into the repository root; delete "
+            "{} after the live check\n".format(path)
+        )
     return 0
 
 

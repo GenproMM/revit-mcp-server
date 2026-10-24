@@ -124,6 +124,32 @@ def _in_truth_context(node, parents):
     return False
 
 
+def _is_request_data(node):
+    """request.data, as a read."""
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "data"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "request"
+        and isinstance(node.ctx, ast.Load)
+    )
+
+
+def _raw_body_findings(label, tree, parents):
+    """request.data reads that are neither parse_request_data's argument nor a truthiness test."""
+    found = set()
+    for node in ast.walk(tree):
+        if not _is_request_data(node):
+            continue
+        parent = parents.get(node)
+        if _is_parser_call(parent) and any(arg is node for arg in parent.args):
+            continue
+        if _in_truth_context(node, parents):
+            continue
+        found.add((label, node.lineno, "raw request.data read outside parse_request_data"))
+    return found
+
+
 def _call_name(call):
     func = call.func
     if isinstance(func, ast.Name):
@@ -336,14 +362,16 @@ def scan_source(label, source):
         tree = ast.parse(source)
     except (SyntaxError, ValueError) as exc:
         return [(label, getattr(exc, "lineno", None) or 1, "source does not parse")]
-    flow = _Flow(label, _parent_map(tree))
+    parents = _parent_map(tree)
+    flow = _Flow(label, parents)
     # Every function body is analysed from an empty state, so a handler nested in a
     # register_*_routes function is found whatever its depth. The enclosing walk also
     # reaches it with the outer state; the findings set merges the duplicates.
     for node in ast.walk(tree):
         if isinstance(node, _FUNCTIONS):
             flow.visit_block(node.body, set())
-    return sorted(flow.findings, key=lambda item: (item[1], item[2]))
+    found = flow.findings | _raw_body_findings(label, tree, parents)
+    return sorted(found, key=lambda item: (item[1], item[2]))
 
 
 # ------------------------------------------------------------------------------ inputs
@@ -395,6 +423,35 @@ def scan_git_rev(repo, rev):
     return results
 
 
+def scan_directory(path):
+    """Scan every *.py under a directory (a revit_mcp folder). Returns {label: [findings]}.
+
+    Labels are paths relative to the directory with forward slashes. __pycache__ is
+    skipped; nothing is written and nothing is imported.
+    """
+    if not os.path.isdir(path):
+        raise ScanError("not a directory: {}".format(path))
+    results = {}
+    for folder, dirs, names in os.walk(path):
+        dirs[:] = sorted(name for name in dirs if name != "__pycache__")
+        for name in sorted(names):
+            if not name.endswith(".py"):
+                continue
+            full = os.path.join(folder, name)
+            label = os.path.relpath(full, path).replace(os.sep, "/")
+            try:
+                with open(full, "rb") as handle:
+                    source = _decode(handle.read())
+            except (IOError, OSError) as exc:
+                raise ScanError("cannot read {}: {}".format(label, exc))
+            except UnicodeDecodeError:
+                raise ScanError("{} is not UTF-8".format(label))
+            results[label] = scan_source(label, source)
+    if not results:
+        raise ScanError("no .py files under {}".format(path))
+    return results
+
+
 # ------------------------------------------------------------------------------- main
 
 
@@ -420,7 +477,13 @@ def main(argv=None):
         description="Static D-06 check: does an extension tree tolerate the _mcp key "
         "in every POST body? Reads source only and writes nothing."
     )
-    parser.add_argument(
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--dir",
+        help="scan every *.py in this folder, for example the extension's revit_mcp "
+        "folder on the main share",
+    )
+    source.add_argument(
         "--git-rev",
         help="scan revit_mcp/*.py of this git revision (the pre-phase tree is c187004)",
     )
@@ -432,11 +495,11 @@ def main(argv=None):
     args = _parse(parser, argv)
     if args is None:
         return 2
-    if not args.git_rev:
-        print("ERROR: give --git-rev REV")
-        return 2
     try:
-        results = scan_git_rev(args.repo, args.git_rev)
+        if args.dir:
+            results = scan_directory(args.dir)
+        else:
+            results = scan_git_rev(args.repo, args.git_rev)
     except ScanError as exc:
         print("ERROR: {}".format(exc))
         return 2

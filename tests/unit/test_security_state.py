@@ -5,11 +5,12 @@ INTG-03, SEC-06; Phase 5 plan 05-01). Needs no Revit.
 initialize() is pinned on temporary extension trees, the gate (gate_or_response) and the
 open-read strip (strip_envelope) on request doubles. The fake pyRevit holds only
 ``routes.make_response``, so a refusal comes back as a (status, data) pair. Plan 05-16
-adds the startup rows to this file.
+adds the startup rows to this file (every name contains "startup").
 """
 
 import ast
 import builtins
+import importlib.util
 import json
 import os
 import sys
@@ -465,3 +466,164 @@ def test_initialize_gate_and_strip_never_write_anything(tmp_path, monkeypatch):
         assert security.gate_or_response(_request(None)).status == 401
     assert security._STATE["secret"] == TEST_SECRET
 
+
+# ---------------------------------------------------------------------------
+# startup.py initializes the gate (plan 05-16, INTG-02, INTG-07, T-05-04)
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ALIAS = "genpro_revit_mcp"
+HELPERS = ("registry.py", "security.py", "trust.py", "integrity.py", "textutils.py")
+
+
+def _startup_source():
+    with open(os.path.join(REPO_ROOT, "startup.py"), encoding="utf-8") as handle:
+        return handle.read()
+
+
+def test_startup_source_initializes_security_between_identity_and_the_domain_loop():
+    source = _startup_source()
+    reset = source.index("registry.reset()")
+    identity = source.index("initialize_process_identity()")
+    call = source.index("security.initialize(")
+    loop = source.index("for name in _domain_modules(package)")
+    assert reset < identity < call < loop
+    tree = ast.parse(source)
+    guarded = [n for n in ast.walk(tree) if isinstance(n, ast.Try)
+               and any(isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                       and c.func.attr == "initialize"
+                       and isinstance(c.func.value, ast.Name) and c.func.value.id == "security"
+                       for stmt in n.body for c in ast.walk(stmt))]
+    assert len(guarded) == 1
+    recorded = [t for h in guarded[0].handlers for st in h.body if isinstance(st, ast.Assign)
+                for t in st.targets if isinstance(t, ast.Subscript)
+                and isinstance(t.slice, ast.Constant) and t.slice.value == "security"
+                and ast.dump(t.value) == ast.dump(ast.parse("registry.FAILED").body[0].value)]
+    assert len(recorded) == 1
+
+
+@pytest.fixture
+def startup_tree(tmp_path, monkeypatch):
+    """The real startup.py run under CPython from a temporary extension tree."""
+    table = {}
+
+    class API(object):
+        def __init__(self, name):
+            self.name = name
+
+        def route(self, pattern, methods):
+            def decorate(fn):
+                for method in methods:
+                    table[(self.name, method, pattern)] = fn
+                return fn
+            return decorate
+
+    def make_response(data=None, status=200, headers=None):
+        return types.SimpleNamespace(status=status, data=data)
+
+    monkeypatch.setitem(sys.modules, "pyrevit", types.SimpleNamespace(
+        routes=types.SimpleNamespace(API=API, make_response=make_response)))
+
+    def drop_alias():
+        for name in list(sys.modules):
+            if name == ALIAS or name.startswith(ALIAS + "."):
+                del sys.modules[name]
+
+    drop_alias()
+    package = tmp_path / "revit_mcp"
+    package.mkdir()
+    (package / "__init__.py").write_bytes(b"# -*- coding: utf-8 -*-\n")
+    (package / "example.py").write_bytes(
+        b"# -*- coding: utf-8 -*-\n"
+        b"def register_example_routes(api):\n"
+        b"    @api.route('/status/', methods=['GET'])\n"
+        b"    def status():\n"
+        b"        return 'ok'\n")
+    (tmp_path / "startup.py").write_bytes(
+        open(os.path.join(REPO_ROOT, "startup.py"), "rb").read())
+
+    def build(helpers=HELPERS, secret=TEST_SECRET, stubs=None):
+        for name in helpers:
+            with open(os.path.join(REPO_ROOT, "revit_mcp", name), "rb") as handle:
+                (package / name).write_bytes(handle.read())
+        for name, text in (stubs or {}).items():
+            (package / name).write_bytes(text.encode("utf-8"))
+        if secret is not None:
+            (package / trust.SECRET_FILE_NAME).write_bytes(secret.encode("utf-8"))
+
+    def load():
+        spec = importlib.util.spec_from_file_location("startup_under_test", str(tmp_path / "startup.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    yield build, load, str(tmp_path)
+    drop_alias()
+
+
+def test_startup_loaded_from_a_tree_without_a_manifest_opens_the_gate_with_its_own_secret(startup_tree):
+    build, load, root = startup_tree
+    build()
+    load()
+    registry = sys.modules[ALIAS + ".registry"]
+    alias_security = sys.modules[ALIAS + ".security"]
+    assert alias_security._STATE["secret"] == TEST_SECRET
+    assert alias_security._STATE["integrity"]["state"] == trust.INTEGRITY_UNVERIFIABLE
+    assert alias_security._STATE["integrity"]["reason"] == trust.REASON_MANIFEST_MISSING
+    assert "security" not in registry.FAILED
+    assert registry.REGISTERED == ["example"]
+    ok = types.SimpleNamespace(data=enveloped_body({"a": 1}))
+    assert alias_security.gate_or_response(ok) is None
+    assert json.loads(ok.data) == {"a": 1}
+    refused = alias_security.gate_or_response(types.SimpleNamespace(data=enveloped_body({"a": 1}, secret=None)))
+    assert refused.status == 401 and refused.data["auth"] == "missing"
+
+
+def test_startup_records_an_initialize_failure_and_still_registers_every_domain(startup_tree):
+    build, load, root = startup_tree
+    build(helpers=[h for h in HELPERS if h != "security.py"],
+          stubs={"security.py": "def initialize(root, package_dir):\n"
+                                "    raise RuntimeError('boom')\n"})
+    load()
+    registry = sys.modules[ALIAS + ".registry"]
+    assert registry.FAILED["security"] == "RuntimeError: boom"
+    assert registry.REGISTERED == ["example"]
+
+
+def test_startup_records_a_missing_security_module_and_still_registers_every_domain(startup_tree):
+    build, load, root = startup_tree
+    build(helpers=[h for h in HELPERS if h != "security.py"])
+    load()
+    registry = sys.modules[ALIAS + ".registry"]
+    assert registry.FAILED["security"].startswith(("ModuleNotFoundError", "ImportError"))
+    assert registry.REGISTERED == ["example"]
+
+
+def test_startup_secret_is_not_in_the_failure_record_or_the_log(startup_tree, caplog):
+    build, load, root = startup_tree
+    build(helpers=[h for h in HELPERS if h != "security.py"],
+          stubs={"security.py": "def initialize(root, package_dir):\n"
+                                "    raise RuntimeError('boom')\n"})
+    with caplog.at_level("DEBUG"):
+        load()
+    registry = sys.modules[ALIAS + ".registry"]
+    assert TEST_SECRET not in repr(registry.FAILED)
+    assert TEST_SECRET not in caplog.text
+
+
+def test_startup_check_integrity_raising_keeps_the_gate_closed(monkeypatch, tmp_path):
+    root = str(tmp_path / "ext")
+    _build_tree(root)
+    _initialize(root)
+    assert security._STATE is not None
+
+    def boom(_root):
+        raise RuntimeError("manifest reader exploded")
+
+    monkeypatch.setattr(integrity, "check_integrity", boom)
+    with pytest.raises(RuntimeError):
+        _initialize(root)
+    assert security._STATE is None
+    refused = security.gate_or_response(types.SimpleNamespace(data=enveloped_body({"a": 1})))
+    assert refused.status == 401
+    assert refused.data["auth"] == "server_not_configured"

@@ -1,20 +1,21 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.1
-current_phase: 5
-current_phase_name: Live secret gate and integrity enforcement
+current_phase: 06
+current_phase_name: Structured audit log of true outcomes
 current_plan: Not started
-status: executing
-stopped_at: Phase 5 context gathered
-last_updated: "2026-10-24T09:37:52.904Z"
-last_activity: 2026-10-23
-last_activity_desc: Phase 04 complete, transitioned to Phase 5
-state_head: c187004468d3cd2dd64036edffb8eb724733bc7e
+status: planning
+stopped_at: Phase 5 complete, ready to plan Phase 06
+last_updated: "2026-10-24T23:38:27.906Z"
+last_activity: 2026-10-25
+last_activity_desc: Phase 5 complete, transitioned to Phase 06
+state_head: 03eee55e2bb5fea135dc5dbe0a84c80dc9e2c8b3
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 63
-  completed_plans: 47
+  completed_plans: 63
+  percent: 71
 milestone_name: Доверенный мост
 ---
 
@@ -25,24 +26,24 @@ milestone_name: Доверенный мост
 See: .planning/PROJECT.md (updated 2026-10-14)
 
 **Core value:** Ассистент может достоверно читать и изменять модель Revit — и инженер может доверять тому, что ответ сервера описывает то, что действительно произошло.
-**Current focus:** Phase 04 — Honest outcomes on every mutating route
+**Current focus:** Phase 05 — Live secret gate and integrity enforcement
 
 ## Current Position
 
-Phase: 5 (Live secret gate and integrity enforcement) — READY TO EXECUTE
+Phase: 06 — Structured audit log of true outcomes
 Current Plan: Not started
 Total Plans in Phase: 16
-Plan: 11 of 11
-Status: Ready to execute
-Last activity: 2026-10-23 — Phase 04 complete, transitioned to Phase 5
+Plan: 4 of 16
+Status: Ready to plan
+Last activity: 2026-10-25 — Phase 5 complete, transitioned to Phase 06
 
-Progress: [██████░░░░] 57% of phase 02 plans (19/20)
+Progress: [███████░░░] 71% of phase 02 plans (19/20)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 47
+- Total plans completed: 63
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -54,6 +55,7 @@ Progress: [██████░░░░] 57% of phase 02 plans (19/20)
 | 02 | 20 | - | - |
 | 03 | 9 | - | - |
 | 04 | 11 | - | - |
+| 5 | 16 | - | - |
 
 **Recent Trend:**
 
@@ -108,6 +110,17 @@ Progress: [██████░░░░] 57% of phase 02 plans (19/20)
 | Phase 04 P10 | 9 min | 2 tasks | 2 files |
 | Phase 04 P08 | 6 min | 2 tasks | 6 files |
 | Phase 04 P09 | 20 min | 3 tasks | 15 files |
+| Phase 05 P01 | 35 min | 2 tasks | 10 files |
+| Phase 05 P08 | interrupted-resume | 3 tasks | 5 files |
+| Phase 05 P09 | 25 min | 2 tasks | 2 files |
+| Phase 05 P02 | 20 min | 2 tasks | 7 files |
+| Phase 05 P03 | 15 min | 2 tasks | 6 files |
+| Phase 05 P04 | 12 min | 2 tasks | 6 files |
+| Phase 05 P05 | 25min | 2 tasks | 7 files |
+| Phase 05 P16 | 7 min | 2 tasks | 6 files |
+| Phase 05 P07 | 13 min | 3 tasks | 11 files |
+| Phase 05 P14 | 35min | 3 tasks | 1 files |
+| Phase 05 P15 | n/a | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -145,6 +158,15 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 04]: 04-10: a preflight stop (POSTS_SENT=0) may be rerun to a fresh --out; any run that handed a POST to the bridge (a raising POST counts) consumes the one-shot live gate — Live write steps never repeat; posts_sent is counted before each revit_post call
 - [Phase 04]: 04-08: D-02 static rule enforced by scripts/conventions.py (no Commit outside module-level commit_and_report, no discarded swallower), wired into check_route_module; contributor kit zip must be rebuilt at release
 - [Phase 04]: 04-09: tool docstrings promise only the statuses their route can return (classes P/S/E/A/EXEMPT), pinned by tests/unit/test_outcome_docstrings.py
+- [Phase 05]: 05-01: gate order is state, secret (trust.check_secret), then integrity; a wrong secret is 401 even under a verified mismatch — D-04; one gate, secret first
+- [Phase 05]: 05-01: strip_envelope parses once to test for _mcp; bodies without the key stay byte-identical — Pitfall 3 truthiness; never refuses open reads
+- [Phase 05]: 05-08: --allow-repo-dest accepted only at repo root and only when _manifest.json is git-ignored; SMB rename-while-open probe deferred to 05-10 pilot checklist
+- [Phase 05]: 05-09: D-06 static scan tracks only parse_request_data(<x>.data); pre-phase tree c187004 is ENVELOPE_SCAN_OK (31 modules), no payload-first blocker; pilot rehearsal remains the live half
+- [Phase 05]: 05-03: suite request_of replaced by gate_support.request_of; every document/interop row sends the envelope — same shape as 05-02; keeps pre-existing rows valid once handlers are gated
+- [Phase 05]: 05-05: gated /execute_code/, /open_model/, /activate_document/ before any stamp or Revit read; open reads strip the envelope
+- [Phase 05]: 05-16: bridge.revit_post builds the _mcp envelope before _dispatch (forged body is NOT sent, not outcome-unknown); secret loaded lazily and memoized with an unset sentinel; startup initializes security once, failure isolated in registry.FAILED['security'] with gate closed
+- [Phase 05]: 05-07: health degrades for verified_mismatch, exposed bind and missing extension secret; unverifiable integrity never degrades — INTG-07 and 03 D-16: reported, never blocking
+- [Phase 05]: 05-13: live match stage PASS (PHASE5_GATE_OK, POSTS_SENT=7, S1-match-3.json) on a user-approved one-time rerun after runner fixes 9aa9876; temporary manifest kept for 05-14, no tracked revit_mcp/startup.py/extension.json edits until 05-15
 
 ### Roadmap Evolution
 
@@ -177,7 +199,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-24T07:45:54.605Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-live-secret-gate-and-integrity-enforcement/05-CONTEXT.md
+Last session: 2026-10-24T20:36:05.590Z
+Stopped at: Phase 5 complete, ready to plan Phase 06
+Resume file: None
 Next boundary: prepare bounded 02-02 recheck and require full Revit close/reopen before any live route; no G6 or broad rollout

@@ -1,9 +1,10 @@
 ---
 phase: 05-live-secret-gate-and-integrity-enforcement
 verified: 2026-10-24T21:30:00Z
-status: human_needed
+status: passed
 score: 3/3 roadmap success criteria verified (16/16 requirement IDs accounted for)
 covered_files:
+
   - .planning/REQUIREMENTS.md
   - .planning/phases/05-live-secret-gate-and-integrity-enforcement/05-01-PLAN.md
   - .planning/phases/05-live-secret-gate-and-integrity-enforcement/05-01-SUMMARY.md
@@ -54,11 +55,13 @@ covered_files:
   - tests/unit/test_phase5_status_diagnostics.py
   - tests/unit/test_security_state.py
   - tools/status_tools.py
+
 covered_digest: "v1:sha256:c6ba604d02cd00fabd2aa5edddbe9e7850568539c04b4ea2c5ddff839503046d"
 behavior_unverified: 0
 overrides_applied: 0
 gaps: []
 human_verification:
+
   - test: "R3 pilot-first rollout: D-06 payload-first rehearsal on the pilot share (new payload against the old pilot extension keeps mutations working, then the pilot extension), plus `scripts/scan_envelope_tolerance.py --dir <main share ext>\\revit_mcp` printing ENVELOPE_SCAN_OK on the main share"
     expected: "Rehearsal succeeds with no lost mutation window; scanner prints ENVELOPE_SCAN_OK on the share copy"
     why_human: "Needs the pilot machine and share; one-way door per ROADMAP R3. Runbook: deploy/RELEASE-RUNBOOK.md sections 5 / 6.3 (plan 05-10). Not a live-gate criterion; it is the release step that follows phase close."

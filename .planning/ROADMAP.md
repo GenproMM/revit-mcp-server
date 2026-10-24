@@ -38,7 +38,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Live identity, ambiguity refusal, and multi-document addressing** - Every response names the document and process that handled it, two listeners on one port produce an explicit refusal instead of a coin-flip, and an engineer can list, address, and switch between documents open in one Revit session (completed 2026-10-23)
 - [x] **Phase 3: Secret gate and payload integrity (unit-verified)** - The shared-secret compare and the file-manifest integrity check are built and unit-tested on both runtimes, plus the build pipeline that generates the secret and the manifest, ready to wire in (completed 2026-10-23)
 - [x] **Phase 4: Honest outcomes on every mutating route** - Every mutating route, including the two known stragglers, reports what actually happened in Revit rather than an assumed success (completed 2026-10-23)
-- [ ] **Phase 5: Live secret gate and integrity enforcement** - The Phase 3 secret gate and integrity check are wired into the live chokepoint and binding
+- [x] **Phase 5: Live secret gate and integrity enforcement** - The Phase 3 secret gate and integrity check are wired into the live chokepoint and binding (completed 2026-10-25)
 - [ ] **Phase 6: Structured audit log of true outcomes** - Every mutation lands in a local, rotation-capped JSONL log carrying the same honest outcome the client saw, without leaking the secret
 - [ ] **Phase 7: Repository-owned mutation safety and human approval** - Редактируемые правила, объяснение риска и одноразовое подтверждение опасных операций реализованы в этом репозитории; Hermes Fork не изменяется, Jev необязателен и не ослабляет правила
 
@@ -230,42 +230,42 @@ Plans:
 
 **Note (planning, 2026-10-24):** per 05-CONTEXT D-01 the gate is an explicit first call in every non-GET route handler (no wrapper in `startup.py`); `startup.py` only initializes the gate state and runs the integrity check at load.
 
-**Plans:** 16 plans
+**Plans:** 16/16 plans complete
 
 Plans:
 **Wave 1**
 
-- [ ] 05-01-PLAN.md — Tracer: gate end to end on /create_level/ (security.py, trust additions); strip_envelope and the full gate contract on temp trees under both runtimes
-- [ ] 05-08-PLAN.md — Staged atomic publish with ext-previous, rollback-extension.cmd, make_manifest --check / --allow-repo-dest
-- [ ] 05-09-PLAN.md — D-06 static scanner (scan_envelope_tolerance.py) and its verdict on the pre-phase tree
+- [x] 05-01-PLAN.md — Tracer: gate end to end on /create_level/ (security.py, trust additions); strip_envelope and the full gate contract on temp trees under both runtimes
+- [x] 05-08-PLAN.md — Staged atomic publish with ext-previous, rollback-extension.cmd, make_manifest --check / --allow-repo-dest
+- [x] 05-09-PLAN.md — D-06 static scanner (scan_envelope_tolerance.py) and its verdict on the pre-phase tree
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 05-02-PLAN.md — Gate/strip fan-out: analysis, annotation, building, clash, colors, detail
-- [ ] 05-03-PLAN.md — Gate fan-out: document, documentation, editing, interop, placement
-- [ ] 05-04-PLAN.md — Gate fan-out: mep, parameters, rooms, structure, tags
-- [ ] 05-05-PLAN.md — Gate/strip fan-out: transforms, view_management, worksharing, code_execution, documents
-- [ ] 05-16-PLAN.md — Gate entry points: bridge envelopes every POST (tracer through the real gate), startup initializes the gate state at load
+- [x] 05-02-PLAN.md — Gate/strip fan-out: analysis, annotation, building, clash, colors, detail
+- [x] 05-03-PLAN.md — Gate fan-out: document, documentation, editing, interop, placement
+- [x] 05-04-PLAN.md — Gate fan-out: mep, parameters, rooms, structure, tags
+- [x] 05-05-PLAN.md — Gate/strip fan-out: transforms, view_management, worksharing, code_execution, documents
+- [x] 05-16-PLAN.md — Gate entry points: bridge envelopes every POST (tracer through the real gate), startup initializes the gate state at load
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 05-07-PLAN.md — /status/ secret / integrity / bind diagnostics, fingerprints on both halves, D-07 hints
+- [x] 05-07-PLAN.md — /status/ secret / integrity / bind diagnostics, fingerprints on both halves, D-07 hints
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 05-06-PLAN.md — Closed by default: AST sentinel, conventions check_route_gate, scaffolds and CONTRIBUTING
-- [ ] 05-11-PLAN.md — Live-gate record contract and classifiers (offline-tested)
+- [x] 05-06-PLAN.md — Closed by default: AST sentinel, conventions check_route_gate, scaffolds and CONTRIBUTING
+- [x] 05-11-PLAN.md — Live-gate record contract and classifiers (offline-tested)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 05-10-PLAN.md — R3 rollout order, preconditions and Revit-half rollback in RELEASES/runbook; CLAUDE.md and user guide
-- [ ] 05-12-PLAN.md — Live-gate run command, corrupt / restore / scan-secret (offline-tested)
+- [x] 05-10-PLAN.md — R3 rollout order, preconditions and Revit-half rollback in RELEASES/runbook; CLAUDE.md and user guide
+- [x] 05-12-PLAN.md — Live-gate run command, corrupt / restore / scan-secret (offline-tested)
 
 **Wave 6-8** *(live, restart per stage, user restarts Revit)*
 
-- [ ] 05-13-PLAN.md — Live L1 match: temporary manifest, 401 before transaction, reads open, fingerprints equal
-- [ ] 05-14-PLAN.md — Live L2 corrupt: /status/ names both files, 423 incl. execute_code, reads open; junction restored
-- [ ] 05-15-PLAN.md — Live L3 cleanup: unverifiable and mutations work; phase verdict recorded in 05-VALIDATION.md
+- [x] 05-13-PLAN.md — Live L1 match: temporary manifest, 401 before transaction, reads open, fingerprints equal
+- [x] 05-14-PLAN.md — Live L2 corrupt: /status/ names both files, 423 incl. execute_code, reads open; junction restored
+- [x] 05-15-PLAN.md — Live L3 cleanup: unverifiable and mutations work; phase verdict recorded in 05-VALIDATION.md
 
 ### Phase 6: Structured audit log of true outcomes
 
@@ -321,7 +321,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Live identity, ambiguity refusal, and multi-document addressing | 20/20 | Complete    | 2026-10-23 |
 | 3. Secret gate and payload integrity (unit-verified) | 9/9 | Complete    | 2026-10-23 |
 | 4. Honest outcomes on every mutating route | 11/11 | Complete    | 2026-10-23 |
-| 5. Live secret gate and integrity enforcement | 0/TBD | Not started | - |
+| 5. Live secret gate and integrity enforcement | 16/16 | Complete    | 2026-10-25 |
 | 6. Structured audit log of true outcomes | 0/TBD | Not started | - |
 | 7. Repository-owned mutation safety and human approval | 0/TBD | Not planned | - |
 

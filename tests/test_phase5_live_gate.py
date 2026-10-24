@@ -75,7 +75,8 @@ def _error_body(text, status):
     if not isinstance(text, str) or not text.startswith(prefix):
         return None
     try:
-        value = json.loads(text[len(prefix):])
+        # The bridge appends a "Verified Revit process: PID ..." line after the JSON body.
+        value, _ = json.JSONDecoder().raw_decode(text[len(prefix):])
     except (TypeError, ValueError):
         return None
     return value if isinstance(value, dict) else None
@@ -551,6 +552,11 @@ def _names(stage):
             "n_mismatch": "P5_N_MISMATCH_{}".format(stamp), "m_create": "P5_M_CREATE_{}".format(stamp)}
 
 
+def _selector(record):
+    """The 'document' selector value of the one open document found by the preflight."""
+    return (record["preflight"].get("document") or {}).get("document")
+
+
 async def _run_steps(bridge, client, args, record):
     names = record["inputs"]["names"]
     tools, replies = await _toolset(bridge, record)
@@ -558,8 +564,9 @@ async def _run_steps(bridge, client, args, record):
         await _direct_step(client, record, "n_missing", "POST", "/create_level/", {"levels": [{"name": names["n_missing"], "elevation": 1100.0}]})
         await _direct_step(client, record, "n_mismatch", "POST", "/create_level/", {"_mcp": {"secret": WRONG_SECRET}, "levels": [{"name": names["n_mismatch"], "elevation": 1200.0}]})
         await _direct_step(client, record, "n_code", "POST", "/execute_code/", {"code": "pass"})
-        await _direct_step(client, record, "r_levels_open", "POST", "/document_levels/", {})
-        await _direct_step(client, record, "r_levels_wrong", "POST", "/document_levels/", {"_mcp": {"secret": WRONG_SECRET}})
+        selector = _selector(record)
+        await _direct_step(client, record, "r_levels_open", "POST", "/document_levels/", {"document": selector})
+        await _direct_step(client, record, "r_levels_wrong", "POST", "/document_levels/", {"document": selector, "_mcp": {"secret": WRONG_SECRET}})
         try:
             bridge._secret_cache = WRONG_SECRET
             await _tool_step(record, replies, "b_wrong", "/create_level/", tools["create_level"], levels=[{"name": names["n_mismatch"], "elevation": 1300.0}])
@@ -572,7 +579,7 @@ async def _run_steps(bridge, client, args, record):
         await _direct_step(client, record, "n_missing", "POST", "/create_level/", {"levels": [{"name": names["m_create"], "elevation": 1500.0}]})
         await _tool_step(record, replies, "m_create", "/create_level/", tools["create_level"], levels=[{"name": names["m_create"], "elevation": 1600.0}])
         await _tool_step(record, replies, "m_code", "/execute_code/", tools["execute_revit_code"], code="pass")
-        await _direct_step(client, record, "r_levels_open", "POST", "/document_levels/", {})
+        await _direct_step(client, record, "r_levels_open", "POST", "/document_levels/", {"document": _selector(record)})
         await _direct_step(client, record, "p_levels", "GET", "/list_levels/")
         await _tool_step(record, replies, "s_status", "/status/", tools["get_revit_status"])
     else:

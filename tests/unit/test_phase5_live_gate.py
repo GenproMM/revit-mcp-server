@@ -270,7 +270,7 @@ class _Client(object):
         if path.endswith("/status/"):
             return _Reply(200, _status(self.stage))
         if path.endswith("/documents/"):
-            return _Reply(200, {"documents": [{"id": 1}]})
+            return _Reply(200, {"documents": [{"document": "sel-1", "title": "Project1"}]})
         if path.endswith("/list_levels/"):
             return _Reply(200, {"levels": [{"name": self.accepted}] if self.stage != "corrupt" else []})
         raise AssertionError("unexpected GET {}".format(path))
@@ -287,6 +287,8 @@ class _Client(object):
                 return _Reply(401, _auth("missing"))
             return _Reply(401, _auth("mismatch"))
         if route == "/document_levels/":
+            if body.get("document") != "sel-1":
+                return _Reply(400, {"error_code": "document-selector-required"})
             return _Reply(200, {"levels": []})
         raise AssertionError("unexpected POST {}".format(path))
 
@@ -337,7 +339,7 @@ class _Bridge(object):
         if self.stage == "corrupt":
             return "Error: 423 - " + json.dumps(_integrity(), sort_keys=True)
         if self._secret_cache == proc.WRONG_SECRET:
-            return "Error: 401 - " + json.dumps(_auth("mismatch"), sort_keys=True)
+            return "Error: 401 - " + json.dumps(_auth("mismatch"), sort_keys=True) + "\nVerified Revit process: PID 4242"
         levels = data.get("levels") if isinstance(data, dict) else None
         if isinstance(levels, list) and levels:
             self.client.accepted = levels[0]["name"]
@@ -539,3 +541,18 @@ def test_scan_secret_command_prints_only_status_tokens(monkeypatch, tmp_path, ca
     monkeypatch.setattr(proc, "_bridge", lambda: _SecretBridge(None))
     assert proc.main(["scan-secret", str(clean)]) == 2
     assert capsys.readouterr().out.strip() == "SECRET_UNAVAILABLE"
+
+
+def test_error_body_ignores_trailing_bridge_line():
+    text = "Error: 401 - " + json.dumps(_auth("mismatch")) + "\nVerified Revit process: PID 4242"
+    assert proc._error_body(text, 401) == _auth("mismatch")
+    assert proc._error_body("Error: 401 - not json", 401) is None
+    assert proc._error_body("Error: 423 - {}", 401) is None
+
+
+def test_document_levels_steps_carry_the_preflight_selector(monkeypatch, tmp_path):
+    client = _Client("match")
+    _run_with_fakes(monkeypatch, tmp_path, "match", client=client)
+    bodies = [body for path, body, _ in client.posts if path.endswith("/document_levels/")]
+    assert [body["document"] for body in bodies] == ["sel-1", "sel-1"]
+    assert "_mcp" not in bodies[0] and "_mcp" in bodies[1]

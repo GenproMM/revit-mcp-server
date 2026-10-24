@@ -218,7 +218,7 @@ Plans:
 
 ### Phase 5: Live secret gate and integrity enforcement
 
-**Goal**: The secret gate and integrity check built in Phase 3 are wired into the live request chokepoint in `startup.py` (the same one Phase 2 uses for identity) and become binding. This is a live-Revit restart-per-iteration phase.
+**Goal**: The secret gate and integrity check built in Phase 3 are wired into the live request path and become binding: every non-GET route handler calls the gate explicitly as its first action (the same explicit-route pattern Phase 2 uses for the document guard), the bridge sends the secret on every POST, and `startup.py` only initializes the gate state and runs the integrity check at load (05-CONTEXT D-01). This is a live-Revit restart-per-iteration phase.
 **Release checkpoint**: R3 — on phase close, offer a PILOT-FIRST release (one-way door: unauthenticated mutations start failing). Plan the mixed-version rollout order (Revit half at next Revit restart, CPython half at next logon) and the Revit-half rollback during planning of this phase, not at release time. See `.planning/RELEASES.md`.
 **Depends on**: Phase 2 (live chokepoint), Phase 3 (secret/integrity logic to wire in)
 **Requirements**: live enforcement of SEC-01..08 and INTG-01..08 (traced to Phase 3, where the logic is built; they become user-observably true here)
@@ -228,7 +228,44 @@ Plans:
   2. A deliberately corrupted `revit_mcp/` file is detected and reported by `/status/` while reads keep working — confirmed live.
   3. Reads and `/status/` stay available without the secret, so a secret mismatch never blocks diagnostics — confirmed live.
 
-**Plans**: TBD
+**Note (planning, 2026-10-24):** per 05-CONTEXT D-01 the gate is an explicit first call in every non-GET route handler (no wrapper in `startup.py`); `startup.py` only initializes the gate state and runs the integrity check at load.
+
+**Plans:** 16 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 05-01-PLAN.md — Tracer: gate end to end on /create_level/ (security.py, trust additions); strip_envelope and the full gate contract on temp trees under both runtimes
+- [ ] 05-08-PLAN.md — Staged atomic publish with ext-previous, rollback-extension.cmd, make_manifest --check / --allow-repo-dest
+- [ ] 05-09-PLAN.md — D-06 static scanner (scan_envelope_tolerance.py) and its verdict on the pre-phase tree
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 05-02-PLAN.md — Gate/strip fan-out: analysis, annotation, building, clash, colors, detail
+- [ ] 05-03-PLAN.md — Gate fan-out: document, documentation, editing, interop, placement
+- [ ] 05-04-PLAN.md — Gate fan-out: mep, parameters, rooms, structure, tags
+- [ ] 05-05-PLAN.md — Gate/strip fan-out: transforms, view_management, worksharing, code_execution, documents
+- [ ] 05-16-PLAN.md — Gate entry points: bridge envelopes every POST (tracer through the real gate), startup initializes the gate state at load
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 05-07-PLAN.md — /status/ secret / integrity / bind diagnostics, fingerprints on both halves, D-07 hints
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 05-06-PLAN.md — Closed by default: AST sentinel, conventions check_route_gate, scaffolds and CONTRIBUTING
+- [ ] 05-11-PLAN.md — Live-gate record contract and classifiers (offline-tested)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 05-10-PLAN.md — R3 rollout order, preconditions and Revit-half rollback in RELEASES/runbook; CLAUDE.md and user guide
+- [ ] 05-12-PLAN.md — Live-gate run command, corrupt / restore / scan-secret (offline-tested)
+
+**Wave 6-8** *(live, restart per stage, user restarts Revit)*
+
+- [ ] 05-13-PLAN.md — Live L1 match: temporary manifest, 401 before transaction, reads open, fingerprints equal
+- [ ] 05-14-PLAN.md — Live L2 corrupt: /status/ names both files, 423 incl. execute_code, reads open; junction restored
+- [ ] 05-15-PLAN.md — Live L3 cleanup: unverifiable and mutations work; phase verdict recorded in 05-VALIDATION.md
 
 ### Phase 6: Structured audit log of true outcomes
 

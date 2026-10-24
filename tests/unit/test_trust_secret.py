@@ -413,3 +413,32 @@ def test_secret_file_missing_directory_and_unreadable_give_none(tmp_path, monkey
 def test_secret_file_name_constant():
     assert trust.SECRET_FILE_NAME == "_bridge_secret"
     assert trust.MIN_SECRET_LENGTH == 16
+
+
+# ------------------------------------------------------------- D-07 hint wording (05-07)
+
+
+def test_hints_name_the_d07_actions():
+    missing = trust.auth_failure("missing")[0]["hint"]
+    assert "Update RevitMCP" in missing and "assistant session" in missing
+    mismatch = trust.auth_failure("mismatch")[0]["hint"]
+    assert "same build" in mismatch and "get_revit_status" in mismatch
+    assert "restart Revit" in trust.auth_failure("server_not_configured")[0]["hint"]
+
+
+def test_hints_carry_neither_the_secret_nor_its_fingerprint():
+    fingerprint = trust.secret_fingerprint(SECRET)
+    for reason in ("missing", "mismatch", "server_not_configured"):
+        hint = trust.auth_failure(reason)[0]["hint"]
+        assert SECRET not in hint
+        assert fingerprint not in hint
+        assert not re.search(r"\b[0-9a-f]{8}\b", hint)
+
+
+def test_secret_fingerprint_rule():
+    assert trust.secret_fingerprint(SECRET) == trust.secret_fingerprint(SECRET.encode("utf-8"))
+    assert trust.secret_fingerprint(None) is None
+    assert trust.secret_fingerprint("short") is None
+    assert trust.secret_fingerprint(" " * 40) is None
+    assert trust.secret_fingerprint(7) is None
+    assert re.fullmatch(r"[0-9a-f]{8}", trust.secret_fingerprint(CYRILLIC * 2))

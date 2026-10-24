@@ -57,16 +57,17 @@ OPEN_POST_READ_ROUTES = frozenset((
 
 _AUTH_HINTS = {
     AUTH_MISSING: (
-        "The MCP server sent no shared secret. Update the payload so _bridge_secret "
-        "exists and restart the MCP server."
+        "The MCP server sent no shared secret. Run the Update RevitMCP shortcut "
+        "(or sign out of Windows and back in) and restart the assistant session."
     ),
     AUTH_MISMATCH: (
-        "The MCP server and the Revit extension hold different shared secrets. "
-        "Install both from the same build and restart Revit."
+        "The MCP server and the Revit extension hold different shared secrets, so "
+        "they come from different builds. Install both from the same build and "
+        "call get_revit_status to compare the two fingerprints."
     ),
     AUTH_SERVER_NOT_CONFIGURED: (
-        "The Revit extension has no _bridge_secret file. Republish the extension "
-        "and restart Revit."
+        "The Revit extension has no _bridge_secret file. Reinstall the extension "
+        "and fully restart Revit."
     ),
 }
 
@@ -610,3 +611,45 @@ def classify_listeners(endpoints, port):
         return BIND_LOOPBACK_ONLY
     except Exception:
         return BIND_UNKNOWN
+
+
+def security_alerts(block):
+    """Plain sentences about what is wrong in a /status/ security block; [] when nothing is.
+
+    ``block`` is the dict security.status_block builds. One sentence each for a
+    verified integrity mismatch (naming the files; mutations are refused with 423), an
+    exposed bind (Routes listens beyond loopback; the secret is the only network
+    barrier; mutations are not blocked, 03 D-16) and a secret that is not configured
+    (mutations are refused with 401 server_not_configured). An unverifiable integrity
+    state, whatever its reason, produces no sentence: a developer junction has no
+    manifest and that must not read as damage (INTG-07). Pure, never raises; a
+    malformed block gives [].
+    """
+    alerts = []
+    try:
+        if not isinstance(block, dict):
+            return []
+        integrity = block.get("integrity")
+        if isinstance(integrity, dict) and integrity.get("state") == INTEGRITY_MISMATCH:
+            files = mismatch_files(integrity)
+            named = " ({})".format(", ".join(files)) if files else ""
+            alerts.append(
+                "The extension files differ from the published manifest{}: every "
+                "mutation is refused with 423 until the extension is reinstalled and "
+                "Revit is fully restarted.".format(named)
+            )
+        if block.get("bind") == BIND_EXPOSED:
+            alerts.append(
+                "Routes listens beyond loopback, so the shared secret is the only "
+                "network barrier. Mutations are not blocked."
+            )
+        secret = block.get("secret")
+        if isinstance(secret, dict) and secret.get("configured") is False:
+            alerts.append(
+                "The extension holds no shared secret: every mutation is refused with "
+                "401 server_not_configured until the extension is reinstalled and Revit "
+                "is fully restarted."
+            )
+    except Exception:
+        return []
+    return alerts

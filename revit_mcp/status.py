@@ -73,13 +73,16 @@ def register_status_routes(api):
             # imported lazily and defensively like the registry: /status/ must
             # still answer when the security module cannot be imported (SEC-05).
             block = {}
+            alerts = []
             try:
                 from .security import status_block
+                from .trust import security_alerts
 
                 block = status_block(
                     identity_data.get("actual_port")
                     if isinstance(identity_data, dict) else None
                 )
+                alerts = security_alerts(block)
             except Exception as security_exc:
                 logger.warning(
                     "Could not build the security status block: {}".format(
@@ -87,12 +90,16 @@ def register_status_routes(api):
                     )
                 )
                 block = {}
+                alerts = []
+            if alerts:
+                block = dict(block)
+                block["security_alerts"] = alerts
 
             doc = revit.doc
             if doc:
                 payload = {
                     "status": "active",
-                    "health": "degraded" if degraded else "healthy",
+                    "health": "degraded" if (degraded or alerts) else "healthy",
                     "revit_available": True,
                     "document_title": (
                         sanitize_string(doc.Title) if doc.Title else "Untitled"
@@ -115,6 +122,10 @@ def register_status_routes(api):
                     "api_name": api.name,
                 }
                 payload.update(registration)
+                payload.update(block)
+                payload["health"] = (
+                    "degraded" if (degraded or alerts or identity_error) else "healthy"
+                )
                 if identity_error:
                     payload["identity_error"] = identity_error
                 else:

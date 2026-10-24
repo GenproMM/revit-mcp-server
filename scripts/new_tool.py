@@ -44,7 +44,7 @@ hints. Package siblings are imported relatively -- a flat `from utils import`
 is an implicit relative import and fails to load.
 """
 
-from .utils import get_element_name, get_element_id_value{suppress_import}
+from .utils import get_element_name, get_element_id_value{suppress_import}{security_import}
 from pyrevit import routes, DB
 import logging
 
@@ -63,7 +63,7 @@ def register_{domain}_routes(api):
             "example": "value"
         }}
         """
-        try:
+{gate_preamble}        try:
             if not doc:
                 return routes.make_response(
                     data={{"error": "No active Revit document"}}, status=503
@@ -204,6 +204,53 @@ def _add_to_manifest(tool):
         handle.write("\n".join(sorted(names)) + "\n")
 
 
+def build_route_source(domain, get=False, no_mm=False):
+    """Build the Revit-side scaffold for ``domain`` without writing it."""
+    title = domain.replace("_", " ").capitalize()
+    if get:
+        handler_signature = "\n    def {}_handler(doc, example=None):".format(domain)
+        payload_block = (
+            "\n            # Query params arrive as named keyword arguments.\n"
+            "            example = example if example else None\n"
+        )
+        method = "GET"
+        suppress_import = ""
+        security_import = ""
+        gate_preamble = ""
+    else:
+        handler_signature = "\n    def {}_handler(doc, request):".format(domain)
+        payload_block = (
+            "\n            data = {}\n"
+            "            if request and request.data:\n"
+            "                data = parse_request_data(request.data)\n"
+            "            example = data.get(\"example\")\n"
+        )
+        method = "POST"
+        suppress_import = (
+            ", make_element_id, parse_request_data, suppress_warnings, commit_and_report, finalize_outcome"
+        )
+        security_import = "\nfrom .security import gate_or_response"
+        gate_preamble = (
+            "        # Phase 5 gate (D-01): first, before any document or body access.\n"
+            "        gate_refusal = gate_or_response(request)\n"
+            "        if gate_refusal is not None:\n"
+            "            return gate_refusal\n"
+        )
+
+    return ROUTE_TEMPLATE.format(
+        title=title,
+        domain=domain,
+        route=domain,
+        method=method,
+        handler_signature=handler_signature,
+        payload_block=payload_block,
+        suppress_import=suppress_import,
+        security_import=security_import,
+        gate_preamble=gate_preamble,
+        mm_constant="" if no_mm else "\nMM_TO_FEET = 1.0 / 304.8\n",
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Scaffold a new Revit MCP capability (both halves)."
@@ -232,13 +279,6 @@ def main():
     title = args.domain.replace("_", " ").capitalize()
 
     if args.get:
-        handler_signature = (
-            "\n    def {}_handler(doc, example=None):".format(args.domain)
-        )
-        payload_block = (
-            "\n            # Query params arrive as named keyword arguments.\n"
-            "            example = example if example else None\n"
-        )
         # % formatting, not .format(): the generated code contains literal
         # braces (`params = {}`) that .format() would try to substitute.
         call_block = (
@@ -248,37 +288,13 @@ def main():
             "        response = await revit_get(\"/%s/\", ctx, params=params)"
             % args.domain
         )
-        method = "GET"
     else:
-        handler_signature = (
-            "\n    def {}_handler(doc, request):".format(args.domain)
-        )
-        payload_block = (
-            "\n            data = {}\n"
-            "            if request and request.data:\n"
-            "                data = parse_request_data(request.data)\n"
-            "            example = data.get(\"example\")\n"
-        )
         call_block = (
             "        data = {\"example\": example}\n"
             "        response = await revit_post(\"/%s/\", data, ctx)" % args.domain
         )
-        method = "POST"
 
-    route_source = ROUTE_TEMPLATE.format(
-        title=title,
-        domain=args.domain,
-        route=args.domain,
-        method=method,
-        handler_signature=handler_signature,
-        payload_block=payload_block,
-        suppress_import=(
-            ""
-            if args.get
-            else ", make_element_id, parse_request_data, suppress_warnings, commit_and_report, finalize_outcome"
-        ),
-        mm_constant="" if args.no_mm else "\nMM_TO_FEET = 1.0 / 304.8\n",
-    )
+    route_source = build_route_source(args.domain, get=args.get, no_mm=args.no_mm)
     tool_source = TOOL_TEMPLATE.format(
         title=title, domain=args.domain, tool=args.tool, call_block=call_block
     )
@@ -297,7 +313,7 @@ def main():
     print("  1. Fill in the TODOs. The algorithm is the only decision left.")
     print("  2. uv run pytest tests/unit          # conventions + manifest")
     print("  3. Fully close and reopen Revit      # Reload is NOT enough")
-    print("  4. http://localhost:48884/revit_mcp/status/?verbose=true")
+    print("  4. http://127.0.0.1:48884/genpro_revit_mcp/status/?verbose=true")
     print("     -> your domain listed, health: healthy")
     print("  5. mcp dev main.py                   # call the tool for real")
 

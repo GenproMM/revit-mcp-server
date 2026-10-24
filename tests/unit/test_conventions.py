@@ -116,6 +116,14 @@ def test_suppress_warnings_result_is_kept(path):
     assert not violations, _report(violations)
 
 
+# Phase 5 D-01: closed by default. Every non-GET route opens with the gate.
+
+@pytest.mark.parametrize("path", REVIT_MCP_FILES, ids=_rel)
+def test_route_gate(path):
+    violations = conventions.check_route_gate(_rel(path), _read(path))
+    assert not violations, _report(violations)
+
+
 # --- the MCP half -----------------------------------------------------------
 
 @pytest.mark.parametrize("path", TOOLS_FILES, ids=_rel)
@@ -450,6 +458,7 @@ def test_route_module_check_reports_the_new_violations_with_the_old():
     assert any("Commit() outside commit_and_report" in v for v in violations), violations
     assert any("suppress_warnings" in v for v in violations), violations
     assert any("parse_request_data" in v for v in violations), violations
+    assert any("gate_or_response" in v and "/x/" in v for v in violations), violations
 
 
 def test_code_execution_rejects_missing_document_before_transaction():
@@ -462,3 +471,228 @@ def test_code_execution_rejects_missing_document_before_transaction():
     guard_at = prefix.index("if not doc")
     assert guard_at < transaction_at
     assert "No active Revit document" in prefix[guard_at:]
+
+
+# --- Phase 5 D-01/D-02: check_route_gate --------------------------------------
+
+_PREAMBLE = (
+    "        gate_refusal = gate_or_response(request)\n"
+    "        if gate_refusal is not None:\n"
+    "            return gate_refusal\n"
+)
+_GATE_IMPORT = "from .security import gate_or_response\n"
+
+
+def _route(path="/x/", methods='["POST"]', body=_PREAMBLE, imports=_GATE_IMPORT, doc=True):
+    """A route module with one handler whose body is ``body``."""
+    return (
+        "# -*- coding: utf-8 -*-\n"
+        + imports
+        + "\n\ndef register_x_routes(api):\n"
+        + "    @api.route(\"{}\", methods={})\n".format(path, methods)
+        + "    def h(doc, request):\n"
+        + ('        """Doc."""\n' if doc else "")
+        + body
+        + "        return None\n"
+    )
+
+
+def _gate_hits(source, label="revit_mcp/x.py"):
+    return conventions.check_route_gate(label, source)
+
+
+def test_a_gated_post_route_is_clean():
+    assert _gate_hits(_route()) == []
+
+
+def test_an_open_read_that_strips_is_clean():
+    source = _route(path="/clash_check/", body="        strip_envelope(request)\n",
+                    imports="from .security import strip_envelope\n")
+    assert _gate_hits(source) == []
+
+
+def test_a_get_route_without_the_gate_is_clean():
+    assert _gate_hits(_route(methods='["GET"]', body="        x = 1\n", imports="")) == []
+
+
+def test_a_post_route_without_the_preamble_names_label_line_and_path():
+    violations = _gate_hits(_route(body="        x = 1\n", imports=""))
+    assert len(violations) == 1, violations
+    assert "revit_mcp/x.py" in violations[0] and "/x/" in violations[0]
+    assert "line 6" in violations[0] and "gate_or_response(request)" in violations[0]
+
+
+def test_strip_envelope_on_a_route_that_is_not_open_is_a_violation():
+    source = _route(body="        strip_envelope(request)\n",
+                    imports="from .security import strip_envelope\n")
+    violations = _gate_hits(source)
+    assert any("strip_envelope does not authenticate" in v for v in violations), violations
+
+
+def test_an_open_route_that_gates_instead_of_stripping_is_a_violation():
+    violations = _gate_hits(_route(path="/clash_check/"))
+    assert any("is an open read and must open with strip_envelope(request)" in v
+               for v in violations), violations
+
+
+def test_a_get_route_that_calls_the_gate_is_a_violation():
+    violations = _gate_hits(_route(methods='["GET"]'))
+    assert any("is a GET route and must not call the gate" in v for v in violations), violations
+
+
+def test_a_get_route_that_strips_is_a_violation():
+    violations = _gate_hits(_route(methods='["GET"]', body="        strip_envelope(request)\n",
+                                   imports="from .security import strip_envelope\n"))
+    assert any("is a GET route" in v for v in violations), violations
+
+
+def test_a_preamble_that_returns_another_name_is_a_violation():
+    body = (
+        "        gate_refusal = gate_or_response(request)\n"
+        "        if gate_refusal is not None:\n"
+        "            return other\n"
+    )
+    assert _gate_hits(_route(body=body)), "wrong returned name must be reported"
+
+
+def test_a_preamble_with_extra_work_in_its_branch_is_a_violation():
+    body = (
+        "        gate_refusal = gate_or_response(request)\n"
+        "        if gate_refusal is not None:\n"
+        "            log()\n"
+        "            return gate_refusal\n"
+    )
+    assert _gate_hits(_route(body=body))
+
+
+def test_a_call_before_the_preamble_is_a_violation():
+    assert _gate_hits(_route(body="        warm_up()\n" + _PREAMBLE))
+
+
+def test_a_gate_called_with_another_argument_is_a_violation():
+    body = _PREAMBLE.replace("(request)", "(None)", 1)
+    assert _gate_hits(_route(body=body))
+
+
+def test_methods_that_are_not_a_literal_list_count_as_non_get():
+    source = _route(methods="METHODS", body="        x = 1\n", imports="")
+    assert any("gate_or_response(request)" in v for v in _gate_hits(source))
+
+
+def test_a_route_without_a_methods_keyword_counts_as_non_get():
+    source = _route(methods='["GET"]', body="        x = 1\n", imports="").replace(
+        ', methods=["GET"]', "")
+    assert any("gate_or_response(request)" in v for v in _gate_hits(source))
+
+
+@pytest.mark.parametrize("imports", [
+    "from security import gate_or_response\n",
+    "from revit_mcp.security import gate_or_response\n",
+    "import revit_mcp.security\n" + _GATE_IMPORT,
+    "from . import security\n" + _GATE_IMPORT,
+    "from revit_mcp import security\n" + _GATE_IMPORT,
+])
+def test_a_flat_or_absolute_import_of_security_is_a_violation(imports):
+    violations = _gate_hits(_route(imports=imports))
+    assert any("imports the security module by a flat or absolute name" in v
+               for v in violations), violations
+
+
+@pytest.mark.parametrize("name", ["_STATE", "initialize"])
+def test_importing_a_security_internal_is_a_violation(name):
+    source = _route(imports="from .security import gate_or_response, {}\n".format(name))
+    violations = _gate_hits(source)
+    assert any("imports {} from security".format(name) in v for v in violations), violations
+
+
+def test_importing_status_block_is_allowed():
+    source = _route(imports="from .security import gate_or_response, status_block\n")
+    assert _gate_hits(source) == []
+
+
+def test_a_syntax_error_is_the_only_violation_reported():
+    violations = _gate_hits("def broken(:\n")
+    assert len(violations) == 1
+
+
+def test_the_open_list_mirrors_trust_exactly():
+    """The kit cannot import revit_mcp, so conventions carries a copy; this pins it."""
+    from revit_mcp import trust
+
+    assert conventions.OPEN_POST_READ_ROUTES == trust.OPEN_POST_READ_ROUTES
+    assert conventions.SECURITY_IMPORTS == frozenset(
+        ("gate_or_response", "strip_envelope", "status_block"))
+
+
+def test_local_modules_lists_every_security_sibling():
+    assert {"identity", "trust", "integrity", "security"} <= set(conventions.LOCAL_MODULES)
+
+
+@pytest.mark.parametrize("name", ["identity", "trust", "integrity", "security"])
+def test_a_flat_import_of_a_security_sibling_is_reported_by_the_dialect_check(name):
+    source = _route(imports="from {} import x\n".format(name) + _GATE_IMPORT)
+    violations = conventions.check_ironpython_dialect("revit_mcp/x.py", source)
+    assert any(name in v for v in violations), violations
+
+
+def test_the_package_check_rejects_an_ungated_post_route():
+    route = _route(body="        x = 1\n", imports="")
+    tool = _read(os.path.join(TOOLS_DIR, "clash_tools.py"))
+    violations = conventions.check_package("x", route, tool)
+    assert any("gate_or_response(request)" in v for v in violations), violations
+
+
+def test_intake_runs_the_whole_unit_suite_on_the_scratch_copy():
+    """So check_route_gate and the closed-by-default sentinel run on a contributed module."""
+    source = _read(os.path.join(REPO_ROOT, "scripts", "intake_package.py"))
+    assert '"pytest", "tests/unit"' in source
+
+
+# --- Phase 5 D-01: generated route scaffolds ----------------------------------
+
+def _load_module(path, name):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_new_tool_post_scaffold_is_gated_and_convention_clean():
+    new_tool = _load_module(os.path.join(REPO_ROOT, "scripts", "new_tool.py"),
+                            "phase5_new_tool")
+    source = new_tool.build_route_source("demo", get=False, no_mm=True)
+    assert "from .security import gate_or_response" in source
+    assert source.index("gate_refusal = gate_or_response(request)") < source.index("try:")
+    assert conventions.check_route_module("revit_mcp/demo.py", source) == []
+
+
+def test_new_tool_get_scaffold_is_ungated_and_convention_clean():
+    new_tool = _load_module(os.path.join(REPO_ROOT, "scripts", "new_tool.py"),
+                            "phase5_new_tool_get")
+    source = new_tool.build_route_source("demo", get=True, no_mm=True)
+    assert "gate_or_response" not in source
+    assert conventions.check_route_module("revit_mcp/demo.py", source) == []
+
+
+@pytest.mark.parametrize("get", [False, True], ids=["post", "get"])
+def test_contributor_kit_scaffold_is_convention_clean(get, tmp_path, monkeypatch):
+    kit_path = os.path.join(REPO_ROOT, "contrib-kit", "revitmcp_kit.py")
+    kit_dir = os.path.dirname(kit_path)
+    monkeypatch.syspath_prepend(kit_dir)
+    kit = _load_module(kit_path, "phase5_contributor_kit_{}".format(get))
+
+    args = type("Args", (), {
+        "domain": "demo", "tool": "run_demo", "get": get, "no_mm": True,
+        "author": "Example",
+    })()
+    monkeypatch.chdir(str(tmp_path))
+    kit.cmd_new(args)
+    source = _read(os.path.join(str(tmp_path), "demo-tool", "revit_mcp", "demo.py"))
+    if get:
+        assert "gate_or_response" not in source
+    else:
+        assert "from .security import gate_or_response" in source
+        assert source.index("gate_refusal = gate_or_response(request)") < source.index("try:")
+    assert conventions.check_route_module("revit_mcp/demo.py", source) == []

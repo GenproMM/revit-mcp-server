@@ -11,14 +11,15 @@ They talk over local HTTP. Mixing their idioms is the most common way to break t
 | Side | Files | Runtime | Dialect |
 |---|---|---|---|
 | MCP server | `main.py`, `tools/`, `tests/` | CPython ≥3.11 | `async`/`await`, f-strings, `list[str]`, type hints |
-| Revit extension | `startup.py`, `revit_mcp/` | IronPython 2.7 inside Revit | Python 2 only: `"{}".format(x)`, **no** f-strings, no `async`, no `pathlib`, no modern typing |
+| Revit extension | `startup.py`, `revit_mcp/` | IronPython 3 inside Revit | Python 3.4 intersection: `"{}".format(x)`, **no** f-strings, no `async`, no `pathlib`, no modern typing |
 
 Both halves keep an encoding cookie on line 1 — `# -*- coding: utf-8 -*-` in `tools/`,
 `# -*- coding: UTF-8 -*-` in `revit_mcp/`. IronPython needs it.
 
 `revit_mcp/utils.py` and `tools/utils.py` are **unrelated files that happen to share a
-name.** Route modules import helpers as bare `from utils import ...`, not
-`from .utils import ...`, because pyRevit puts the module directory on `sys.path`.
+name.** Route modules import helpers relatively, for example `from .utils import ...`.
+A flat sibling import fails under IronPython 3 and can load a second copy under pyRevit's
+module-path setup.
 
 ## Adding a capability: two files
 
@@ -31,7 +32,8 @@ module, so a forgotten registration line is no longer possible.
 # -*- coding: UTF-8 -*-
 """What this domain does."""
 
-from utils import get_element_name, get_element_id_value, suppress_warnings
+from .utils import get_element_name, get_element_id_value, suppress_warnings
+from .security import gate_or_response
 from pyrevit import routes, DB
 import json
 import logging
@@ -47,6 +49,9 @@ def register_<domain>_routes(api):
     @api.route("/<name>/", methods=["POST"])
     def <name>_handler(doc, request):
         """Docstring for a developer. State the expected payload."""
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         try:
             if not doc:
                 return routes.make_response(
@@ -84,6 +89,15 @@ def register_<domain>_tools(mcp, revit_get, revit_post, revit_image=None):
 
 Then **update `tests/unit/tool_manifest.txt`** in the same commit. It is the guard that
 turns a silently dropped tool into a failing test and a blocked release.
+
+### Gate every non-GET route
+
+Every non-GET route must begin with the `gate_or_response(request)` preamble shown above,
+before parsing the request, checking the document, or touching Revit. The only open POST reads
+are the seven keys in `revit_mcp/trust.py` `OPEN_POST_READ_ROUTES`, mirrored in
+`scripts/conventions.py` and pinned by `tests/unit/test_phase5_gate_wiring.py`. Opening another
+POST route requires changing all three and proving that it is a pure read; do not substitute
+`strip_envelope(request)` for the gate on any other route.
 
 ### How discovery finds your module
 

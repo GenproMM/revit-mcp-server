@@ -108,7 +108,7 @@ IronPython 3 внутри процесса Revit, на уровне языка P
 import ...) — плоский `from utils import ...` не грузится под IronPython 3.
 """
 
-from .utils import get_element_name, get_element_id_value{suppress_import}
+from .utils import get_element_name, get_element_id_value{suppress_import}{security_import}
 from pyrevit import routes, DB
 import logging
 
@@ -127,7 +127,7 @@ def register_{domain}_routes(api):
             "example": "value"
         }}
         """
-        try:
+{gate_preamble}        try:
             if not doc:
                 return routes.make_response(
                     data={{"error": "No active Revit document"}}, status=503
@@ -287,6 +287,8 @@ def cmd_new(args):
         )
         method = "GET"
         suppress_import = ""
+        security_import = ""
+        gate_preamble = ""
     else:
         handler_signature = "\n    def {}_handler(doc, request):".format(args.domain)
         payload_block = (
@@ -304,6 +306,13 @@ def cmd_new(args):
             ", make_element_id, parse_request_data, suppress_warnings,"
             " commit_and_report, finalize_outcome"
         )
+        security_import = "\nfrom .security import gate_or_response"
+        gate_preamble = (
+            "        # Шлюз фазы 5 (D-01): первым, до всего остального.\n"
+            "        gate_refusal = gate_or_response(request)\n"
+            "        if gate_refusal is not None:\n"
+            "            return gate_refusal\n"
+        )
 
     os.makedirs(os.path.join(package_dir, "revit_mcp"))
     os.makedirs(os.path.join(package_dir, "tools"))
@@ -312,7 +321,8 @@ def cmd_new(args):
         os.path.join("revit_mcp", args.domain + ".py"): ROUTE_TEMPLATE.format(
             title=title, domain=args.domain, method=method,
             handler_signature=handler_signature, payload_block=payload_block,
-            suppress_import=suppress_import,
+            suppress_import=suppress_import, security_import=security_import,
+            gate_preamble=gate_preamble,
             mm_constant="" if args.no_mm else "\nMM_TO_FEET = 1.0 / 304.8\n",
         ),
         os.path.join("tools", args.domain + "_tools.py"): TOOL_TEMPLATE.format(

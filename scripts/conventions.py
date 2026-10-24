@@ -16,6 +16,12 @@ have.
 
 Every function takes source text and returns a list of human-readable
 violations. Empty list means the rule holds.
+
+Checks over a Revit-half route module (composed by check_route_module):
+encoding cookie, IronPython 3 dialect (f-strings, async, flat imports),
+ElementId helpers, request parsing, commit_and_report, kept swallower, the one
+register_*_routes registrar, and check_route_gate (Phase 5 D-01): every non-GET
+route opens with the shared-secret gate unless it is one of the open reads.
 """
 
 import ast
@@ -38,8 +44,32 @@ PY3_ONLY_MODULES = {
 # without a leading dot is the implicit relative import Python 3 removed.
 # `revit_mcp` itself is listed because `from revit_mcp import registry` works
 # only while the extension root happens to be on sys.path; `from . import
-# registry` does not depend on that.
-LOCAL_MODULES = {"utils", "textutils", "registry", "revit_mcp"}
+# registry` does not depend on that. identity, trust, integrity and security
+# are the Phase 2 and Phase 5 siblings; a flat import of the security module in
+# particular would load a second copy with its own state and no secret.
+LOCAL_MODULES = {"utils", "textutils", "registry", "revit_mcp",
+                 "identity", "trust", "integrity", "security"}
+
+# Phase 5 D-01/D-02: the gate a route opens with, the strip an open read opens
+# with, and the only names a route module may take from revit_mcp/security.py.
+GATE_FUNCTION = "gate_or_response"
+STRIP_FUNCTION = "strip_envelope"
+SECURITY_IMPORTS = frozenset((GATE_FUNCTION, STRIP_FUNCTION, "status_block"))
+
+# The seven POST routes that only read and are never refused (D-02). This mirrors
+# OPEN_POST_READ_ROUTES in revit_mcp/trust.py because the contributor kit cannot
+# import the repository; tests/unit/test_conventions.py pins the two equal, and
+# tests/unit/test_phase5_gate_wiring.py pins both to a literal. Opening another
+# route means editing all three.
+OPEN_POST_READ_ROUTES = frozenset((
+    "/document_summary/",
+    "/document_levels/",
+    "/model_worksets/",
+    "/material_quantities/",
+    "/clash_check/",
+    "/ai_filter/",
+    "/list_category_parameters/",
+))
 
 # Gone in Python 3, so gone in IronPython 3.
 PY2_ONLY_MODULES = {
@@ -506,6 +536,170 @@ def check_route_registrar(label, source):
     return violations
 
 
+# Phase 5 D-01 -- closed by default.
+#
+# Every non-GET route opens with
+#     gate_refusal = gate_or_response(request)
+#     if gate_refusal is not None:
+#         return gate_refusal
+# before it reads the body or touches the document, so a request without the
+# shared secret never reaches Revit. The only exceptions are the seven open POST
+# reads of D-02, which open with strip_envelope(request) instead: it removes the
+# reserved key so the route's own parse does not see it, but it authenticates
+# nothing. A GET route calls neither (SEC-05: reads stay open). The same rule is
+# a sentinel over the real inventory in tests/unit/test_phase5_gate_wiring.py;
+# this copy is what the kit and package intake run on a contributed module.
+
+def _route_decorator(function):
+    """The @api.route(...) call on a handler, or None."""
+    for decorator in function.decorator_list:
+        if (isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and decorator.func.attr == "route"):
+            return decorator
+    return None
+
+
+def _route_path(decorator):
+    """The literal path of a route with any <converter> or {param} tail removed."""
+    if decorator.args and isinstance(decorator.args[0], ast.Constant) \
+            and isinstance(decorator.args[0].value, str):
+        return re.split(r"[<{]", decorator.args[0].value, maxsplit=1)[0]
+    return "<non-literal path>"
+
+
+def _route_is_get(decorator):
+    """True only for a literal methods list holding nothing but GET and HEAD.
+
+    A missing or non-literal `methods` is treated as non-GET: unknown means closed.
+    """
+    for keyword in decorator.keywords:
+        if keyword.arg == "methods" and isinstance(keyword.value, (ast.List, ast.Tuple)):
+            names = [e.value for e in keyword.value.elts
+                     if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            if len(names) != len(keyword.value.elts) or not names:
+                return False
+            return all(n.upper() in ("GET", "HEAD") for n in names)
+    return False
+
+
+def _handler_statements(function):
+    statements = list(function.body)
+    if (statements and isinstance(statements[0], ast.Expr)
+            and isinstance(statements[0].value, ast.Constant)
+            and isinstance(statements[0].value.value, str)):
+        statements = statements[1:]
+    return statements
+
+
+def _is_request_call(node, name):
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == name and len(node.args) == 1 and not node.keywords
+            and isinstance(node.args[0], ast.Name) and node.args[0].id == "request")
+
+
+def _opens_with_strip(statements):
+    return bool(statements) and isinstance(statements[0], ast.Expr) \
+        and _is_request_call(statements[0].value, STRIP_FUNCTION)
+
+
+def _opens_with_gate(statements):
+    """The two-statement preamble: assign the gate result, return it when not None."""
+    if len(statements) < 2:
+        return False
+    first, second = statements[0], statements[1]
+    if not (isinstance(first, ast.Assign) and len(first.targets) == 1
+            and isinstance(first.targets[0], ast.Name)
+            and _is_request_call(first.value, GATE_FUNCTION)):
+        return False
+    name = first.targets[0].id
+    test = second.test if isinstance(second, ast.If) else None
+    return (
+        isinstance(test, ast.Compare)
+        and isinstance(test.left, ast.Name) and test.left.id == name
+        and len(test.ops) == 1 and isinstance(test.ops[0], ast.IsNot)
+        and len(test.comparators) == 1 and _is_none_constant(test.comparators[0])
+        and len(second.body) == 1 and isinstance(second.body[0], ast.Return)
+        and isinstance(second.body[0].value, ast.Name) and second.body[0].value.id == name
+        and not second.orelse
+    )
+
+
+def _calls_named(function, name):
+    return [n for n in ast.walk(function)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == name]
+
+
+def _check_security_imports(label, tree):
+    violations = []
+    flat = []
+    bad_names = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(a.name.split(".")[-1] == "security" for a in node.names):
+                flat.append(node.lineno)
+        elif isinstance(node, ast.ImportFrom):
+            last = (node.module or "").split(".")[-1]
+            if last == "security":
+                if node.level != 1 or node.module != "security":
+                    flat.append(node.lineno)
+                else:
+                    bad_names.extend(a.name for a in node.names
+                                     if a.name not in SECURITY_IMPORTS)
+            elif any(a.name == "security" for a in node.names):
+                flat.append(node.lineno)
+    if flat:
+        violations.append(
+            "{}: imports the security module by a flat or absolute name at lines {}; "
+            "use from .security import ... (a second copy would carry no secret "
+            "state)".format(label, sorted(set(flat))))
+    for name in sorted(set(bad_names)):
+        violations.append(
+            "{}: imports {} from security; only gate_or_response, strip_envelope "
+            "and status_block may be imported".format(label, name))
+    return violations
+
+
+def check_route_gate(label, source):
+    """Every non-GET route opens with the gate; the open reads strip; GET routes do neither."""
+    tree, error = _parse(label, source)
+    if error:
+        return [error]
+
+    violations = _check_security_imports(label, tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        decorator = _route_decorator(node)
+        if decorator is None:
+            continue
+        path = _route_path(decorator)
+        where = "{}: route {} ({}, line {})".format(label, path, node.name, node.lineno)
+        statements = _handler_statements(node)
+
+        if _route_is_get(decorator):
+            if _calls_named(node, GATE_FUNCTION) or _calls_named(node, STRIP_FUNCTION):
+                violations.append(
+                    "{} is a GET route and must not call the gate or strip_envelope; "
+                    "reads stay open (SEC-05)".format(where))
+        elif path in OPEN_POST_READ_ROUTES:
+            if not _opens_with_strip(statements) or _calls_named(node, GATE_FUNCTION):
+                violations.append(
+                    "{} is an open read and must open with strip_envelope(request), "
+                    "never the gate (D-02)".format(where))
+        else:
+            if _calls_named(node, STRIP_FUNCTION):
+                violations.append(
+                    "{} is not an open read; strip_envelope does not authenticate "
+                    "(D-01)".format(where))
+            if not _opens_with_gate(statements):
+                violations.append(
+                    "{} must open with gate_refusal = gate_or_response(request) and "
+                    "return it when it is not None, before any other statement "
+                    "(D-01)".format(where))
+    return violations
+
+
 # --------------------------------------------------------------------------
 # the MCP half: tool signatures and docstrings
 # --------------------------------------------------------------------------
@@ -619,6 +813,7 @@ def check_route_module(label, source):
         + check_commit_goes_through_report(label, source)
         + check_swallower_is_kept(label, source)
         + check_route_registrar(label, source)
+        + check_route_gate(label, source)
     )
 
 

@@ -456,6 +456,79 @@ def test_check_ignores_the_repo_argument(tree, make_manifest, tmp_path, capsys):
     assert capsys.readouterr().out.startswith("INTEGRITY verified_match")
 
 
+# ------------------------------------------------------------- --allow-repo-dest (plan 05-08)
+
+
+def _ignored_repo(tmp_path, name="devrepo", ignore=True):
+    """A committed repo whose .gitignore does (or does not) list _manifest.json."""
+    repo = str(tmp_path / name)
+    files = dict(FILES)
+    if ignore:
+        files[".gitignore"] = u"_manifest.json\n"
+    _init_repo(repo, files)
+    return repo
+
+
+@needs_git
+def test_allow_repo_dest_repo_root_ignored_manifest_verifies(tmp_path, make_manifest):
+    repo = _ignored_repo(tmp_path)
+    manifest = make_manifest.build_manifest(repo, repo, allow_repo_dest=True)
+    make_manifest.write_manifest(repo, manifest)
+    assert integrity.check_integrity(repo)["state"] == trust.INTEGRITY_MATCH
+    assert _git(repo, "status", "--porcelain", "--", "_manifest.json") == ""
+
+
+@needs_git
+def test_allow_repo_dest_subfolder_names_the_repository_root_rule(tmp_path, make_manifest):
+    repo = _ignored_repo(tmp_path)
+    inside = os.path.join(repo, "published")
+    os.makedirs(inside)
+    for relpath, text in FILES.items():
+        _write(inside, relpath, text)
+    with pytest.raises(make_manifest.ManifestError) as caught:
+        make_manifest.build_manifest(repo, inside, allow_repo_dest=True)
+    assert "repository root" in str(caught.value)
+    assert not os.path.exists(os.path.join(inside, "_manifest.json"))
+
+
+@needs_git
+def test_allow_repo_dest_not_ignored_is_refused_and_writes_nothing(tmp_path, make_manifest, capsys):
+    repo = _ignored_repo(tmp_path, ignore=False)
+    with pytest.raises(make_manifest.ManifestError) as caught:
+        make_manifest.build_manifest(repo, repo, allow_repo_dest=True)
+    assert "not be git-ignored" in str(caught.value)
+    assert make_manifest.main(["--allow-repo-dest", "--repo", repo, "--dest", repo]) == 1
+    assert "git-ignored" in capsys.readouterr().err
+    assert not os.path.exists(os.path.join(repo, "_manifest.json"))
+
+
+@needs_git
+def test_allow_repo_dest_outside_the_repo_behaves_as_the_default(tree, make_manifest):
+    repo, dest = tree
+    with_flag = make_manifest.build_manifest(repo, dest, commit=COMMIT, now=NOW,
+                                             allow_repo_dest=True)
+    without = make_manifest.build_manifest(repo, dest, commit=COMMIT, now=NOW)
+    assert with_flag == without
+
+
+@needs_git
+def test_allow_repo_dest_default_refusal_message_is_unchanged(tree, make_manifest):
+    repo, _ = tree
+    with pytest.raises(make_manifest.ManifestError) as caught:
+        make_manifest.build_manifest(repo, repo)
+    assert "INTG-08" in str(caught.value)
+
+
+@needs_git
+def test_allow_repo_dest_main_writes_the_manifest_and_warns(tmp_path, make_manifest, capsys):
+    repo = _ignored_repo(tmp_path)
+    assert make_manifest.main(["--allow-repo-dest", "--repo", repo, "--dest", repo]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.startswith("MANIFEST written:")
+    assert "delete" in captured.err and "_manifest.json" in captured.err
+    assert integrity.check_integrity(repo)["state"] == trust.INTEGRITY_MATCH
+
+
 # ------------------------------------------------------------- grammar
 
 

@@ -803,10 +803,22 @@ revit_get.discover_targets = discover_targets
 async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None,
                      target: Optional[str] = None, timeout: float = 30.0,
                      params: Optional[Dict] = None) -> Union[Dict, str]:
-    """POST to one Revit route, on the selected incarnation or the only usable one."""
+    """POST to one Revit route, on the selected incarnation or the only usable one.
+
+    Every POST body carries the shared secret under the reserved ENVELOPE_KEY, open
+    reads included; the Revit half strips it before the route parses its own body.
+    The envelope is built here, before _dispatch: a refusal raised inside
+    _verified_exchange after the exchange started would read as "outcome unknown",
+    while a body the model built wrongly was certainly never sent.
+    """
+    try:
+        body = with_envelope(data, _secret())
+    except ValueError as exc:  # fixed text: carries neither the body nor the secret
+        return _uncertain("Error: the request was NOT sent to Revit: {}".format(exc),
+                          "not-sent", None)
 
     async def write(client) -> Union[Dict, str]:
-        return await _send(client, "POST", endpoint, data, timeout, params)
+        return await _send(client, "POST", endpoint, body, timeout, params)
 
     return await _dispatch("POST", endpoint, ctx, timeout, write, target)
 
@@ -1059,10 +1071,12 @@ async def _verified_exchange(method: str, exchange: Any, state: "_TargetState", 
 
 # ---------------------------------------------------------------- shared-secret envelope
 #
-# The client half of the shared-secret gate. It is built and unit-tested in Phase 3
-# and is NOT sent yet: nothing calls with_envelope(), and _send posts exactly the
-# bytes it always did. Phase 5 wires it. ENVELOPE_KEY is the reserved body key the
-# Revit half (revit_mcp/trust.py) reads; a test pins the two constants equal.
+# The client half of the shared-secret gate. Since Phase 5 (plan 05-16) revit_post
+# sends the envelope on every POST, open reads included: with_envelope() builds the
+# body, _secret() supplies the secret, and _send posts exactly json.dumps of the body
+# it is given. GET calls carry no body and so no envelope. The Revit half
+# (revit_mcp/security.py) checks and strips it. ENVELOPE_KEY is the reserved body key
+# that half reads (revit_mcp/trust.py); a test pins the two constants equal.
 ENVELOPE_KEY = "_mcp"
 SECRET_KEY = "secret"
 
@@ -1129,7 +1143,8 @@ def load_secret(search_dirs: Optional[list] = None) -> Optional[str]:
     file or an unusable search entry gives None. Never raises and never logs, so a
     secret cannot reach a log through this function.
 
-    Not called anywhere in Phase 3: sending the secret starts in Phase 5 (D-10).
+    Called lazily by _secret() on the first POST, never at import. A rotated
+    secret needs a restart of the MCP server process (the value is memoized).
     """
     if search_dirs is None:
         here = os.path.dirname(os.path.abspath(__file__))
@@ -1147,3 +1162,23 @@ def load_secret(search_dirs: Optional[list] = None) -> Optional[str]:
         except (OSError, ValueError):
             return None
     return None
+
+
+# Memoized secret. _SECRET_UNSET means "not loaded yet"; None is a valid cached value
+# (no usable secret file) and is not looked up again. Tests set the cache directly.
+_SECRET_UNSET = object()
+_secret_cache = _SECRET_UNSET
+
+
+def _secret() -> Optional[str]:
+    """The shared secret, loaded once on first use (never at import) and memoized."""
+    global _secret_cache
+    if _secret_cache is _SECRET_UNSET:
+        _secret_cache = load_secret()
+    return _secret_cache
+
+
+def reset_secret_cache() -> None:
+    """Forget the memoized secret so the next POST reads the file again."""
+    global _secret_cache
+    _secret_cache = _SECRET_UNSET

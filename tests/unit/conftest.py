@@ -28,6 +28,10 @@ def _no_live_revit_from_the_bridge(monkeypatch):
     listener inventory that is unavailable: discovery refuses before any HTTP.
     A test that wants a process fakes BOTH listener_snapshot and the client
     factory itself, which overrides this default.
+
+    The bridge's loaded shared secret is pinned to None for the same reason: no
+    test may read the developer's real revit_mcp/_bridge_secret. A test that wants
+    a secret sets bridge._secret_cache itself.
     """
     import bridge
 
@@ -50,6 +54,8 @@ def _no_live_revit_from_the_bridge(monkeypatch):
                                  transport=httpx.MockTransport(refuse), trust_env=False)
 
     monkeypatch.setattr(bridge, "listener_snapshot", guarded_snapshot)
+    if hasattr(bridge, "_secret_cache"):  # never read the developer's real revit_mcp/_bridge_secret
+        monkeypatch.setattr(bridge, "_secret_cache", None)
     if hasattr(bridge, "_states"):  # pooled clients and locks never leak between tests
         monkeypatch.setattr(bridge, "_states", {})
     if hasattr(bridge, "_selected_client"):

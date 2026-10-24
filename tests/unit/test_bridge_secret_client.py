@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Client half of the shared-secret contract (bridge.load_secret), and proof it is inert.
+"""Client half of the shared-secret contract (bridge.load_secret) and its wiring.
 
 bridge.load_secret reads the secret file the same way revit_mcp/trust.py does; the
 payload ships no revit_mcp/ package, so the rule is duplicated in bridge.py and the
-parity tests here are what keep the two halves identical. Nothing in production code
-calls load_secret or with_envelope until Phase 5, and bridge._send still posts exactly
-json.dumps(data). Needs no Revit.
+parity tests here are what keep the two halves identical. Since Phase 5 (plan 05-16)
+bridge.revit_post envelopes every POST through with_envelope and loads the secret
+lazily through _secret(); nothing else calls either, and bridge._send still posts
+exactly json.dumps(body) of the body it is given. Needs no Revit.
 """
 
 import ast
@@ -251,10 +252,10 @@ def test_with_envelope_refuses_a_non_dict_body():
     assert SECRET not in str(excinfo.value)
 
 
-# --- inert: the send path is untouched (D-10) ---------------------------------
+# --- wired: the send path itself is untouched, the envelope is built before it ---
 
 @pytest.mark.anyio
-async def test_inert_send_posts_exactly_json_dumps():
+async def test_send_posts_exactly_json_dumps_of_the_body_it_is_given():
     seen = []
 
     def handler(request):
@@ -289,26 +290,35 @@ def _call_names(tree):
                 yield func.attr
 
 
-def test_inert_no_production_call_sites():
+def test_envelope_and_secret_loader_are_called_only_from_bridge():
     paths = _production_files()
     assert len(paths) >= 3  # bridge.py, main.py and at least one tools module
-    offenders = []
+    callers = {}
     for path in paths:
         with open(path, "rb") as handle:
             tree = ast.parse(handle.read(), filename=path)
         for name in _call_names(tree):
             if name in ("load_secret", "with_envelope"):
-                offenders.append((os.path.basename(path), name))
-    assert offenders == []
+                callers.setdefault(os.path.basename(path), set()).add(name)
+    assert callers == {"bridge.py": {"load_secret", "with_envelope"}}, callers
 
 
-def test_inert_load_secret_is_not_run_at_import():
-    # Importing bridge must not read a secret file: the only references to
-    # load_secret in bridge.py are its definition.
+def test_load_secret_runs_lazily_never_at_import():
+    # Importing bridge must not read a secret file: every reference to load_secret
+    # other than its definition sits inside the body of _secret().
     with open(os.path.join(REPO_ROOT, "bridge.py"), "rb") as handle:
         tree = ast.parse(handle.read())
     defs = [n for n in ast.walk(tree)
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "load_secret"]
     assert len(defs) == 1
+    getters = [n for n in tree.body
+               if isinstance(n, ast.FunctionDef) and n.name == "_secret"]
+    assert len(getters) == 1
+    inside = {id(n) for n in ast.walk(getters[0])}
     mentions = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == "load_secret"]
-    assert mentions == []
+    assert mentions, "_secret() must reach load_secret"
+    assert [m for m in mentions if id(m) not in inside] == []
+    for node in tree.body:  # nothing at module level calls it
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        assert "load_secret" not in ast.dump(node)

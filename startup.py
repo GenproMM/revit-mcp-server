@@ -12,9 +12,10 @@ Discovery uses os.listdir rather than pkgutil: this runs under IronPython
 and the extension is frequently loaded over a UNC share, where a plain
 directory listing is the predictable option.
 
-Registration order is alphabetical and deliberately not significant: no module
-in revit_mcp/ imports another module in revit_mcp/ (every cross-module import
-goes to the flat `utils` helper), so nothing depends on being registered first.
+Registration order is alphabetical and deliberately not significant: no domain
+module in revit_mcp/ imports another domain module (cross-module imports go to
+helper modules, which expose no registrar), so nothing depends on being
+registered first.
 """
 
 from pyrevit import routes
@@ -124,6 +125,20 @@ def register_routes():
     except Exception as exc:
         registry.FAILED["identity"] = "{}: {}".format(type(exc).__name__, str(exc))
         logger.exception("Failed to initialize process identity")
+
+    # Security state: the shared secret (revit_mcp/_bridge_secret) and the integrity
+    # verdict (_manifest.json). The gate itself is an explicit call at the top of
+    # every non-GET handler (D-01); this block only initializes its state. The
+    # integrity check runs here, once, before any domain is imported, so a file
+    # changed after load is seen only after a full Revit restart. A failure is
+    # recorded like any other and leaves the state empty: every gated route then
+    # answers 401 server_not_configured instead of running unguarded.
+    try:
+        security = __import__("{}.security".format(_PACKAGE), fromlist=["security"])
+        security.initialize(os.path.dirname(package.__path__[0]), package.__path__[0])
+    except Exception as exc:
+        registry.FAILED["security"] = "{}: {}".format(type(exc).__name__, str(exc))
+        logger.exception("Failed to initialize the security gate")
 
     for name in _domain_modules(package):
         try:

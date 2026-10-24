@@ -69,12 +69,12 @@ created: "2026-10-24"
 | 05-12-T1 | 05-12 | 5 | SEC-01, SEC-02 | T-05-49 | run match against a fake Revit; POSTS_SENT counted | unit (tracer) | `uv run pytest tests/unit/test_phase5_live_gate.py -q -k run` | Yes (05-11) | ⬜ pending |
 | 05-12-T2 | 05-12 | 5 | INTG-04, INTG-08 | T-05-49 | corrupt/cleanup runs; refusals before any request | unit | `uv run pytest tests/unit/test_phase5_live_gate.py -q` | Yes (05-11) | ⬜ pending |
 | 05-12-T3 | 05-12 | 5 | SEC-06, INTG-03 | T-05-50, T-05-51, T-05-52 | corrupt/restore on temp repos; scan-secret | unit | `uv run pytest tests/unit/test_phase5_live_gate.py -q -k "corrupt_cmd or restore or scan_secret"` | Yes (05-11) | ⬜ pending |
-| 05-13-T1 | 05-13 | 6 | INTG-06 | T-05-57 | real junction tree verified_match with the dev manifest | live prep (tracer) | `uv run python deploy/make_manifest.py --check --dest .` | n/a | ⬜ pending |
-| 05-13-T3 | 05-13 | 6 | SEC-01, SEC-03, SEC-05, SEC-07, SEC-08, INTG-02 | T-05-54, T-05-56 | live L1 match: 401 before transaction, reads open, fingerprints equal | live, one-shot | `uv run python tests/test_phase5_live_gate.py classify --stage match C:/Temp/phase5/S1-match.json` | n/a | ⬜ pending |
-| 05-14-T1 | 05-14 | 7 | INTG-05 | T-05-59 | corruption staged, reader sees both files | live prep (tracer) | `uv run python deploy/make_manifest.py --check --dest .` | n/a | ⬜ pending |
-| 05-14-T3 | 05-14 | 7 | INTG-02, INTG-03, INTG-04, INTG-05, SEC-05 | T-05-58, T-05-60, T-05-61 | live L2 corrupt: 423 incl. execute_code, reads open; junction restored | live, one-shot | `uv run python tests/test_phase5_live_gate.py classify --stage corrupt C:/Temp/phase5/S2-corrupt.json` | n/a | ⬜ pending |
-| 05-15-T1 | 05-15 | 8 | INTG-08 | — | junction clean, manifest absent | live prep (tracer) | `uv run python deploy/make_manifest.py --check --dest .` | n/a | ⬜ pending |
-| 05-15-T3 | 05-15 | 8 | INTG-07, INTG-08, SEC-06 | T-05-62, T-05-63, T-05-64 | live L3 cleanup and phase verdict; no secret in any record | live, one-shot | `uv run python tests/test_phase5_live_gate.py classify-phase C:/Temp/phase5/S1-match.json C:/Temp/phase5/S2-corrupt.json C:/Temp/phase5/S3-cleanup.json` | n/a | ⬜ pending |
+| 05-13-T1 | 05-13 | 6 | INTG-06 | T-05-57 | real junction tree verified_match with the dev manifest | live prep (tracer) | `uv run python deploy/make_manifest.py --check --dest .` | n/a | ✅ green (verified_match) |
+| 05-13-T3 | 05-13 | 6 | SEC-01, SEC-03, SEC-05, SEC-07, SEC-08, INTG-02 | T-05-54, T-05-56 | live L1 match: 401 before transaction, reads open, fingerprints equal | live, one-shot | `uv run python tests/test_phase5_live_gate.py classify --stage match C:/Temp/phase5/S1-match-3.json` | n/a | ✅ green: PHASE5_GATE_OK (attempt 3; see Gaps) |
+| 05-14-T1 | 05-14 | 7 | INTG-05 | T-05-59 | corruption staged, reader sees both files | live prep (tracer) | `uv run python deploy/make_manifest.py --check --dest .` | n/a | ✅ green (verified_mismatch, both files named) |
+| 05-14-T3 | 05-14 | 7 | INTG-02, INTG-03, INTG-04, INTG-05, SEC-05 | T-05-58, T-05-60, T-05-61 | live L2 corrupt: 423 incl. execute_code, reads open; junction restored | live, one-shot | `uv run python tests/test_phase5_live_gate.py classify --stage corrupt C:/Temp/phase5/S2-corrupt.json` | n/a | ✅ green: PHASE5_GATE_OK |
+| 05-15-T1 | 05-15 | 8 | INTG-08 | — | junction clean, manifest absent | live prep (tracer) | `uv run python deploy/make_manifest.py --check --dest .` | n/a | ✅ green (unverifiable / manifest_missing) |
+| 05-15-T3 | 05-15 | 8 | INTG-07, INTG-08, SEC-06 | T-05-62, T-05-63, T-05-64 | live L3 cleanup and phase verdict; no secret in any record | live, one-shot | `uv run python tests/test_phase5_live_gate.py classify-phase C:/Temp/phase5/S1-match-3.json C:/Temp/phase5/S2-corrupt.json C:/Temp/phase5/S3-cleanup.json` | n/a | ✅ green: PHASE5_GATE_OK |
 | 05-16-T1 | 05-16 | 2 | SEC-02, SEC-03, SEC-06 | T-05-05, T-05-06, T-05-07, T-05-65 | every POST carries the envelope and passes the real gate; 401 texts without the secret; forged `_mcp` refused not-sent | unit e2e (tracer) | `uv run pytest tests/unit/test_phase5_gate_e2e.py tests/unit/test_bridge_secret_client.py -q` | No - created in task | ⬜ pending |
 | 05-16-T2 | 05-16 | 2 | INTG-02, INTG-07 | T-05-04 | startup initializes the gate at load; failure recorded in registry.FAILED and the gate stays closed | unit (startup loader) | `uv run pytest tests/unit/test_security_state.py -q -k startup` | Yes (05-01) | ⬜ pending |
 
@@ -97,10 +97,30 @@ created: "2026-10-24"
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| L1 match (plan 05-13): manifest match on the junction; unauthenticated, wrong-secret and no-envelope /execute_code/ POSTs 401 with no level created; open reads and /status/ without a secret; authenticated create_level commits; fingerprints equal; bind loopback_only | SEC-01/02/03/05/07/08, INTG-02/06, SC1, SC3 | Needs live Revit + pyRevit Routes, restart with the temporary manifest present | `tests/test_phase5_live_gate.py run --stage match` (D-11 restarts reduced to three: the baseline secret checks run in the match stage) |
-| L2 corrupt (plan 05-14): `/status/` names the modified module and `revit_mcp/_zz_probe.py`, health degraded; create_level and execute_code 423; reads continue | INTG-02/03/04/05, SEC-05, SC2, SC3 | Needs Revit restart after the corruption | `tests/test_phase5_live_gate.py run --stage corrupt`, then `restore` |
-| L3 cleanup (plan 05-15): unverifiable/manifest_missing, healthy, distinct positive-control write | INTG-07/08, D-11 | Needs Revit restart on the restored junction | `tests/test_phase5_live_gate.py run --stage cleanup`, then `classify-phase` and `scan-secret` |
+| L1 match (plan 05-13): manifest match on the junction; unauthenticated, wrong-secret and no-envelope /execute_code/ POSTs 401 with no level created; open reads and /status/ without a secret; authenticated create_level commits; fingerprints equal; bind loopback_only | SEC-01/02/03/05/07/08, INTG-02/06, SC1, SC3 | Needs live Revit + pyRevit Routes, restart with the temporary manifest present | `tests/test_phase5_live_gate.py run --stage match` (D-11 restarts reduced to three: the baseline secret checks run in the match stage). **Result:** `PHASE5_GATE_OK`, `POSTS_SENT=7`, 2026-10-24, listener check: one row on 127.0.0.1:48884, fingerprints equal: yes, record `C:/Temp/phase5/S1-match-3.json` (attempt 3; see Gaps). |
+| L2 corrupt (plan 05-14): `/status/` names the modified module and `revit_mcp/_zz_probe.py`, health degraded; create_level and execute_code 423; reads continue | INTG-02/03/04/05, SEC-05, SC2, SC3 | Needs Revit restart after the corruption | `tests/test_phase5_live_gate.py run --stage corrupt`, then `restore`. **Result:** `PHASE5_GATE_OK`, `POSTS_SENT=4`, 2026-10-24, listener check: one row on 127.0.0.1:48884, fingerprints equal: yes, record `C:/Temp/phase5/S2-corrupt.json`; `restore` printed `RESTORED clean`. |
+| L3 cleanup (plan 05-15): unverifiable/manifest_missing, healthy, distinct positive-control write | INTG-07/08, D-11 | Needs Revit restart on the restored junction | `tests/test_phase5_live_gate.py run --stage cleanup`, then `classify-phase` and `scan-secret`. **Result:** `PHASE5_GATE_OK`, `POSTS_SENT=1`, 2026-10-24, listener check: one row on 127.0.0.1:48884, fingerprints equal: yes, integrity `unverifiable` / `manifest_missing`, health `healthy`, no security alert, distinctly named create_level committed and listed; record `C:/Temp/phase5/S3-cleanup.json`. |
 | D-06 payload-first rehearsal on the pilot share, D-10 second-publish probe with Revit open | D-06, D-10 | Pilot machine only, at R3 | RELEASE-RUNBOOK.md section 5 / 6.3 (plan 05-10) |
+
+### Live gate phase verdict (recorded 2026-10-24)
+
+`classify-phase C:/Temp/phase5/S1-match-3.json C:/Temp/phase5/S2-corrupt.json C:/Temp/phase5/S3-cleanup.json` (exit 0):
+
+```
+PHASE5_GATE_OK
+STAGE=match VERDICT=ok POSTS_SENT=7
+STAGE=corrupt VERDICT=ok POSTS_SENT=4
+STAGE=cleanup VERDICT=ok POSTS_SENT=1
+```
+
+`scan-secret` over `S1-match-3.json`, `S2-corrupt.json` and `S3-cleanup.json`: `SECRET_ABSENT` for each. The two superseded match records (`S1-match.json`, `S1-match-2.json`) were also scanned: `SECRET_ABSENT`. `uv run pytest tests/unit -q` after the stages: 5884 passed, 3 skipped.
+
+### Gaps and history
+
+- **Match stage, three attempts.** `S1-match.json` (attempt 1) stopped in preflight with `POSTS_SENT=0` (no document open); nothing was sent. `S1-match-2.json` (attempt 2) was `PHASE5_GATE_STOP` with `POSTS_SENT=7`, caused by two defects in the live runner (the `/document_levels/` steps sent no document selector; the tool-text error parser did not tolerate the trailing process line), not by the product. The runner was fixed in commit `9aa9876`. Attempt 3 (`S1-match-3.json`) reran the stage under a user-approved one-time exception and is the authoritative L1 record. Both earlier records are superseded and must not be used for `classify-phase`. The match stage is consumed and must not be run again.
+- **Corrupt and cleanup stages** ran once each, at the first attempt, and are not to be repeated.
+- **Leftover test level.** The unsaved throwaway project still holds the test level created by the cleanup stage (`P5_P_CREATE_20261024T203317`) plus the two from the match attempts; they disappear when the project is closed unsaved. Nothing was saved.
+- The developer junction ends clean: no `_manifest.json`, no `revit_mcp/_zz_probe.py`, no change under `revit_mcp/`, `startup.py` or `extension.json`.
 
 ---
 

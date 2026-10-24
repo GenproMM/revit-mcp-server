@@ -2257,21 +2257,6 @@ def test_edit_family_validation_replies_carry_no_outcome(world):
 
 WRONG_SECRET = "wrong-secret-0123456789-abcdefXYZ-nope"
 
-# 05-03 Task 1 gates document, documentation and editing; the interop and placement rows
-# stay strict xfails until Task 2 gates them (a strict xfail fails the moment it passes).
-GATED_LATER = ("interop", "placement")
-
-
-def _gated_params():
-    params = []
-    for key in MUTATIONS:
-        marks = []
-        if key[0] in GATED_LATER:
-            marks.append(pytest.mark.xfail(strict=True, reason="gated in Task 2"))
-        params.append(pytest.param(key, id="{}:{}".format(*key), marks=marks))
-    return params
-
-
 def _one_open_document(world):
     world.open("Only", "C:/Models/Only.rvt", active=True)
     world.tokens()
@@ -2301,7 +2286,7 @@ def _refused(world, key, request, status):
     return reply
 
 
-@pytest.mark.parametrize("key", _gated_params())
+@pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
 def test_without_the_shared_secret_a_mutation_is_401_before_any_side_effect(world, key):
     _one_open_document(world)
     body = fill(world, MUTATIONS[key])
@@ -2310,7 +2295,7 @@ def test_without_the_shared_secret_a_mutation_is_401_before_any_side_effect(worl
     assert reply.data["auth"] == "missing"
 
 
-@pytest.mark.parametrize("key", _gated_params())
+@pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
 def test_with_a_wrong_secret_a_mutation_is_401_before_any_side_effect(world, key):
     _one_open_document(world)
     body = fill(world, MUTATIONS[key])
@@ -2319,7 +2304,7 @@ def test_with_a_wrong_secret_a_mutation_is_401_before_any_side_effect(world, key
     assert reply.data["auth"] == "mismatch"
 
 
-@pytest.mark.parametrize("key", _gated_params())
+@pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
 def test_with_an_integrity_mismatch_a_mutation_is_423_before_any_side_effect(
         world, monkeypatch, key):
     _one_open_document(world)

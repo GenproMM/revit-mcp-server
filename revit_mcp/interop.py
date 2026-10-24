@@ -6,6 +6,7 @@ Handles IFC export and external file linking/importing
 
 from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import clr
 import os
@@ -149,6 +150,10 @@ def register_interop_routes(api):
     @api.route("/export_ifc/", methods=["POST"])
     def export_ifc_handler(uiapp, doc, request):
         """Export the model to IFC format."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access, file output or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -291,6 +296,10 @@ def register_interop_routes(api):
     @api.route("/link_file/", methods=["POST"])
     def link_file_handler(uiapp, doc, request):
         """Link or import an external file."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access, file output or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)

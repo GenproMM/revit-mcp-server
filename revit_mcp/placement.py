@@ -22,6 +22,7 @@ from .identity import (
     attribute_response,
     family_document_info,
 )
+from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import os
 import traceback
@@ -531,6 +532,10 @@ def register_placement_routes(api):
     @api.route("/place_family/", methods=["POST"])
     def place_family(uiapp, doc, request):
         """Place a family instance at a specified location in the model."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access, file output or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -605,6 +610,10 @@ def register_placement_routes(api):
     @api.route("/load_family/", methods=["POST"])
     def load_family(uiapp, doc, request):
         """Load a Revit family (.rfa) from disk into the selected document."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access, file output or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -1082,6 +1091,10 @@ def register_placement_routes(api):
     @api.route("/edit_family/", methods=["POST"])
     def edit_family(uiapp, doc, request):
         """Open a family loaded in the selected project, edit it, and load it back."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before EditFamily opens any nested document.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)

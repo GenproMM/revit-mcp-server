@@ -20,6 +20,7 @@ import logging
 import traceback
 
 from .utils import get_element_name, get_element_id_value, parse_request_data
+from .security import strip_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,7 @@ def register_clash_routes(api):
         - If only set_a is given, set_a is checked against itself.
         - If both are given, set_a is checked against set_b (cross-discipline).
         """
+        strip_envelope(request)
         try:
             if not doc:
                 return routes.make_response(

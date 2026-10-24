@@ -17,7 +17,7 @@ from .utils import (
     exception_outcome,
 )
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
-from .security import gate_or_response
+from .security import gate_or_response, strip_envelope
 from pyrevit import routes, DB
 import logging
 import random
@@ -1226,6 +1226,7 @@ def register_color_routes(api):
             "category_name": "Walls"
         }
         """
+        strip_envelope(request)
         try:
             data = parse_request_data(request.data)
 

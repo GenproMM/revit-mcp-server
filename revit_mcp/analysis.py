@@ -5,6 +5,7 @@ Handles element filtering, room data, material quantities, and model statistics
 """
 
 from .utils import get_element_name, normalize_string, get_element_id_value, parse_request_data
+from .security import strip_envelope
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -22,6 +23,7 @@ def register_analysis_routes(api):
     @api.route("/ai_filter/", methods=["POST"])
     def ai_element_filter_handler(doc, request):
         """Filter and find Revit elements by various criteria."""
+        strip_envelope(request)
         try:
             if not doc:
                 return routes.make_response(
@@ -293,6 +295,7 @@ def register_analysis_routes(api):
     @api.route("/material_quantities/", methods=["POST"])
     def get_material_quantities_handler(doc, request):
         """Get material quantities from the model."""
+        strip_envelope(request)
         try:
             if not doc:
                 return routes.make_response(

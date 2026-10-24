@@ -550,9 +550,9 @@ def _imports(path):
     return absolute, relative
 
 
-def test_dialect_trust_imports_only_hashlib_and_textutils():
+def test_dialect_trust_imports_only_hashlib_json_and_textutils():
     absolute, relative = _imports(TRUST_PATH)
-    assert absolute == set(["hashlib"])
+    assert absolute == set(["hashlib", "json"])
     assert relative == set(["textutils"])
 
 

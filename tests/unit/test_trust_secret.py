@@ -313,7 +313,7 @@ def test_trust_imports_nothing_from_revit():
                 relative.add(node.module)
             else:
                 absolute.add(node.module)
-    assert absolute == set(["hashlib"])
+    assert absolute == set(["hashlib", "json"])
     assert relative == set(["textutils"])
 
 

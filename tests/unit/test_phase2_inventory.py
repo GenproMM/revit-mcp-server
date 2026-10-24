@@ -437,6 +437,24 @@ def test_a_guarded_handler_calls_the_explicit_guard_first_and_attributes_every_r
     route = ROUTE_BY_KEY[key]
     assert {"uiapp", "request"} <= set(route.args), route.args
     statements = _body(route.node)
+    # Phase 5 gate (D-01): a handler that carries it opens with
+    #     gate_refusal = gate_or_response(request)
+    #     if gate_refusal is not None: return gate_refusal
+    # and the document guard follows. 05-06 makes the gate mandatory for every non-GET
+    # route; until then a handler without it is still checked as before.
+    gate_first = statements[0]
+    gated = (isinstance(gate_first, ast.Assign) and isinstance(gate_first.value, ast.Call)
+             and call_name(gate_first.value) == "gate_or_response"
+             and [t.id for t in gate_first.targets] == ["gate_refusal"])
+    if gated:
+        assert [a.id for a in gate_first.value.args] == ["request"] and not gate_first.value.keywords
+        gate_if = statements[1]
+        assert isinstance(gate_if, ast.If)
+        assert isinstance(gate_if.test, ast.Compare) and gate_if.test.left.id == "gate_refusal"
+        assert isinstance(gate_if.test.ops[0], ast.IsNot)
+        assert len(gate_if.body) == 1 and isinstance(gate_if.body[0], ast.Return)
+        assert gate_if.body[0].value.id == "gate_refusal"
+        statements = statements[2:]
     first, second = statements[0], statements[1]
     # document, descriptor, refusal = mutation_document_or_response(request_document_selector(request), uiapp=uiapp)
     assert isinstance(first, ast.Assign) and isinstance(first.value, ast.Call)
@@ -452,8 +470,9 @@ def test_a_guarded_handler_calls_the_explicit_guard_first_and_attributes_every_r
     assert isinstance(second.test.ops[0], ast.IsNot)
     assert len(second.body) == 1 and isinstance(second.body[0], ast.Return)
     assert second.body[0].value.id == "refusal"
-    # Nothing at all before the guard; the injected `doc` is never used by the handler.
-    guard_line = first.lineno
+    # Nothing at all before the guard (the gate, when present, is the only thing before
+    # it); the injected `doc` is never used by the handler.
+    guard_line = gate_first.lineno if gated else first.lineno
     for statement in route.node.body:
         for call in ast.walk(statement):
             if isinstance(call, ast.Call):

@@ -15,6 +15,7 @@ prove: how pyRevit dispatches these handlers, or how a real Document answers -- 
 live recheck after a full Revit restart (02-18). Nothing here touches Revit.
 """
 
+import asyncio
 import importlib
 import inspect
 import itertools
@@ -23,9 +24,12 @@ import sys
 import types
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
-from revit_mcp import identity
+import bridge
+from gate_support import TEST_SECRET, configure_gate, request_of
+from revit_mcp import identity, trust
 from revit_mcp.textutils import classify_outcome
 from tools.utils import format_response
 
@@ -386,6 +390,9 @@ def world(monkeypatch):
     """
     w = World()
     w.guard_calls = []
+    # Phase 5: the Revit-side gate state is configured and every request carries the
+    # envelope, exactly as production delivers it once the bridge envelopes every POST.
+    configure_gate(monkeypatch)
     real_guard = identity.mutation_document_or_response
 
     def counting_guard(*args, **kwargs):
@@ -456,15 +463,15 @@ def handler_of(world, module_name, route, method="POST"):
     return load(world, module_name)[(route, method)]
 
 
-def request_of(body):
-    if body is None:
-        return types.SimpleNamespace(data=None)
-    return types.SimpleNamespace(data=json.dumps(body).encode("utf-8"))
+def call(world, fn, body=None, request=None):
+    """Invoke a handler the way pyRevit does: injected arguments by name.
 
-
-def call(world, fn, body=None):
-    """Invoke a handler the way pyRevit does: injected arguments by name."""
-    available = {"uiapp": world.uiapp, "doc": world.injected, "request": request_of(body)}
+    ``request`` is a prebuilt request object (the gate tests build their own); without
+    one the body travels with the Phase 5 envelope (gate_support.request_of).
+    """
+    if request is None:
+        request = request_of(body)
+    available = {"uiapp": world.uiapp, "doc": world.injected, "request": request}
     parameters = inspect.signature(fn).parameters
     return fn(**dict((name, available[name]) for name in parameters))
 
@@ -986,6 +993,136 @@ def test_create_level_success_keeps_its_body_and_opens_the_transaction_on_the_re
     assert order[:2] == ["transaction", "start"], "the guard must precede any transaction"
     assert world.kinds("transaction")[0][1] == "Only"
     assert world.kinds("commit")
+
+
+# --------------------------------------------- Phase 5 tracer: the gate on /create_level/
+#
+# One real mutation travels from the production bridge (with_envelope plus the unchanged
+# _send, text/plain bytes) through revit_mcp.security.gate_or_response into the real
+# handler. Every refusal must arrive before the document guard and before any Revit
+# object (document attribute, collector, transaction) is touched.
+
+
+class _IronPython3Json(object):
+    """json as IronPython 3 ships it: loads() refuses bytes (see test_secret_gate_e2e)."""
+
+    def loads(self, payload, *args, **kwargs):
+        if not isinstance(payload, str):
+            raise TypeError(
+                "the JSON object must be str, not {!r}".format(payload.__class__.__name__))
+        return json.loads(payload, *args, **kwargs)
+
+
+CREATE_LEVEL = ("building", "/create_level/")
+LEVEL_BODY = MUTATIONS[CREATE_LEVEL]
+
+
+def _through_the_bridge(world, body):
+    """POST ``body`` to the real /create_level/ handler through the unchanged bridge._send.
+
+    Returns (what _send returned, the request objects the handler received).
+    """
+    fn = handler_of(world, *CREATE_LEVEL)
+    seen = []
+
+    def revit(http_request):
+        request = types.SimpleNamespace(data=http_request.content)
+        seen.append(request)
+        reply = call(world, fn, request=request)
+        return httpx.Response(reply.status, json=reply.data)
+
+    async def run():
+        transport = httpx.MockTransport(revit)
+        async with httpx.AsyncClient(base_url="http://revit.test/genpro_revit_mcp/",
+                                     transport=transport) as client:
+            return await bridge._send(client, "POST", "/create_level/", body, 5.0, None)
+
+    return asyncio.run(run()), seen
+
+
+def _mismatch_naming(*files):
+    return {"state": trust.INTEGRITY_MISMATCH, "reason": None,
+            "modified": sorted(files), "missing": [], "unexpected": []}
+
+
+def test_create_level_through_the_real_bridge_send_path_reaches_the_handler_without_the_envelope(
+        world, monkeypatch):
+    monkeypatch.setattr("revit_mcp.textutils.json", _IronPython3Json())
+    world.open("Only", "C:/Models/Only.rvt", active=True)
+    world.tokens()
+    result, seen = _through_the_bridge(world, bridge.with_envelope(LEVEL_BODY, TEST_SECRET))
+    assert isinstance(result, dict), result
+    assert result["outcome"]["transaction_status"] == "Committed"
+    assert world.kinds("transaction")[0][1] == "Only"
+    assert world.kinds("start") and world.kinds("commit")
+    assert len(world.guard_calls) == 1
+    assert len(seen) == 1
+    data = seen[0].data
+    assert isinstance(data, bytes), "bytes in, bytes out (RESEARCH Pitfall 3)"
+    assert "_mcp" not in json.loads(data.decode("utf-8"))
+    assert TEST_SECRET.encode("utf-8") not in data
+
+
+def _refusal_case(name, monkeypatch):
+    if name == "no-envelope":
+        return bridge.with_envelope(LEVEL_BODY, None)
+    if name == "wrong-secret":
+        return bridge.with_envelope(LEVEL_BODY, "wrong-secret-0123456789-abcdefXYZ-nope")
+    configure_gate(monkeypatch, secret=None)
+    return bridge.with_envelope(LEVEL_BODY, TEST_SECRET)
+
+
+@pytest.mark.parametrize("name,word", [
+    ("no-envelope", "missing"),
+    ("wrong-secret", "mismatch"),
+    ("unconfigured", "server_not_configured"),
+])
+def test_create_level_refusals_happen_before_any_document_access(world, monkeypatch, name, word):
+    monkeypatch.setattr("revit_mcp.textutils.json", _IronPython3Json())
+    world.open("Only", "C:/Models/Only.rvt", active=True)
+    world.tokens()
+    del world.events[:]
+    body = _refusal_case(name, monkeypatch)
+    result, _ = _through_the_bridge(world, body)
+    assert isinstance(result, str), result
+    assert result.startswith("Error: 401 - ")
+    assert word in result
+    assert '"outcome"' not in result, "a refusal before any transaction carries no outcome"
+    assert format_response(result) == result
+    assert TEST_SECRET not in result
+    assert world.transactions == []
+    assert world.events == [], "no collector, document attribute or transaction before the gate"
+    assert world.guard_calls == []
+
+
+def test_create_level_with_a_verified_mismatch_is_a_423_naming_the_files(world, monkeypatch):
+    monkeypatch.setattr("revit_mcp.textutils.json", _IronPython3Json())
+    world.open("Only", "C:/Models/Only.rvt", active=True)
+    world.tokens()
+    del world.events[:]
+    configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
+    result, _ = _through_the_bridge(world, bridge.with_envelope(LEVEL_BODY, TEST_SECRET))
+    assert isinstance(result, str), result
+    assert result.startswith("Error: 423 - ")
+    assert "revit_mcp/detail.py" in result
+    assert format_response(result) == result
+    assert TEST_SECRET not in result
+    assert world.transactions == [] and world.events == [] and world.guard_calls == []
+
+
+def test_create_level_with_a_wrong_secret_and_a_mismatch_is_still_a_401(world, monkeypatch):
+    monkeypatch.setattr("revit_mcp.textutils.json", _IronPython3Json())
+    world.open("Only", "C:/Models/Only.rvt", active=True)
+    world.tokens()
+    del world.events[:]
+    configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
+    wrong = bridge.with_envelope(LEVEL_BODY, "wrong-secret-0123456789-abcdefXYZ-nope")
+    result, _ = _through_the_bridge(world, wrong)
+    assert isinstance(result, str), result
+    assert result.startswith("Error: 401 - ")
+    assert "mismatch" in result
+    assert "revit_mcp/detail.py" not in result, "the secret is checked first (D-04)"
+    assert world.transactions == [] and world.events == [] and world.guard_calls == []
 
 
 # ------------------------------------------------------------------- helper contracts

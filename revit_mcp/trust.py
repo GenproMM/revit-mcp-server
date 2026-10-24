@@ -6,8 +6,8 @@ This module is deliberately free of any pyRevit, clr, System or Revit API
 import, so it is unit tested under CPython 3 and a refusal it decides can be
 returned before any transaction is opened. It registers no routes, so
 startup.py's discovery imports it at extension load and reports it as a helper.
-It was built in Phase 3 and is wired into the request path by Phase 5; until
-then nothing calls it.
+It was built in Phase 3 and is wired into the request path by Phase 5:
+revit_mcp/security.py calls it on every non-GET request.
 
 Dialect: IronPython 3 at the Python 3.4 language level (CLAUDE.md two-runtime
 rule). Only text.format, no annotations, relative sibling imports, and runtime
@@ -21,6 +21,7 @@ here, and this module never logs.
 """
 
 import hashlib
+import json
 
 from .textutils import _BYTES_TYPE, _TEXT_TYPE, parse_request_data
 
@@ -39,6 +40,21 @@ AUTH_FAILURE_STATUS = 401
 # is gated, so a route added with a new verb is closed rather than silently open.
 UNGATED_METHODS = ("GET", "HEAD")
 
+# The seven POST routes that only read (D-02). They are never refused: their handlers
+# call security.strip_envelope so the reserved key does not reach the route's own
+# parse, but a missing or wrong secret does not change their answer. Adding a key is
+# an edit of this set plus the pinning test (05-06), like UNLOCKED_GET in bridge.py;
+# every other non-GET route is gated and refuses without the secret.
+OPEN_POST_READ_ROUTES = frozenset((
+    "/document_summary/",
+    "/document_levels/",
+    "/model_worksets/",
+    "/material_quantities/",
+    "/clash_check/",
+    "/ai_filter/",
+    "/list_category_parameters/",
+))
+
 _AUTH_HINTS = {
     AUTH_MISSING: (
         "The MCP server sent no shared secret. Update the payload so _bridge_secret "
@@ -53,6 +69,45 @@ _AUTH_HINTS = {
         "and restart Revit."
     ),
 }
+
+
+GATE_FAILURE_STATUS = 500
+
+
+def clean_body(raw, payload):
+    """The request body to hand to the route once the envelope is removed.
+
+    ``raw`` is what the request carried and ``payload`` the parsed body without the
+    reserved key. The result keeps the type the request arrived in: bytes give UTF-8
+    bytes, text gives text, a dict gives the payload dict. A route's own
+    ``if not request.data`` check therefore sees the truthiness it saw before the
+    gate existed (an envelope-only body becomes b"{}", still truthy; RESEARCH
+    Pitfall 3). json.dumps keeps its default ensure_ascii=True, so non-ASCII text
+    survives as an ASCII escape sequence and round-trips through parse_request_data.
+    Runtime types come from the textutils aliases, never from a ``unicode`` probe.
+    """
+    if isinstance(raw, _BYTES_TYPE):
+        return json.dumps(payload).encode("utf-8")
+    if isinstance(raw, _TEXT_TYPE):
+        return json.dumps(payload)
+    return payload
+
+
+def gate_failure():
+    """(body, status) of the HTTP 500 answer when the gate itself failed; fixed text.
+
+    The gate must fail closed and loud: a request it cannot read or rewrite is
+    refused with this body, which carries no exception text, local variable, request
+    body or secret.
+    """
+    body = {
+        "error": (
+            "Mutation rejected: the request gate failed before the route ran. "
+            "Nothing was changed."
+        ),
+        "gate": "internal_error",
+    }
+    return body, GATE_FAILURE_STATUS
 
 
 def split_envelope(raw):

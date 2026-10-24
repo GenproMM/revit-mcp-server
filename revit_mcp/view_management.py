@@ -6,6 +6,7 @@ Handles view creation and active view switching
 
 from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, build_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -454,6 +455,10 @@ def register_view_management_routes(api):
     @api.route("/create_view/", methods=["POST"])
     def create_view_handler(uiapp, doc, request):
         """Create a new view in the Revit model."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -464,6 +469,10 @@ def register_view_management_routes(api):
     @api.route("/set_active_view/", methods=["POST"])
     def set_active_view_handler(uiapp, doc, uidoc, request):
         """Set the active view in Revit UI."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first. A view switch is a document-bound mutation, so an open
         # but inactive selection is refused (412) and never made active to satisfy it.
         document, descriptor, refusal = mutation_document_or_response(

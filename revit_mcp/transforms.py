@@ -6,6 +6,7 @@ Handles move, copy, rotate, and mirror operations on elements
 
 from .utils import get_element_id_value, make_element_id, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .security import gate_or_response
 from pyrevit import routes, revit, DB
 from System.Collections.Generic import List
 import math
@@ -217,6 +218,10 @@ def register_transform_routes(api):
     @api.route("/transform_elements/", methods=["POST"])
     def transform_elements_handler(uiapp, doc, request):
         """Move, copy, rotate, or mirror elements."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)

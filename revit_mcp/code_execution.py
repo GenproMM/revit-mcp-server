@@ -6,6 +6,7 @@ Handles direct execution of IronPython code in Revit context.
 from pyrevit import routes, revit, DB
 from .utils import suppress_warnings, parse_request_data, commit_and_report, build_outcome, exception_outcome
 from .identity import process_identity_or_error
+from .security import gate_or_response
 import logging
 import sys
 import traceback
@@ -276,6 +277,10 @@ def register_code_execution_routes(api):
         Trusted arbitrary-code exception (D-15): no document selector, no document
         guard and no 412 path. Every reply carries document_scope and process_identity.
         """
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         return _stamp_exception(_execute_code(doc, request), uiapp)
 
     logger.info("Code execution routes registered successfully.")

@@ -41,7 +41,8 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from revit_mcp import identity
+from gate_support import TEST_SECRET, configure_gate, enveloped_body, request_of
+from revit_mcp import identity, trust
 from revit_mcp.textutils import classify_outcome
 
 IDENT = {"pid": 4242, "actual_port": 48885, "session_token": "tok-abc", "revit_version": "2024"}
@@ -481,6 +482,7 @@ def world(monkeypatch):
     process-level route that gained a guard, or a mutation that lost its call, is visible.
     """
     w = World()
+    configure_gate(monkeypatch)
     w.guard_calls = []
     real_guard = identity.mutation_document_or_response
 
@@ -551,12 +553,6 @@ def load(world, module_name):
 
 def handler_of(world, module_name, route, method="POST"):
     return load(world, module_name)[(route, method)]
-
-
-def request_of(body):
-    if body is None:
-        return types.SimpleNamespace(data=None)
-    return types.SimpleNamespace(data=json.dumps(body).encode("utf-8"))
 
 
 def call(world, fn, body=None, **extra):
@@ -1545,8 +1541,10 @@ def test_execute_code_early_errors_carry_no_outcome(world):
     world.open("Only", ONLY_PATH, active=True)
     empty = run_code(world, {"code": "", "description": "none"})
     assert empty.status == 400 and "outcome" not in empty.data
+    # A body that is not JSON carries no envelope: the gate answers 401 before the route's own
+    # parse ever runs (Phase 5, D-01), and that refusal has no outcome either.
     bad = run_code(world, request=types.SimpleNamespace(data=b"{not json"))
-    assert bad.status == 500 and "outcome" not in bad.data
+    assert bad.status == 401 and "outcome" not in bad.data
 
 
 def test_execute_code_early_error_replies_carry_the_notice_too(world):
@@ -1562,11 +1560,28 @@ def test_execute_code_early_error_replies_carry_the_notice_too(world):
     assert world.kinds("transaction") == []
 
 
-def test_execute_code_unparseable_body_is_a_non_raising_500_with_the_notice(world):
-    bad = types.SimpleNamespace(data=b"{not json")
-    reply = run_code(world, request=bad)
+def test_execute_code_unparseable_body_is_a_non_raising_500_with_the_notice(world, monkeypatch):
+    """With a valid envelope the gate passes, so the route's own parse failure is still a
+    non-raising 500 that carries the notice. A non-JSON body never gets this far (401)."""
+    world.open("Only", ONLY_PATH, active=True)
+    module = importlib.import_module("revit_mcp.code_execution")
+
+    def broken_parse(raw):
+        raise ValueError("body could not be parsed")
+
+    monkeypatch.setattr(module, "parse_request_data", broken_parse)
+    reply = run_code(world)
     assert reply.status == 500 and reply.data["error"]
     assert_exception_labelled(world, reply)
+
+
+def test_execute_code_non_json_body_is_a_gate_401_with_zero_side_effects(world):
+    world.open("Only", ONLY_PATH, active=True)
+    del world.events[:]
+    reply = run_code(world, request=types.SimpleNamespace(data=b"{not json"))
+    assert reply.status == 401 and reply.data["auth"] == "missing"
+    assert world.events == []
+    assert "document_scope" not in reply.data and "process_identity" not in reply.data
 
 
 def test_execute_code_without_process_identity_says_why_and_still_executes(world, monkeypatch):
@@ -1713,3 +1728,108 @@ def test_execute_revit_code_goes_through_the_real_bridge_preflight_and_lock(monk
     out = asyncio.run(mcp.tools["execute_revit_code"]("print(1)", "one", target=selector))
     assert out.startswith("Error") and "not sent" in out.lower()
     assert sent == []
+
+
+# ------------------------------------------------------- the Phase 5 gate (D-01, D-03, D-04)
+#
+# transform_elements, create_view, set_active_view, open_model and execute_code open with
+# revit_mcp.security.gate_or_response, before the document guard (where there is one), before
+# _stamp_process / _stamp_exception and before any Revit read. The world has one open document,
+# so a call that slipped past the gate would visibly reach the guard, a transaction, an Open*
+# call or a view switch. /model_worksets/ is an open read: it strips the envelope and never
+# refuses (SEC-05).
+
+WRONG_SECRET = "wrong-secret-0123456789-abcdefXYZ-nope"
+
+GATE_BODIES = {
+    ("code_execution", "/execute_code/"): {"code": "result = 1"},
+    ("worksharing", "/open_model/"): {"file_path": "C:/Models/Scratch.rvt"},
+}
+GATE_KEYS = list(MUTATIONS) + sorted(PROCESS_LEVEL)
+GATE_IDS = ["{}:{}".format(module, route) for module, route in GATE_KEYS]
+
+
+def _gate_body(key):
+    return MUTATIONS[key] if key in MUTATIONS else GATE_BODIES[key]
+
+
+def _mismatch_naming(*files):
+    return {"state": trust.INTEGRITY_MISMATCH, "reason": None,
+            "modified": sorted(files), "missing": [], "unexpected": []}
+
+
+def _refused(world, key, request, status):
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    del world.events[:]
+    reply = call(world, handler_of(world, *key), request=request)
+    assert reply.status == status
+    assert "outcome" not in reply.data
+    assert world.events == [], "no collector, document attribute, view switch or transaction"
+    assert world.transactions == []
+    assert world.open_calls == [], "no OpenDocumentFile or OpenAndActivateDocument call"
+    assert world.guard_calls == []
+    assert "document_scope" not in reply.data, "a refusal reads nothing from Revit (Pitfall 12)"
+    assert "process_identity" not in reply.data
+    assert "identity_error" not in reply.data
+    text = repr(reply.data)
+    assert TEST_SECRET not in text and WRONG_SECRET not in text
+    return reply
+
+
+@pytest.mark.parametrize("key", GATE_KEYS, ids=GATE_IDS)
+def test_without_the_shared_secret_the_route_is_401_before_any_side_effect(world, key):
+    request = types.SimpleNamespace(data=enveloped_body(_gate_body(key), secret=None))
+    reply = _refused(world, key, request, 401)
+    assert reply.data["auth"] == "missing"
+
+
+@pytest.mark.parametrize("key", GATE_KEYS, ids=GATE_IDS)
+def test_with_a_wrong_secret_the_route_is_401_before_any_side_effect(world, key):
+    request = types.SimpleNamespace(data=enveloped_body(_gate_body(key), secret=WRONG_SECRET))
+    reply = _refused(world, key, request, 401)
+    assert reply.data["auth"] == "mismatch"
+
+
+@pytest.mark.parametrize("key", GATE_KEYS, ids=GATE_IDS)
+def test_with_an_integrity_mismatch_the_route_is_423_before_any_side_effect(
+        world, monkeypatch, key):
+    configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
+    request = types.SimpleNamespace(data=enveloped_body(_gate_body(key)))
+    reply = _refused(world, key, request, 423)
+    assert reply.data["files"] == ["revit_mcp/detail.py"]
+
+
+def test_a_refused_execute_code_never_compiles_or_runs_the_submitted_code(world):
+    world.open("Only", ONLY_PATH, active=True)
+    probe = types.ModuleType("_gate_probe")
+    probe.ran = False
+    sys.modules["_gate_probe"] = probe
+    try:
+        body = {"code": "import sys; sys.modules['_gate_probe'].ran = True"}
+        request = types.SimpleNamespace(data=enveloped_body(body, secret=None))
+        reply = run_code(world, request=request)
+        assert reply.status == 401
+        assert probe.ran is False, "the submitted code ran for a caller without a secret"
+    finally:
+        sys.modules.pop("_gate_probe", None)
+
+
+MODEL_WORKSETS = ("worksharing", "/model_worksets/")
+
+
+@pytest.mark.parametrize("variant", ["none", "wrong", "valid", "mismatch"])
+def test_model_worksets_needs_no_secret_and_never_sees_the_envelope(world, monkeypatch, variant):
+    body = {"file_path": "C:/Models/Missing.rvt"}
+    fn = handler_of(world, *MODEL_WORKSETS, method="POST")
+    bare = call(world, fn, request=types.SimpleNamespace(data=json.dumps(body).encode("utf-8")))
+    assert bare.status == 404
+    if variant == "mismatch":
+        configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
+    secret = {"none": None, "wrong": WRONG_SECRET}.get(variant, TEST_SECRET)
+    request = types.SimpleNamespace(data=enveloped_body(body, secret=secret))
+    reply = call(world, fn, request=request)
+    assert reply.status == bare.status
+    assert reply.data == bare.data
+    assert "_mcp" not in json.loads(request.data.decode("utf-8"))
+    assert world.guard_calls == []

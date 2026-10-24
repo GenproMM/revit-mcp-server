@@ -16,6 +16,7 @@ is roughly ten extra discipline models and ten times the memory.
 from pyrevit import routes, DB
 from .utils import parse_request_data, build_outcome
 from .textutils import sanitize_string, describe_broken_path
+from .security import gate_or_response, strip_envelope
 from .identity import (
     read_live_snapshot, get_document_registry, current_descriptor, process_identity_or_error,
 )
@@ -337,6 +338,8 @@ def register_worksharing_routes(api):
             "close_worksets_matching": ["#_RVT_LINK"]
         }
         """
+        # Phase 5 open read (D-02): never refused; the reserved envelope key is removed.
+        strip_envelope(request)
         try:
             data = {}
             if request and request.data:
@@ -618,6 +621,10 @@ def register_worksharing_routes(api):
     @api.route("/open_model/", methods=["POST"])
     def open_model(uiapp, doc, request):
         """Open a model from disk (process-level); the reply names the document it opened."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # Not document-bound (D-01): no selector and no guard. The reply is stamped with the
         # process that answered; a success also names the document that was actually opened.
         return _stamp_process(_open_model(uiapp, request), uiapp)

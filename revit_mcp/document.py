@@ -21,6 +21,7 @@ from .identity import (
     attribute_response,
     current_descriptor,
 )
+from .security import gate_or_response
 import os
 import logging
 
@@ -211,6 +212,10 @@ def register_document_routes(api):
             "overwrite": true
         }
         """
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any directory is created or anything is saved.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)

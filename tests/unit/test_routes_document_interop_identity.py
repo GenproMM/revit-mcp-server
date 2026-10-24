@@ -22,7 +22,6 @@ after a full Revit restart (02-18). Nothing here touches Revit.
 import importlib
 import importlib.util
 import inspect
-import json
 import os
 import sys
 import time
@@ -31,7 +30,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from revit_mcp import identity
+from gate_support import TEST_SECRET, configure_gate, enveloped_body, request_of
+from revit_mcp import identity, trust
 from revit_mcp.textutils import classify_outcome
 
 IDENT = {"pid": 4242, "actual_port": 48885, "session_token": "tok-abc", "revit_version": "2024"}
@@ -496,6 +496,9 @@ def world(monkeypatch, tmp_path):
     """
     w = World(tmp_path)
     w.guard_calls = []
+    # Phase 5: the Revit-side gate state is configured and every request carries the
+    # envelope, exactly as production delivers it once the bridge envelopes every POST.
+    configure_gate(monkeypatch)
     for name in ("plan.dwg", "Door.rfa", "model.rvt"):
         (tmp_path / name).write_bytes(b"x")
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
@@ -580,16 +583,16 @@ def handler_of(world, module_name, route, method="POST"):
     return load(world, module_name)[(route, method)]
 
 
-def request_of(body):
-    if body is None:
-        return types.SimpleNamespace(data=None)
-    return types.SimpleNamespace(data=json.dumps(body).encode("utf-8"))
+def call(world, fn, body=None, request=None):
+    """Invoke a handler the way pyRevit does: injected arguments by name.
 
-
-def call(world, fn, body=None):
-    """Invoke a handler the way pyRevit does: injected arguments by name."""
+    ``request`` is a prebuilt request object (the gate tests build their own); without
+    one the body travels with the Phase 5 envelope (gate_support.request_of).
+    """
+    if request is None:
+        request = request_of(body)
     available = {"uiapp": world.uiapp, "doc": world.injected, "uidoc": world.uidoc,
-                 "request": request_of(body)}
+                 "request": request}
     parameters = inspect.signature(fn).parameters
     return fn(**dict((name, available[name]) for name in parameters))
 
@@ -2244,6 +2247,87 @@ def test_edit_family_validation_replies_carry_no_outcome(world):
     assert unknown.status == 404 and "outcome" not in unknown.data
     nothing = call(world, handler, {"family_name": "Door"})
     assert nothing.status == 400 and "outcome" not in nothing.data
+
+
+# ----------------------------------- Phase 5 (05-03): every mutation of the suite is gated
+#
+# One parametrized refusal set over the whole MUTATIONS table. One active document is open,
+# so a call that slipped past the gate would visibly reach the document guard. The file
+# writing routes (save, export, IFC export, link) must leave no file behind.
+
+WRONG_SECRET = "wrong-secret-0123456789-abcdefXYZ-nope"
+
+# 05-03 Task 1 gates document, documentation and editing; the interop and placement rows
+# stay strict xfails until Task 2 gates them (a strict xfail fails the moment it passes).
+GATED_LATER = ("interop", "placement")
+
+
+def _gated_params():
+    params = []
+    for key in MUTATIONS:
+        marks = []
+        if key[0] in GATED_LATER:
+            marks.append(pytest.mark.xfail(strict=True, reason="gated in Task 2"))
+        params.append(pytest.param(key, id="{}:{}".format(*key), marks=marks))
+    return params
+
+
+def _one_open_document(world):
+    world.open("Only", "C:/Models/Only.rvt", active=True)
+    world.tokens()
+    del world.events[:]
+
+
+def _tree(world):
+    return sorted(str(path.relative_to(world.tmp)) for path in world.tmp.rglob("*"))
+
+
+def _mismatch_naming(*files):
+    return {"state": trust.INTEGRITY_MISMATCH, "reason": None,
+            "modified": sorted(files), "missing": [], "unexpected": []}
+
+
+def _refused(world, key, request, status):
+    before = _tree(world)
+    reply = call(world, handler_of(world, *key), request=request)
+    assert reply.status == status
+    assert "outcome" not in reply.data
+    assert world.events == [], "no collector, document attribute, save or transaction before the gate"
+    assert world.transactions == []
+    assert world.guard_calls == []
+    assert _tree(world) == before, "an unauthenticated call must write no file"
+    text = repr(reply.data)
+    assert TEST_SECRET not in text and WRONG_SECRET not in text
+    return reply
+
+
+@pytest.mark.parametrize("key", _gated_params())
+def test_without_the_shared_secret_a_mutation_is_401_before_any_side_effect(world, key):
+    _one_open_document(world)
+    body = fill(world, MUTATIONS[key])
+    request = types.SimpleNamespace(data=enveloped_body(body, secret=None))
+    reply = _refused(world, key, request, 401)
+    assert reply.data["auth"] == "missing"
+
+
+@pytest.mark.parametrize("key", _gated_params())
+def test_with_a_wrong_secret_a_mutation_is_401_before_any_side_effect(world, key):
+    _one_open_document(world)
+    body = fill(world, MUTATIONS[key])
+    request = types.SimpleNamespace(data=enveloped_body(body, secret=WRONG_SECRET))
+    reply = _refused(world, key, request, 401)
+    assert reply.data["auth"] == "mismatch"
+
+
+@pytest.mark.parametrize("key", _gated_params())
+def test_with_an_integrity_mismatch_a_mutation_is_423_before_any_side_effect(
+        world, monkeypatch, key):
+    _one_open_document(world)
+    configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
+    body = fill(world, MUTATIONS[key])
+    request = types.SimpleNamespace(data=enveloped_body(body))
+    reply = _refused(world, key, request, 423)
+    assert reply.data["files"] == ["revit_mcp/detail.py"]
 
 
 # ------------------------------------------------------------------- helper contracts

@@ -6,6 +6,7 @@ Handles element deletion, modification, and selection retrieval
 
 from .utils import get_element_name, make_element_id, get_element_id_value, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, build_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -125,6 +126,10 @@ def register_editing_routes(api):
     @api.route("/delete_elements/", methods=["POST"])
     def delete_elements_handler(uiapp, doc, request):
         """Delete one or more elements from the Revit model."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access, file output or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -318,6 +323,10 @@ def register_editing_routes(api):
     @api.route("/modify_element/", methods=["POST"])
     def modify_element_handler(uiapp, doc, request):
         """Modify parameter values on a Revit element."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access, file output or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)

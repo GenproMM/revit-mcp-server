@@ -6,6 +6,7 @@ Handles sheet creation, schedule creation, and document export
 
 from .utils import get_element_name, get_element_id_value, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -156,6 +157,10 @@ def register_documentation_routes(api):
     @api.route("/create_sheet/", methods=["POST"])
     def create_sheet_handler(uiapp, doc, request):
         """Create a drawing sheet in Revit."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access, file output or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -333,6 +338,10 @@ def register_documentation_routes(api):
     @api.route("/create_schedule/", methods=["POST"])
     def create_schedule_handler(uiapp, doc, request):
         """Create a schedule view in Revit."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access, file output or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -574,6 +583,10 @@ def register_documentation_routes(api):
     @api.route("/export_document/", methods=["POST"])
     def export_document_handler(uiapp, doc, request):
         """Export a view or sheet to file."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access, file output or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)

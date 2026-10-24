@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import tokenize
+import types
 
 import pytest
 
@@ -30,6 +31,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
 import conventions  # noqa: E402  (read-only: PY3_ONLY_MODULES is reused, never edited)
 
 from revit_mcp import integrity as _integrity_module  # noqa: E402
+from revit_mcp import security as _security_module  # noqa: E402
 from revit_mcp import textutils as _textutils_module  # noqa: E402
 from revit_mcp import trust as _trust_module  # noqa: E402
 from test_trust_listeners import TABLE as LISTENER_TABLE  # noqa: E402
@@ -38,16 +40,20 @@ from test_trust_secret import VERDICT_TABLE  # noqa: E402
 REVIT_MCP_DIR = os.path.join(REPO_ROOT, "revit_mcp")
 TRUST_PATH = os.path.join(REVIT_MCP_DIR, "trust.py")
 INTEGRITY_PATH = os.path.join(REVIT_MCP_DIR, "integrity.py")
+SECURITY_PATH = os.path.join(REVIT_MCP_DIR, "security.py")
 
 SECRET = "unit-secret-0123456789-abcdefXYZ"
 _MODULE_ORDER = (_textutils_module, _trust_module, _integrity_module)
+# security imports trust and integrity, so it is reloaded last; the engine still yields
+# the three-module tuple the older tests unpack.
+_RELOAD_ORDER = _MODULE_ORDER + (_security_module,)
 
 
 # ------------------------------------------------------------ the simulated engine
 
 def _reload_in_order():
-    """textutils first (trust imports its aliases), then trust, then integrity."""
-    for module in _MODULE_ORDER:
+    """textutils first (trust imports its aliases), then trust, integrity and security."""
+    for module in _RELOAD_ORDER:
         importlib.reload(module)
 
 
@@ -55,9 +61,10 @@ def _reload_in_order():
 def _ironpython3_engine():
     """pyRevit's IronPython 3 engine: `unicode` is a builtin alias of `str`.
 
-    Yields (textutils, trust, integrity) freshly imported under that builtin, and
-    always removes the builtin (or puts the previous value back) and reloads the
-    three modules again, so later tests see plain CPython modules.
+    Yields (textutils, trust, integrity) freshly imported under that builtin (security
+    is reloaded after them and is reached as _security_module), and always removes the
+    builtin (or puts the previous value back) and reloads all four modules again, so
+    later tests see plain CPython modules.
     """
     had = hasattr(builtins, "unicode")
     previous = getattr(builtins, "unicode", None)
@@ -518,14 +525,16 @@ def test_dialect_guard_reuses_the_repository_module_list_read_only():
     assert "typing" in conventions.PY3_ONLY_MODULES
 
 
-@pytest.mark.parametrize("path", [TRUST_PATH, INTEGRITY_PATH], ids=["trust", "integrity"])
+@pytest.mark.parametrize("path", [TRUST_PATH, INTEGRITY_PATH, SECURITY_PATH],
+                         ids=["trust", "integrity", "security"])
 def test_dialect_modules_use_no_construct_above_python34(path):
     with io.open(path, encoding="utf-8") as handle:
         source = handle.read()
     assert _find_unsupported(source) == []
 
 
-@pytest.mark.parametrize("path", [TRUST_PATH, INTEGRITY_PATH], ids=["trust", "integrity"])
+@pytest.mark.parametrize("path", [TRUST_PATH, INTEGRITY_PATH, SECURITY_PATH],
+                         ids=["trust", "integrity", "security"])
 def test_dialect_modules_keep_the_encoding_cookie_and_the_repo_checker_quiet(path):
     with io.open(path, encoding="utf-8") as handle:
         source = handle.read()
@@ -562,6 +571,27 @@ def test_dialect_integrity_imports_only_the_allowed_standard_library_and_trust()
     assert relative == set(["trust"])
 
 
+def test_dialect_security_imports_only_os_trust_and_integrity():
+    """security reaches its siblings relatively (`from . import x`) and pyRevit only inside _refusal."""
+    with io.open(SECURITY_PATH, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    absolute, siblings, function_level = set(), set(), set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            absolute.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            assert node.level == 1 and node.module is None, "only `from . import <sibling>`"
+            siblings.update(alias.name for alias in node.names)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.ImportFrom):
+                    function_level.add(inner.module)
+    assert absolute == set(["os"])
+    assert siblings == set(["integrity", "trust"])
+    assert function_level == set(["pyrevit"])
+
+
 def test_dialect_import_helper_detects_a_stray_import(tmp_path):
     """Guard the guard: the allow-list scan sees extra imports in a planted module."""
     planted = tmp_path / "planted.py"
@@ -572,3 +602,88 @@ def test_dialect_import_helper_detects_a_stray_import(tmp_path):
     absolute, relative = _imports(str(planted))
     assert absolute == set(["os", "ipaddress"])
     assert relative == set([None, "y"])
+
+
+# ------------------------------------------------------- the gate under the engine (security)
+
+_TEST_SECRET = "unit-secret-0123456789-abcdefXYZ"
+_WRONG = "unit-wrongg-9876543210-zyxwvuABC"
+
+
+def _security_scenario(textutils, trust, security):
+    """Every verdict and rewrite the gate and the strip produce for a table of bytes bodies."""
+    real_json = textutils.json
+    textutils.json = _IronPython3Json()
+    saved_state = security._STATE
+    configured = {"secret": _TEST_SECRET,
+                  "integrity": trust.unverifiable(trust.REASON_MANIFEST_MISSING)}
+    mismatch = {"secret": _TEST_SECRET, "integrity": {
+        "state": trust.INTEGRITY_MISMATCH, "reason": None,
+        "modified": ["revit_mcp/b.py", "revit_mcp/a.py"], "missing": [], "unexpected": []}}
+
+    def body(value, secret=_TEST_SECRET):
+        data = dict(value)
+        if secret is not None:
+            data["_mcp"] = {"secret": secret}
+        return json.dumps(data).encode("utf-8")
+
+    bodies = [
+        body({"a": 1}), body({"a": 1}, _WRONG), body({"a": 1}, None), body({}),
+        body({"name": u"Стена"}),
+        b"", b"{not json", b"[1, 2]",
+    ]
+    rows = {"gate": [], "strip": []}
+    try:
+        for state in (None, configured, mismatch):
+            security._STATE = state
+            for raw in bodies:
+                request = types.SimpleNamespace(data=raw)
+                refusal = security.gate_or_response(request)
+                rows["gate"].append(
+                    (None if refusal is None else (refusal.status, refusal.data), request.data))
+                request = types.SimpleNamespace(data=raw)
+                rows["strip"].append((security.strip_envelope(request), request.data))
+    finally:
+        textutils.json = real_json
+        security._STATE = saved_state
+    return rows
+
+
+def _with_fake_pyrevit(monkeypatch):
+    def make_response(data=None, status=200, headers=None):
+        return types.SimpleNamespace(status=status, data=data)
+
+    monkeypatch.setitem(sys.modules, "pyrevit", types.SimpleNamespace(
+        routes=types.SimpleNamespace(make_response=make_response)))
+
+
+def test_ironpython3_engine_security_verdicts_equal_plain_cpython(monkeypatch):
+    _with_fake_pyrevit(monkeypatch)
+    plain = _security_scenario(_textutils_module, _trust_module, _security_module)
+    with _ironpython3_engine() as (textutils, trust, _):
+        simulated = _security_scenario(textutils, trust, _security_module)
+    assert simulated == plain
+    assert not hasattr(builtins, "unicode")
+
+
+def test_ironpython3_engine_security_results_are_not_vacuous(monkeypatch):
+    _with_fake_pyrevit(monkeypatch)
+    with _ironpython3_engine() as (textutils, trust, _):
+        rows = _security_scenario(textutils, trust, _security_module)
+    statuses = [None if verdict is None else verdict[0] for verdict, _ in rows["gate"]]
+    assert set(statuses) == set([None, 401, 423])
+    passed = [data for (verdict, data) in rows["gate"] if verdict is None]
+    assert passed and all(isinstance(data, bytes) and b"_mcp" not in data for data in passed)
+    assert b"{}" in passed, "an envelope-only bytes body becomes b'{}' under the engine too"
+    assert all(verdict is None for verdict, _ in rows["strip"]), "the strip never refuses"
+    stripped = [data for _, data in rows["strip"]
+                if isinstance(data, bytes) and b"_mcp" not in data]
+    assert stripped
+
+
+def test_ironpython3_engine_leaves_the_security_module_reloaded_and_plain():
+    with _ironpython3_engine():
+        pass
+    assert _security_module.trust is _trust_module
+    assert _security_module.integrity is _integrity_module
+    assert _security_module._STATE is None

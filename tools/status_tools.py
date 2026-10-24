@@ -28,21 +28,38 @@ def _launch_slot_note(configured, response):
 def _secret_line(response, revit_get):
     """One line saying whether the two halves hold the same shared secret, or "".
 
-    Built from the reply's ``secret`` block and the transport's own fingerprint
-    (the ``secret_fingerprint`` seam, read with getattr: tools never import the
-    transport). Only 8-hex fingerprints are ever named, never the secret.
+    Built from the reply's ``secret`` block (a dict reply, or the JSON body of an
+    "Error: 503 - ..." text) and the transport's own fingerprint (the
+    ``secret_fingerprint`` seam, read with getattr: tools never import the
+    transport). Only 8-hex fingerprints are ever named, never the secret. Returns ""
+    when the reply has no secret block and the transport reports no fingerprint, so a
+    bare transport keeps its exact text.
     """
     body = _body_of(response)
     block = body.get("secret") if isinstance(body, dict) else None
     reader = getattr(revit_get, "secret_fingerprint", None)
+    if not isinstance(block, dict) and not callable(reader):
+        return ""
     try:
         local = reader() if callable(reader) else None
     except Exception:
         local = None
-    remote = block.get("fingerprint") if isinstance(block, dict) else None
-    if remote and remote == local:
+    if not isinstance(block, dict):
+        return ("Shared secret: the Revit extension does not report its secret state "
+                "(an extension older than R3).")
+    remote = block.get("fingerprint")
+    if not block.get("configured") or not remote:
+        return ("Shared secret: the Revit extension has none; every mutation is refused "
+                "(401 server_not_configured).")
+    if not local:
+        return ("Shared secret: this MCP server loaded none; every mutation is refused "
+                "(401 missing): run Update RevitMCP (or sign out of Windows and back in) "
+                "and restart the assistant session.")
+    if remote == local:
         return "Shared secret: both halves hold the same secret (fingerprint {}).".format(remote)
-    return ""
+    return ("Shared secret: the halves DIFFER (Revit {}, this MCP server {}); every mutation "
+            "is refused with 401 mismatch until both come from the same build: run Update "
+            "RevitMCP, restart the assistant session, then fully restart Revit.".format(remote, local))
 
 
 def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
@@ -78,6 +95,22 @@ def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
         calls: when the verified process answered on another port, or nothing
         was sent, the line says so and the verified-process line is the only
         statement of who answered.
+
+        The reply also carries three security blocks from the extension.
+        "secret" is whether the extension holds a shared secret plus its short
+        fingerprint (8 hex characters of a SHA-256: it identifies the secret, it is
+        not the secret). A line "Shared secret: ..." right after the status
+        compares that fingerprint with this MCP server's own and says whether both
+        halves hold the same secret, differ, or one of them has none; when they
+        differ or either has none, every mutation is refused with 401. "integrity"
+        is whether the extension files match the published manifest, taken once at
+        load: on verified_mismatch the differing files are named and mutations are
+        refused with 423 until the extension is reinstalled and Revit fully
+        restarted; unverifiable (for example a developer junction with no manifest)
+        is reported but is not damage and blocks nothing. "bind" is
+        loopback_only, exposed or unknown: exposed means Routes listens beyond this
+        machine, which is reported and degrades health but blocks nothing.
+        "security_alerts" lists in plain words anything that needs action.
 
         Uses a 10-second HTTP timeout. Selected status first allows up to
         10 seconds for OS inventory, so its total may approach 20 seconds.

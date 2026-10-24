@@ -105,6 +105,7 @@ start path and has to stay cheap.
 import os
 import json
 import base64
+import hashlib
 import asyncio
 import binascii
 import ipaddress
@@ -1182,3 +1183,40 @@ def reset_secret_cache() -> None:
     """Forget the memoized secret so the next POST reads the file again."""
     global _secret_cache
     _secret_cache = _SECRET_UNSET
+
+
+def secret_fingerprint(secret: Any) -> Optional[str]:
+    """The first 8 hex characters of the SHA-256 of a configured secret, else None.
+
+    "Configured" is the rule the Revit half applies: text or bytes of at least
+    MIN_SECRET_LENGTH once stripped; text is hashed as UTF-8. This duplicates
+    revit_mcp/trust.py's secret_fingerprint on purpose: the payload ships no
+    revit_mcp/ package, so this half cannot import it. tests/unit/test_bridge_secret_client.py
+    pins the parity; change the two together. Only this short fingerprint may be
+    shown to an engineer or the model (D-08); never the secret. Never raises.
+    """
+    try:
+        if isinstance(secret, str):
+            if len(secret.strip()) < MIN_SECRET_LENGTH:
+                return None
+            raw = secret.encode("utf-8")
+        elif isinstance(secret, bytes):
+            if len(secret.strip()) < MIN_SECRET_LENGTH:
+                return None
+            raw = secret
+        else:
+            return None
+        return hashlib.sha256(raw).hexdigest()[:8]
+    except Exception:
+        return None
+
+
+def loaded_secret_fingerprint() -> Optional[str]:
+    """The fingerprint of the secret this MCP server loaded (loading it once if needed), or None."""
+    return secret_fingerprint(_secret())
+
+
+# Seam read with getattr by get_revit_status, beside revit_target and discover_targets:
+# tools never import this transport. Assigned here because _secret() is defined in
+# this section, after revit_get.
+revit_get.secret_fingerprint = loaded_secret_fingerprint

@@ -333,3 +333,16 @@ def test_end_to_end_leak_scan_across_payload_and_tool_text(monkeypatch):
     assert TEST_SECRET not in repr(payload)
     assert TEST_SECRET not in text
     assert all(TEST_SECRET not in alert for alert in payload["security_alerts"])
+
+
+def test_end_to_end_comparison_lines_through_status_and_tool(monkeypatch):
+    fingerprint = trust.secret_fingerprint(TEST_SECRET)
+    _, payload = _status(monkeypatch)
+    differ = _tool_text(_get_with(payload, lambda: "00000000"))
+    assert "DIFFER" in differ and fingerprint in differ and "00000000" in differ
+    none_local = _tool_text(_get_with(payload, lambda: None))
+    assert "this MCP server loaded none" in none_local
+    _, payload = _status(monkeypatch, secret=None, has_doc=False)
+    extension_none = _tool_text(_get_with(payload, lambda: fingerprint))
+    assert "extension has none" in extension_none
+    assert TEST_SECRET not in extension_none

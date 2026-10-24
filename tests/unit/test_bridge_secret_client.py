@@ -322,3 +322,41 @@ def test_load_secret_runs_lazily_never_at_import():
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
         assert "load_secret" not in ast.dump(node)
+
+
+# ------------------------------------------------ fingerprint parity and seam (05-07)
+
+
+FINGERPRINT_VALUES = [
+    ("ascii", "x" * 32),
+    ("cyrillic", "Секретный-пароль-й-26"),
+    ("none", None),
+    ("empty", ""),
+    ("too-short", "0123456789"),
+    ("bytes", b"y" * 24),
+]
+
+
+@pytest.mark.parametrize("label, value", FINGERPRINT_VALUES, ids=[f[0] for f in FINGERPRINT_VALUES])
+def test_fingerprint_bridge_equals_trust(label, value):
+    assert bridge.secret_fingerprint(value) == trust.secret_fingerprint(value)
+
+
+def test_fingerprint_is_eight_lowercase_hex_for_a_configured_secret():
+    import re
+
+    assert re.fullmatch(r"[0-9a-f]{8}", bridge.secret_fingerprint(SECRET))
+    assert bridge.secret_fingerprint(SECRET) != bridge.secret_fingerprint(OTHER)
+
+
+def test_fingerprint_seam_returns_only_the_fingerprint(monkeypatch):
+    monkeypatch.setattr(bridge, "_secret_cache", SECRET)
+    result = bridge.revit_get.secret_fingerprint()
+    assert result == trust.secret_fingerprint(SECRET)
+    assert result != SECRET and SECRET not in result
+    monkeypatch.setattr(bridge, "_secret_cache", None)
+    assert bridge.revit_get.secret_fingerprint() is None
+
+
+def test_fingerprint_seam_is_the_loaded_secret_fingerprint():
+    assert bridge.revit_get.secret_fingerprint is bridge.loaded_secret_fingerprint

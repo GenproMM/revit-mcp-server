@@ -686,6 +686,172 @@ def test_publish_second_run_keeps_the_first_build_in_ext_previous(tmp_path):
     assert not os.path.exists(prev + ".outgoing")
 
 
+def _two_publishes(env, tmp_path):
+    """Publish twice; the first build carries a marker file outside the integrity scope."""
+    live, _, _, _ = _folders(env)
+    code, out = _publish(env, tmp_path)
+    assert code == 0, out[-2000:]
+    with open(os.path.join(live, "first-build.marker"), "wb") as handle:
+        handle.write(b"first")
+    code, out = _publish(env, tmp_path)
+    assert code == 0, out[-2000:]
+
+
+@needs_windows_publish
+def test_publish_failed_gate_leaves_live_and_previous_byte_identical(tmp_path):
+    env = _scratch_publish_env(tmp_path)
+    live, stage, prev, _ = _folders(env)
+    _two_publishes(env, tmp_path)
+    live_before, prev_before = _tree_digest(live), _tree_digest(prev)
+
+    short = tmp_path / "short" / "bridge_secret"
+    _write(short, b"0123456789")
+    code, out = _publish(dict(env, MCP_SECRET_FILE=str(short)), tmp_path)
+
+    assert code != 0, out[-2000:]
+    assert "ERROR" in out
+    assert _tree_digest(live) == live_before
+    assert _tree_digest(prev) == prev_before
+    assert not os.path.exists(prev + ".outgoing")
+
+
+@needs_windows_publish
+def test_publish_with_the_live_folder_in_use_changes_nothing(tmp_path):
+    env = _scratch_publish_env(tmp_path)
+    live, stage, prev, _ = _folders(env)
+    _two_publishes(env, tmp_path)
+    live_before, prev_before = _tree_digest(live), _tree_digest(prev)
+
+    with open(os.path.join(live, "startup.py"), "rb"):  # an open handle, as a running Revit holds
+        code, out = _publish(env, tmp_path)
+    if code == 0:
+        pytest.skip("this filesystem allowed renaming a folder with an open file in it")
+
+    assert code == 1, out[-2000:]
+    assert "Nothing changed" in out
+    assert _tree_digest(live) == live_before
+    assert _tree_digest(prev) == prev_before
+    assert os.path.isdir(stage), "the new build should wait in ext-staging"
+    assert not os.path.exists(prev + ".outgoing")
+
+
+@needs_windows_publish
+def test_publish_refuses_to_run_over_an_interrupted_publish(tmp_path):
+    env = _scratch_publish_env(tmp_path)
+    live, stage, prev, _ = _folders(env)
+    code, out = _publish(env, tmp_path)
+    assert code == 0, out[-2000:]
+    os.makedirs(os.path.dirname(prev), exist_ok=True)
+    os.makedirs(prev + ".outgoing")
+    live_before = _tree_digest(live)
+
+    code, out = _publish(env, tmp_path)
+
+    assert code == 1, out[-2000:]
+    assert "interrupted" in out and "Nothing changed" in out
+    assert _tree_digest(live) == live_before
+    assert not os.path.exists(stage)
+
+
+# --- rollback-extension.cmd (plan 05-08) -------------------------------------
+
+ROLLBACK_CMD = os.path.join("deploy", "rollback-extension.cmd")
+
+
+def _rollback(env, tmp_path):
+    return _run_cmd(env, tmp_path, r"deploy\rollback-extension.cmd")
+
+
+@needs_windows_publish
+def test_rollback_puts_the_previous_build_back_in_one_command(tmp_path):
+    env = _scratch_publish_env(tmp_path)
+    live, stage, prev, rejected = _folders(env)
+    _two_publishes(env, tmp_path)
+    second_manifest = _read(os.path.join(live, "_manifest.json"))
+
+    code, out = _rollback(env, tmp_path)
+
+    assert code == 0, out[-2000:]
+    assert os.path.isfile(os.path.join(live, "first-build.marker")), "ext is not the first build"
+    assert not os.path.exists(os.path.join(rejected, "first-build.marker"))
+    assert _read(os.path.join(rejected, "_manifest.json")) == second_manifest
+    assert not os.path.exists(prev)
+    for tree in (live, rejected):
+        verdict = integrity.check_integrity(tree)
+        assert verdict["state"] == trust.INTEGRITY_MATCH, (tree, verdict)
+    assert "restart" in out.lower() and "revit" in out.lower()
+
+
+@needs_windows_publish
+def test_rollback_without_a_previous_version_refuses_and_changes_nothing(tmp_path):
+    env = _scratch_publish_env(tmp_path)
+    live, stage, prev, rejected = _folders(env)
+    code, out = _publish(env, tmp_path)
+    assert code == 0, out[-2000:]
+    live_before = _tree_digest(live)
+
+    code, out = _rollback(env, tmp_path)
+
+    assert code == 1, out[-2000:]
+    assert "nothing to roll back" in out.lower()
+    assert _tree_digest(live) == live_before
+    assert not os.path.exists(rejected)
+    assert not os.path.exists(prev)
+
+
+@needs_windows_publish
+def test_rollback_replaces_an_older_rejected_build(tmp_path):
+    env = _scratch_publish_env(tmp_path)
+    live, stage, prev, rejected = _folders(env)
+    _two_publishes(env, tmp_path)
+    code, out = _rollback(env, tmp_path)
+    assert code == 0, out[-2000:]
+    os.makedirs(os.path.dirname(prev), exist_ok=True)
+    os.rename(live, prev)  # pretend a later publish left a previous version again
+    os.makedirs(live)
+    with open(os.path.join(live, "stub.txt"), "wb") as handle:
+        handle.write(b"third")
+
+    code, out = _rollback(env, tmp_path)
+
+    assert code == 0, out[-2000:]
+    assert os.path.isfile(os.path.join(rejected, "stub.txt")), "rejected is not the build just pulled"
+    assert os.path.isfile(os.path.join(live, "first-build.marker"))
+
+
+def test_rollback_cmd_is_crlf_ascii_and_needs_neither_python_nor_git():
+    with open(os.path.join(REPO, ROLLBACK_CMD), "rb") as handle:
+        data = handle.read()
+    assert data.count(b"\n") == data.count(b"\r\n")
+    data.decode("ascii")
+    assert b"config.cmd" in data
+    assert b"MCP_PYEXE" not in data
+    code = "\n".join(ln for _, ln in _code_lines(_cmd_lines(ROLLBACK_CMD))).lower()
+    assert "git" not in code and "python" not in code
+
+
+def test_rollback_cmd_order_and_variables():
+    lines = _cmd_lines(ROLLBACK_CMD)
+    assigns = [ln for ln in lines if ln.lower().startswith(('set "live=', 'set "prev=', 'set "rejected='))]
+    assert assigns == [
+        'set "LIVE=%MCP_SHARE_ROOT%\\ext\\%MCP_EXT_NAME%"',
+        'set "PREV=%MCP_SHARE_ROOT%\\ext-previous\\%MCP_EXT_NAME%"',
+        'set "REJECTED=%MCP_SHARE_ROOT%\\ext-rejected\\%MCP_EXT_NAME%"',
+    ]
+    order = [
+        ("config", lambda ln: ln.startswith('call "%~dp0config.cmd"')),
+        ("no previous", lambda ln: ln.lower().startswith('if not exist "%prev%"')),
+        ("live aside", lambda ln: ln.lower().startswith('move "%live%" "%rejected%"')),
+        ("prev back", lambda ln: ln.lower().startswith('move "%prev%" "%live%"')),
+    ]
+    indexes = [_find(lines, pred, label) for label, pred in order]
+    assert indexes == sorted(set(indexes)), dict(zip([o[0] for o in order], indexes))
+    text = "\n".join(lines).lower()
+    assert "nothing to roll back" in text and "nothing changed" in text
+    assert not [ln for _, ln in _code_lines(lines)
+                if ln.split(None, 1)[0].lower() in ("copy", "robocopy", "xcopy")]
+
+
 # --- build-payload.cmd order, gate.py pair check, CLAUDE.md (plan 03-07) ----
 
 

@@ -341,7 +341,9 @@ def test_the_gate_source_adds_no_compare_primitive_of_its_own():
             imported.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0:
             imported.add(node.module)
-    assert imported == set(["os", "pyrevit"]), "no hashlib, hmac or secrets: the compare is trust's"
+    # System.Net.NetworkInformation: the /status/ bind adapter (_dotnet_listeners, 05-07).
+    assert imported == set(["os", "pyrevit", "System.Net.NetworkInformation"]), (
+        "no hashlib, hmac or secrets: the compare is trust's")
     with open(SECURITY_PATH, encoding="utf-8") as handle:
         text = handle.read()
     assert "compare_digest" not in text and "hmac" not in text

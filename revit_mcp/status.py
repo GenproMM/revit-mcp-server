@@ -69,6 +69,25 @@ def register_status_routes(api):
                 identity_error = str(identity_exc)
                 logger.warning("Could not read process identity: {}".format(identity_error))
 
+            # The security block (secret fingerprint, integrity verdict, bind) is
+            # imported lazily and defensively like the registry: /status/ must
+            # still answer when the security module cannot be imported (SEC-05).
+            block = {}
+            try:
+                from .security import status_block
+
+                block = status_block(
+                    identity_data.get("actual_port")
+                    if isinstance(identity_data, dict) else None
+                )
+            except Exception as security_exc:
+                logger.warning(
+                    "Could not build the security status block: {}".format(
+                        str(security_exc)
+                    )
+                )
+                block = {}
+
             doc = revit.doc
             if doc:
                 payload = {
@@ -81,6 +100,7 @@ def register_status_routes(api):
                     "api_name": api.name,
                 }
                 payload.update(registration)
+                payload.update(block)
                 if identity_error:
                     payload["health"] = "degraded"
                     payload["identity_error"] = identity_error

@@ -214,6 +214,28 @@ def _configured(expected):
     return False
 
 
+def secret_fingerprint(secret):
+    """The first 8 hex characters of the SHA-256 of a configured secret, else None; never raises.
+
+    "Configured" is the rule check_secret applies: text or bytes of at least
+    MIN_SECRET_LENGTH once stripped. Text is hashed as UTF-8, bytes as they are, and
+    the value itself is hashed, not its stripped form, which is what the compare
+    sees. This short fingerprint is the only thing about the secret that /status/ and
+    get_revit_status may show (D-08): it tells an engineer whether the two halves
+    hold the same value without disclosing it. bridge.py duplicates this rule on
+    purpose (the payload ships no revit_mcp package); a test pins the parity, so
+    change the two together.
+    """
+    try:
+        if not _configured(secret):
+            return None
+        if isinstance(secret, _TEXT_TYPE):
+            secret = secret.encode("utf-8")
+        return hashlib.sha256(secret).hexdigest()[:8]
+    except Exception:
+        return None
+
+
 def check_secret(provided, expected):
     """One of AUTH_OK, AUTH_MISSING, AUTH_MISMATCH, AUTH_SERVER_NOT_CONFIGURED; never raises.
 

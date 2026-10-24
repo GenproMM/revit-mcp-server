@@ -59,6 +59,57 @@ def initialize(root, package_dir):
     _STATE = {"secret": secret, "integrity": result}
 
 
+def _dotnet_listeners():
+    """(host text, port) pairs of every active TCP listener, or None when unreadable.
+
+    IronPython-only path: System.Net is imported inside the function so CPython
+    tests import this module freely (under CPython the import fails and the result
+    is None). Any exception gives None, which trust.classify_listeners reports as
+    "unknown". Never raises.
+    """
+    try:
+        from System.Net.NetworkInformation import IPGlobalProperties
+        endpoints = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners()
+        return [(str(ep.Address), int(ep.Port)) for ep in endpoints]
+    except Exception:
+        return None
+
+
+def status_block(port, listeners=None):
+    """The security part of the /status/ reply; never raises, never carries the secret.
+
+    Returns {"secret": {"configured", "fingerprint"}, "integrity": <the result
+    initialize stored, or unverifiable/read_error when there is no usable state>,
+    "bind": <trust.classify_listeners verdict>}. The secret appears only as
+    ``configured`` and its 8-hex SHA-256 fingerprint (D-08). ``listeners`` is a
+    zero-argument callable returning (host text, port) pairs for ``port`` (default
+    _dotnet_listeners); a raising callable or None reads as bind "unknown". A bind
+    outside loopback is reported, never blocked (03 D-16).
+    """
+    try:
+        state = _STATE
+        secret = state.get("secret") if isinstance(state, dict) else None
+        result = state.get("integrity") if isinstance(state, dict) else None
+        fingerprint = trust.secret_fingerprint(secret)
+        if not isinstance(result, dict):
+            result = trust.unverifiable(trust.REASON_READ_ERROR)
+        try:
+            endpoints = (listeners if listeners is not None else _dotnet_listeners)()
+        except Exception:
+            endpoints = None
+        return {
+            "secret": {"configured": fingerprint is not None, "fingerprint": fingerprint},
+            "integrity": result,
+            "bind": trust.classify_listeners(endpoints, port),
+        }
+    except Exception:
+        return {
+            "secret": {"configured": False, "fingerprint": None},
+            "integrity": trust.unverifiable(trust.REASON_READ_ERROR),
+            "bind": trust.BIND_UNKNOWN,
+        }
+
+
 def _refusal(body, status):
     """The pyRevit routes response for a refusal. pyRevit is imported only here."""
     from pyrevit import routes

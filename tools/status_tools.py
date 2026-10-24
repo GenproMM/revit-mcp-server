@@ -2,7 +2,7 @@
 """Status and model information tools"""
 
 from mcp.server.fastmcp import Context
-from .utils import PROVENANCE_ATTR, format_response
+from .utils import PROVENANCE_ATTR, _body_of, format_response
 
 
 def _launch_slot_note(configured, response):
@@ -23,6 +23,26 @@ def _launch_slot_note(configured, response):
         return (" (configured launch slot only; this call was answered by the verified process "
                 "on port {}, not by {})".format(process.get("actual_port"), configured))
     return " (configured launch slot only; it does not route calls)"
+
+
+def _secret_line(response, revit_get):
+    """One line saying whether the two halves hold the same shared secret, or "".
+
+    Built from the reply's ``secret`` block and the transport's own fingerprint
+    (the ``secret_fingerprint`` seam, read with getattr: tools never import the
+    transport). Only 8-hex fingerprints are ever named, never the secret.
+    """
+    body = _body_of(response)
+    block = body.get("secret") if isinstance(body, dict) else None
+    reader = getattr(revit_get, "secret_fingerprint", None)
+    try:
+        local = reader() if callable(reader) else None
+    except Exception:
+        local = None
+    remote = block.get("fingerprint") if isinstance(block, dict) else None
+    if remote and remote == local:
+        return "Shared secret: both halves hold the same secret (fingerprint {}).".format(remote)
+    return ""
 
 
 def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
@@ -76,6 +96,9 @@ def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
             options["target"] = target
         response = await revit_get("/status/", ctx, **options)
         text = format_response(response)
+        secret_line = _secret_line(response, revit_get)
+        if secret_line:
+            text = "{}\n{}".format(text, secret_line)
         if target is None:
             configured = getattr(revit_get, "revit_target", None)
             if configured:

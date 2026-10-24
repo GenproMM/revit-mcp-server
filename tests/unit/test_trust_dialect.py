@@ -589,7 +589,9 @@ def test_dialect_security_imports_only_os_and_the_helper_siblings():
                     function_level.add(inner.module)
     assert absolute == set(["os"])
     assert siblings == set(["integrity", "textutils", "trust"])
-    assert function_level == set(["pyrevit"])
+    # System.Net.NetworkInformation: the /status/ bind adapter (_dotnet_listeners, 05-07),
+    # imported inside the function so CPython never needs it.
+    assert function_level == set(["pyrevit", "System.Net.NetworkInformation"])
 
 
 def test_dialect_import_helper_detects_a_stray_import(tmp_path):

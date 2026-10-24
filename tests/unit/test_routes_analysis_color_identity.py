@@ -28,7 +28,7 @@ import httpx
 import pytest
 
 import bridge
-from gate_support import TEST_SECRET, configure_gate, request_of
+from gate_support import TEST_SECRET, configure_gate, enveloped_body, request_of
 from revit_mcp import identity, trust
 from revit_mcp.textutils import classify_outcome
 from tools.utils import format_response
@@ -1123,6 +1123,59 @@ def test_create_level_with_a_wrong_secret_and_a_mismatch_is_still_a_401(world, m
     assert "mismatch" in result
     assert "revit_mcp/detail.py" not in result, "the secret is checked first (D-04)"
     assert world.transactions == [] and world.events == [] and world.guard_calls == []
+
+
+# ----------------------------------- Phase 5 (05-02): every mutation of the suite is gated
+#
+# One parametrized refusal set over the whole MUTATIONS table. One active document is open,
+# so a call that slipped past the gate would visibly reach the document guard.
+
+WRONG_SECRET = "wrong-secret-0123456789-abcdefXYZ-nope"
+
+
+def _one_open_document(world):
+    world.open("Only", "C:/Models/Only.rvt", active=True)
+    world.tokens()
+    del world.events[:]
+
+
+def _assert_gate_refusal(world, reply, status):
+    assert reply.status == status
+    assert "outcome" not in reply.data
+    assert world.events == [], "no collector, document attribute or transaction before the gate"
+    assert world.transactions == []
+    assert world.guard_calls == []
+    text = repr(reply.data)
+    assert TEST_SECRET not in text and WRONG_SECRET not in text
+
+
+@pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
+def test_without_the_shared_secret_a_mutation_is_401_before_any_side_effect(world, key):
+    _one_open_document(world)
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=None))
+    reply = call(world, handler_of(world, *key), request=request)
+    _assert_gate_refusal(world, reply, 401)
+    assert reply.data["auth"] == "missing"
+
+
+@pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
+def test_with_a_wrong_secret_a_mutation_is_401_before_any_side_effect(world, key):
+    _one_open_document(world)
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=WRONG_SECRET))
+    reply = call(world, handler_of(world, *key), request=request)
+    _assert_gate_refusal(world, reply, 401)
+    assert reply.data["auth"] == "mismatch"
+
+
+@pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
+def test_with_an_integrity_mismatch_a_mutation_is_423_before_any_side_effect(
+        world, monkeypatch, key):
+    _one_open_document(world)
+    configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key]))
+    reply = call(world, handler_of(world, *key), request=request)
+    _assert_gate_refusal(world, reply, 423)
+    assert reply.data["files"] == ["revit_mcp/detail.py"]
 
 
 # ------------------------------------------------------------------- helper contracts

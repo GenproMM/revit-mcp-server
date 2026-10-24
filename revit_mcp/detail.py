@@ -9,6 +9,7 @@ from .utils import (
     commit_and_report, finalize_outcome, exception_outcome,
 )
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -182,6 +183,10 @@ def register_detail_routes(api):
     @api.route("/create_detail_line/", methods=["POST"])
     def create_detail_line_handler(uiapp, doc, request):
         """Create a detail line in a view."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)

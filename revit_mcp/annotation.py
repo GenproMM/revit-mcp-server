@@ -9,6 +9,7 @@ from .utils import (
     parse_request_data, commit_and_report, finalize_outcome, exception_outcome,
 )
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -236,6 +237,10 @@ def register_annotation_routes(api):
     @api.route("/create_dimensions/", methods=["POST"])
     def create_dimensions_handler(uiapp, doc, request):
         """Create dimension annotations in the current view."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -433,6 +438,10 @@ def register_annotation_routes(api):
     @api.route("/tag_walls/", methods=["POST"])
     def tag_walls_handler(uiapp, doc, request):
         """Tag all untagged walls in the current view."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
         if refusal is not None:

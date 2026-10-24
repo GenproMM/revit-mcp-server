@@ -310,6 +310,10 @@ def register_building_routes(api):
     @api.route("/create_line/", methods=["POST"])
     def create_line_based(uiapp, doc, request):
         """Create line-based elements (walls, beams) in the Revit model."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -664,6 +668,10 @@ def register_building_routes(api):
     @api.route("/create_surface/", methods=["POST"])
     def create_surface_based(uiapp, doc, request):
         """Create surface-based elements (floors, roofs, ceilings) in the Revit model."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)

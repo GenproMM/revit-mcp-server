@@ -17,6 +17,7 @@ from .utils import (
     exception_outcome,
 )
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .security import gate_or_response
 from pyrevit import routes, DB
 import logging
 import random
@@ -1164,6 +1165,10 @@ def register_color_routes(api):
     @api.route("/color_splash/", methods=["POST"])
     def color_splash(uiapp, doc, request):
         """Color elements in a category based on parameter values (optional "document" selector)."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -1201,6 +1206,10 @@ def register_color_routes(api):
     @api.route("/clear_colors/", methods=["POST"])
     def clear_colors(uiapp, doc, request):
         """Clear color overrides for elements in a category (optional "document" selector)."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
         if refusal is not None:

@@ -29,7 +29,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from revit_mcp import identity
+from gate_support import TEST_SECRET, configure_gate, enveloped_body, request_of
+from revit_mcp import identity, trust
 from revit_mcp.textutils import classify_outcome
 from tools.utils import format_response
 
@@ -476,6 +477,7 @@ def world(monkeypatch):
     so a read that gained a guard, or a mutation that lost its call, is visible.
     """
     w = World()
+    configure_gate(monkeypatch)
     w.guard_calls = []
     real_guard = identity.mutation_document_or_response
 
@@ -545,12 +547,6 @@ def load(world, module_name):
 
 def handler_of(world, module_name, route, method="POST"):
     return load(world, module_name)[(route, method)]
-
-
-def request_of(body):
-    if body is None:
-        return types.SimpleNamespace(data=None)
-    return types.SimpleNamespace(data=json.dumps(body).encode("utf-8"))
 
 
 def call(world, fn, body=None, **extra):
@@ -1687,3 +1683,70 @@ def test_every_transacting_500_carries_the_real_transaction_status(world, key):
     assert world.transactions, "the route never built a transaction"
     assert reply.data["outcome"]["transaction_status"] == world.transactions[-1].status
     assert reply.data["outcome"]["succeeded"] == []
+
+
+# ------------------------------------------------------- the Phase 5 gate (D-01, D-04)
+#
+# Every mutation of this suite opens with revit_mcp.security.gate_or_response, before the
+# document guard and before any Revit object is touched. The world is left with one open
+# document, so a call that slipped past the gate would visibly reach the guard, a
+# transaction or a parameter Set(). The GET reads (READS) carry no gate (SEC-05).
+
+WRONG_SECRET = "wrong-secret-0123456789-abcdefXYZ-nope"
+
+_GATED_IN_TASK_2 = ("rooms", "structure", "tags")
+
+
+def _gate_keys():
+    keys = []
+    for key in MUTATIONS:
+        if key[0] in _GATED_IN_TASK_2:
+            keys.append(pytest.param(
+                key, marks=pytest.mark.xfail(strict=True, reason="gated in Task 2")))
+        else:
+            keys.append(key)
+    return keys
+
+
+def _mismatch_naming(*files):
+    return {"state": trust.INTEGRITY_MISMATCH, "reason": None,
+            "modified": sorted(files), "missing": [], "unexpected": []}
+
+
+def _refused(world, key, request, status):
+    world.open("Only", ONLY_PATH, active=True)
+    world.tokens()
+    del world.events[:]
+    reply = call(world, handler_of(world, *key), request=request)
+    assert reply.status == status
+    assert "outcome" not in reply.data
+    assert world.events == [], "no collector, document attribute or transaction before the gate"
+    assert world.transactions == []
+    assert world.sets == [], "an unauthenticated call must attempt no parameter write"
+    assert world.guard_calls == []
+    text = repr(reply.data)
+    assert TEST_SECRET not in text and WRONG_SECRET not in text
+    return reply
+
+
+@pytest.mark.parametrize("key", _gate_keys(), ids=MUTATION_IDS)
+def test_without_the_shared_secret_a_mutation_is_401_before_any_side_effect(world, key):
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=None))
+    reply = _refused(world, key, request, 401)
+    assert reply.data["auth"] == "missing"
+
+
+@pytest.mark.parametrize("key", _gate_keys(), ids=MUTATION_IDS)
+def test_with_a_wrong_secret_a_mutation_is_401_before_any_side_effect(world, key):
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=WRONG_SECRET))
+    reply = _refused(world, key, request, 401)
+    assert reply.data["auth"] == "mismatch"
+
+
+@pytest.mark.parametrize("key", _gate_keys(), ids=MUTATION_IDS)
+def test_with_an_integrity_mismatch_a_mutation_is_423_before_any_side_effect(
+        world, monkeypatch, key):
+    configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key]))
+    reply = _refused(world, key, request, 423)
+    assert reply.data["files"] == ["revit_mcp/detail.py"]

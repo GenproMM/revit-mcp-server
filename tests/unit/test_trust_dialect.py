@@ -571,7 +571,7 @@ def test_dialect_integrity_imports_only_the_allowed_standard_library_and_trust()
     assert relative == set(["trust"])
 
 
-def test_dialect_security_imports_only_os_trust_and_integrity():
+def test_dialect_security_imports_only_os_and_the_helper_siblings():
     """security reaches its siblings relatively (`from . import x`) and pyRevit only inside _refusal."""
     with io.open(SECURITY_PATH, encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
@@ -588,7 +588,7 @@ def test_dialect_security_imports_only_os_trust_and_integrity():
                 if isinstance(inner, ast.ImportFrom):
                     function_level.add(inner.module)
     assert absolute == set(["os"])
-    assert siblings == set(["integrity", "trust"])
+    assert siblings == set(["integrity", "textutils", "trust"])
     assert function_level == set(["pyrevit"])
 
 

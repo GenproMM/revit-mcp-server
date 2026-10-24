@@ -34,6 +34,7 @@ tests import this module directly.
 import os
 
 from . import integrity
+from . import textutils
 from . import trust
 
 # None means "not initialized": the gate refuses with 401 server_not_configured.
@@ -96,3 +97,26 @@ def gate_or_response(request):
         return None
     except Exception:
         return _refusal(*trust.gate_failure())
+
+
+def strip_envelope(request):
+    """Remove the reserved key from the body of an open POST read; always returns None.
+
+    The seven open reads (trust.OPEN_POST_READ_ROUTES) are never refused, whatever
+    the request carries, a wrong secret and a verified mismatch included; their
+    handlers call this so the reserved key does not reach the route's own parse. The
+    body is rewritten, in the type it arrived in, only when it parses to an object
+    that contains the reserved key. Any other body (None, empty, invalid JSON, a
+    list, an object without the key) is left exactly as it arrived. Never raises: a
+    request that cannot be read or rewritten is left as it is.
+    """
+    try:
+        raw = _raw_data(request)
+        data = textutils.parse_request_data(raw)
+        if not isinstance(data, dict) or trust.ENVELOPE_KEY not in data:
+            return None
+        payload = trust.split_envelope(raw)[1]
+        request.data = trust.clean_body(raw, payload)
+    except Exception:
+        return None
+    return None

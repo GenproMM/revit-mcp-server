@@ -600,6 +600,7 @@ def register_documents_routes(api):
     """Register the document routes with the API. Every handler declares ``uiapp``
     (API-context rule, module docstring)."""
     from pyrevit import routes  # inside: keeps cold start cheap and the module importable offline
+    from .security import gate_or_response, strip_envelope
 
     @api.route("/documents/", methods=["GET"])
     def list_documents(uiapp):
@@ -665,6 +666,10 @@ def register_documents_routes(api):
         call. Success (200) means the re-read active document Equals the target.
         Every reply carries process_identity and observed_active_document.
         """
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         identity = None
         identity_error = None
         try:
@@ -699,6 +704,7 @@ def register_documents_routes(api):
         (ui_switched). Nothing is activated. A closed, stale, unknown, ambiguous or
         missing selector is refused by name. Every reply carries process_identity.
         """
+        strip_envelope(request)
         status, payload = _read_reply(request, run_document_summary, uiapp)
         return routes.make_response(data=payload, status=status)
 
@@ -716,6 +722,7 @@ def register_documents_routes(api):
         closed, stale, unknown, ambiguous or missing selector is refused by name.
         Every reply carries process_identity.
         """
+        strip_envelope(request)
         status, payload = _read_reply(request, run_document_levels, uiapp)
         return routes.make_response(data=payload, status=status)
 

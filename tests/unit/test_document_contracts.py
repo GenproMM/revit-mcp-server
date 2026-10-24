@@ -280,7 +280,8 @@ import re
 import sys
 import types
 
-from revit_mcp import identity
+from gate_support import TEST_SECRET, configure_gate, enveloped_body
+from revit_mcp import identity, trust
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TOKEN_SHAPE = re.compile(r"^doc1\.[0-9a-f]{12}\.[1-9][0-9]*$")
@@ -1263,6 +1264,7 @@ def activate_handlers(monkeypatch, fake_routes, uiapp, registry, identity_value=
     pyrevit.HOST_APP is a trap (HostAppTrap): the handlers are given ``uiapp`` as an
     argument, as pyRevit does, and must never fall back to the global.
     """
+    configure_gate(monkeypatch)
     monkeypatch.setitem(sys.modules, "pyrevit", types.SimpleNamespace(
         routes=sys.modules["pyrevit"].routes,
         HOST_APP=types.SimpleNamespace(uiapp=HostAppTrap(), app=HostAppTrap())))
@@ -1305,7 +1307,7 @@ def test_the_route_is_registered_as_a_post_handler_taking_the_injected_uiapp_and
 def test_route_activates_from_a_text_plain_bytes_body_and_names_the_process(monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = rig()
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
-    body = ('{"document": "%s"}' % tokens["coord"]).encode("utf-8")
+    body = enveloped_body({"document": tokens["coord"]})        # text/plain bytes, as the bridge sends
     handler(uiapp, FakeRequest(body))
     payload, status = fake_routes[-1]
     assert status == 200 and payload["activation"] == "activated"
@@ -1317,7 +1319,7 @@ def test_route_activates_from_a_text_plain_bytes_body_and_names_the_process(monk
 def test_route_refusal_keeps_process_and_observed_active_identity(monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = rig(IsWorkshared=True)
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
-    handler(uiapp, FakeRequest({"document": tokens["coord"]}))     # a dict body is accepted too
+    handler(uiapp, FakeRequest(enveloped_body({"document": tokens["coord"]}, as_type="dict")))     # a dict body is accepted too
     payload, status = fake_routes[-1]
     assert status == 422 and payload["reason"] == "workshared-unmeasured" and payload["error"]
     assert payload["process_identity"] == IDENT
@@ -1325,14 +1327,27 @@ def test_route_refusal_keeps_process_and_observed_active_identity(monkeypatch, f
     assert uiapp.calls == []
 
 
-def test_route_without_a_document_or_with_a_bad_body_is_a_400_not_an_exception(monkeypatch, fake_routes):
+def test_route_without_a_document_is_a_400_not_an_exception(monkeypatch, fake_routes):
+    """An envelope-only body (no document) is the route's own 400, in each body type."""
+    app, uiapp, reg, tokens, docs = rig()
+    handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
+    for as_type in ("bytes", "text", "dict"):
+        handler(uiapp, FakeRequest(enveloped_body(None, as_type=as_type)))
+        payload, status = fake_routes[-1]
+        assert status == 400 and payload["error"], as_type
+        assert payload["process_identity"] == IDENT
+    assert uiapp.calls == []
+
+
+def test_route_with_a_body_that_cannot_carry_an_envelope_is_a_401_missing(monkeypatch, fake_routes):
+    """None, empty, non-JSON and non-object bodies carry no envelope: the gate refuses (D-01)."""
     app, uiapp, reg, tokens, docs = rig()
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
     for body in (None, b"", b"{}", b"not json", b"[1, 2]"):
         handler(uiapp, FakeRequest(body))
         payload, status = fake_routes[-1]
-        assert status == 400 and payload["error"], body
-        assert payload["process_identity"] == IDENT
+        assert status == 401 and payload["auth"] == "missing", body
+        assert "process_identity" not in payload
     assert uiapp.calls == []
 
 
@@ -1340,7 +1355,7 @@ def test_route_without_process_identity_says_so_instead_of_inventing_one(monkeyp
     app, uiapp, reg, tokens, docs = rig()
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg, identity_value="none")[
         ("/activate_document/", ("POST",))]
-    handler(uiapp, FakeRequest({"document": tokens["other"]}))
+    handler(uiapp, FakeRequest(enveloped_body({"document": tokens["other"]}, as_type="dict")))
     payload, status = fake_routes[-1]
     assert status == 200 and "process_identity" not in payload
     assert payload["identity_error"] == "no retained RoutesServer"
@@ -1550,7 +1565,7 @@ def test_run_activation_never_raises_when_the_uiapplication_is_missing():
 def test_route_exception_reply_keeps_process_and_observed_active_identity(monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = rig(mode="raise")
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
-    handler(uiapp, FakeRequest({"document": tokens["coord"]}))
+    handler(uiapp, FakeRequest(enveloped_body({"document": tokens["coord"]}, as_type="dict")))
     payload, status = fake_routes[-1]
     assert status == 500 and payload["error"] and payload["error_code"] == "activation-failed"
     assert payload["process_identity"] == IDENT
@@ -1561,7 +1576,7 @@ def test_route_exception_reply_keeps_process_and_observed_active_identity(monkey
 def test_route_no_change_reply_keeps_process_and_observed_active_identity(monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = rig(mode="noop")
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
-    handler(uiapp, FakeRequest({"document": tokens["coord"]}))
+    handler(uiapp, FakeRequest(enveloped_body({"document": tokens["coord"]}, as_type="dict")))
     payload, status = fake_routes[-1]
     assert status == 409 and payload["error"] and payload["error_code"] == "document-not-activated"
     assert payload["process_identity"] == IDENT
@@ -1580,7 +1595,7 @@ def test_route_never_raises_and_always_names_the_process(monkeypatch, fake_route
         def ActiveUIDocument(self):
             raise RuntimeError("UI unavailable")
 
-    handler(BrokenUIApp(), FakeRequest({"document": tokens["coord"]}))
+    handler(BrokenUIApp(), FakeRequest(enveloped_body({"document": tokens["coord"]}, as_type="dict")))
     payload, status = fake_routes[-1]
     assert status >= 500 and payload["error"] and payload["process_identity"] == IDENT
 
@@ -1589,7 +1604,7 @@ def test_route_never_raises_and_always_names_the_process(monkeypatch, fake_route
         def Application(self):
             raise RuntimeError("no UIApplication")
 
-    handler(NoUIApp(), FakeRequest({"document": tokens["coord"]}))
+    handler(NoUIApp(), FakeRequest(enveloped_body({"document": tokens["coord"]}, as_type="dict")))
     payload, status = fake_routes[-1]
     assert status == 503 and payload["error_code"] == "document-registry-unavailable"
     assert payload["process_identity"] == IDENT
@@ -1599,7 +1614,7 @@ def test_route_never_raises_and_always_names_the_process(monkeypatch, fake_route
         raise RuntimeError("activation machinery failed")
 
     monkeypatch.setattr(documents, "run_activation", explode)
-    handler(uiapp, FakeRequest({"document": tokens["coord"]}))
+    handler(uiapp, FakeRequest(enveloped_body({"document": tokens["coord"]}, as_type="dict")))
     payload, status = fake_routes[-1]
     assert status == 500 and payload["error_code"] == "activation-error"
     assert payload["process_identity"] == IDENT and uiapp.calls == []
@@ -2804,7 +2819,7 @@ def test_handlers_answer_with_an_injected_uiapp_when_no_document_is_active(monke
     assert payload["process_identity"] == IDENT and "error" not in payload
     for path in ("/activate_document/", "/document_summary/", "/document_levels/"):
         pyrevit_dispatch(handlers[(path, ("POST",))], uiapp=uiapp, uidoc=None, doc=None,
-                         request=FakeRequest(b'{"document": "doc1.aaaaaaaaaaaa.1"}'))
+                         request=FakeRequest(enveloped_body({"document": "doc1.aaaaaaaaaaaa.1"})))
         payload, status = fake_routes[-1]
         assert status in (400, 404, 503) and payload["error"] and payload["process_identity"] == IDENT, path
     assert uiapp.calls == [] and host_app_trap().touched == []
@@ -2814,7 +2829,7 @@ def test_the_activation_call_is_made_on_the_injected_uiapp_and_never_on_host_app
     app, uiapp, reg, tokens, docs = rig()
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
     pyrevit_dispatch(handler, uiapp=uiapp, uidoc=None, doc=None,
-                     request=FakeRequest(('{"document": "%s"}' % tokens["coord"]).encode("utf-8")))
+                     request=FakeRequest(enveloped_body({"document": tokens["coord"]})))
     payload, status = fake_routes[-1]
     assert status == 200 and payload["activation"] == "activated", payload
     assert uiapp.calls == [("C:/Models/COORD.rvt",)]
@@ -3393,3 +3408,92 @@ def test_repeated_close_and_reopen_never_recycles_any_token(registry, app):
     for token in seen:                    # still refused after every later reopen
         assert identity.decide_mutation_document(
             token, snap(app, survivor), registry)["code"] == "document-closed"
+
+
+# ------------------------------------------------------- the Phase 5 gate (D-01, D-02, D-03, D-04)
+#
+# /activate_document/ opens with revit_mcp.security.gate_or_response, before the process identity
+# read, the registry read and any UIApplication call. /document_summary/ and /document_levels/ are
+# open reads: they strip the reserved envelope key and are never refused (SEC-05).
+
+WRONG_SECRET = "wrong-secret-0123456789-abcdefXYZ-nope"
+
+
+def _mismatch_naming(*files):
+    return {"state": trust.INTEGRITY_MISMATCH, "reason": None,
+            "modified": sorted(files), "missing": [], "unexpected": []}
+
+
+def _refused_activation(monkeypatch, fake_routes, make_request, integrity=None):
+    """Call /activate_document/ with the request ``make_request(tokens)`` builds; return
+    (payload, status) after asserting nothing was activated and nothing was read first."""
+    app, uiapp, reg, tokens, docs = rig()
+    handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
+    if integrity is not None:
+        configure_gate(monkeypatch, integrity=integrity)
+    touched = []
+
+    def registry_trap(store=None):
+        touched.append("registry")
+        return reg
+
+    def identity_trap(*args, **kwargs):
+        touched.append("identity")
+        return dict(IDENT), None
+
+    monkeypatch.setattr(identity, "get_document_registry", registry_trap)
+    monkeypatch.setattr(identity, "process_identity_or_error", identity_trap)
+    handler(uiapp, make_request(tokens))
+    payload, status = fake_routes[-1]
+    assert uiapp.calls == [], "no document is activated for a refused call"
+    assert touched == [], "no registry or process identity read before the gate"
+    assert "process_identity" not in payload and "identity_error" not in payload
+    assert "observed_active_document" not in payload
+    text = repr(payload)
+    assert TEST_SECRET not in text and WRONG_SECRET not in text
+    return payload, status
+
+
+def test_activate_document_without_the_shared_secret_is_401_and_activates_nothing(
+        monkeypatch, fake_routes):
+    payload, status = _refused_activation(
+        monkeypatch, fake_routes,
+        lambda tokens: FakeRequest(enveloped_body({"document": tokens["coord"]}, secret=None)))
+    assert status == 401 and payload["auth"] == "missing"
+
+
+def test_activate_document_with_a_wrong_secret_is_401_and_activates_nothing(monkeypatch, fake_routes):
+    payload, status = _refused_activation(
+        monkeypatch, fake_routes,
+        lambda tokens: FakeRequest(enveloped_body({"document": tokens["coord"]}, secret=WRONG_SECRET)))
+    assert status == 401 and payload["auth"] == "mismatch"
+
+
+def test_activate_document_with_an_integrity_mismatch_is_423_and_activates_nothing(
+        monkeypatch, fake_routes):
+    payload, status = _refused_activation(
+        monkeypatch, fake_routes,
+        lambda tokens: FakeRequest(enveloped_body({"document": tokens["coord"]})),
+        integrity=_mismatch_naming("revit_mcp/detail.py"))
+    assert status == 423 and payload["files"] == ["revit_mcp/detail.py"]
+
+
+@pytest.mark.parametrize("path,key", [("/document_summary/", "summary"), ("/document_levels/", "levels")])
+@pytest.mark.parametrize("variant", ["none", "wrong", "valid", "mismatch"])
+def test_the_addressed_reads_need_no_secret_and_never_see_the_envelope(
+        monkeypatch, fake_routes, path, key, variant):
+    app, uiapp, reg, tokens, docs = read_rig()
+    db = FakeDB()
+    handler = levels_handlers(monkeypatch, fake_routes, uiapp, reg, db)[(path, ("POST",))]
+    body = {"document": tokens["b"]}
+    handler(uiapp, FakeRequest(enveloped_body(body, secret=None)))
+    bare_payload, bare_status = fake_routes[-1]
+    assert bare_status == 200 and key in bare_payload
+    if variant == "mismatch":
+        configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
+    secret = {"none": None, "wrong": WRONG_SECRET}.get(variant, TEST_SECRET)
+    request = FakeRequest(enveloped_body(body, secret=secret))
+    handler(uiapp, request)
+    payload, status = fake_routes[-1]
+    assert status == bare_status and payload == bare_payload
+    assert b"_mcp" not in request.data, "the route's own parse must never see the reserved key"

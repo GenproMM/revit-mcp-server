@@ -9,6 +9,11 @@ DEST\_manifest.json (and nothing else, and never inside the git working tree):
     {"schema": 1, "generated_at": "...Z", "commit": "<40 hex>",
      "files": {"revit_mcp/x.py": "<sha256 hex>", ...}}
 
+With ``--check`` the tool writes nothing at all: ``--dest`` names a published tree
+and the tool prints ``INTEGRITY <state> <reason or ->`` plus one ``MODIFIED``,
+``MISSING`` or ``UNEXPECTED <path>`` line per differing file, exiting 0 only for
+verified_match. publish-extension.cmd runs it on the staged tree before the swap.
+
 The LIST of files comes from ``git ls-files`` over the repository (startup.py,
 extension.json and revit_mcp/), so caches, .pyc files and anything untracked can
 never be listed. The HASHES come from the published copies in DEST, which is what
@@ -160,13 +165,39 @@ def write_manifest(dest, manifest):
     return final
 
 
+def check_tree(dest):
+    """Print the integrity state of the published tree ``dest``; 0 only for verified_match.
+
+    Reads only: the verdict comes from this checkout's revit_mcp.integrity, the same
+    reader the extension runs at load, so what passes here is what a workstation
+    will accept. One ``MODIFIED``/``MISSING``/``UNEXPECTED <path>`` line follows the
+    verdict line for every file that differs.
+    """
+    if REPO_OF_THIS_TOOL not in sys.path:
+        sys.path.insert(0, REPO_OF_THIS_TOOL)
+    from revit_mcp.integrity import check_integrity
+    from revit_mcp.trust import INTEGRITY_MATCH
+    result = check_integrity(dest)
+    print("INTEGRITY {} {}".format(result.get("state"), result.get("reason") or "-"))
+    for label, key in (("MODIFIED", "modified"), ("MISSING", "missing"),
+                       ("UNEXPECTED", "unexpected")):
+        for relpath in result.get(key) or []:
+            print("{} {}".format(label, relpath))
+    return 0 if result.get("state") == INTEGRITY_MATCH else 1
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Write _manifest.json for a published copy.")
     parser.add_argument("--repo", default=REPO_OF_THIS_TOOL,
                         help="git checkout the file list comes from (default: this tool's repository)")
     parser.add_argument("--dest", required=True,
                         help="published extension directory that receives _manifest.json")
+    parser.add_argument("--check", action="store_true",
+                        help="write nothing: print the integrity state of the published tree in "
+                             "--dest and exit 0 only for verified_match (--repo is ignored)")
     args = parser.parse_args(argv)
+    if args.check:
+        return check_tree(args.dest)
     try:
         manifest = build_manifest(args.repo, args.dest)
         path = write_manifest(args.dest, manifest)

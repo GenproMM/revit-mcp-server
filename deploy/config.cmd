@@ -37,8 +37,9 @@ rem extension it loaded while update.cmd refreshes the payload underneath it.
 rem build-payload.cmd and publish-extension.cmd both stage a byte-identical copy
 rem from this one file, into payload\app\_bridge_secret and into the published
 rem extension as revit_mcp\_bridge_secret.
-rem To rotate: delete this file, rebuild the payload, republish the extension
-rem and restart Revit everywhere.
+rem To rotate: delete this file, rebuild the payload, republish the extension,
+rem delete retained secret copies in ext-previous and ext-rejected, and restart
+rem Revit everywhere.
 rem It sits beside the mirrored folders, not inside ext\ or payload\, and no
 rem script mirrors it. ext\ and payload\ each carry a copy though, so anyone who
 rem can read the share or an installed payload holds the secret: it is a barrier

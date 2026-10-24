@@ -315,6 +315,17 @@ type "%LOCALAPPDATA%\RevitMCP\update.log"
 | Застряло на старой версии | Смотрите `%LOCALAPPDATA%\RevitMCP\update.log`, затем запустите **Update RevitMCP** вручную |
 | Всё стало хуже после обновления | Возможен откат на предыдущую версию — см. ниже |
 
+### Отказы защиты: shared secret и manifest
+
+Чтение и `get_revit_status` продолжают работать, когда защита отказывает мутации.
+Не пытайтесь обходить отказ повторными изменениями.
+
+| Сообщение | Что делать |
+|---|---|
+| `Mutation rejected: shared secret missing` | Запустите **Update RevitMCP** или войдите в Windows заново, затем перезапустите сессию помощника. Если расширение уже обновилось — полностью перезапустите Revit. |
+| `Mutation rejected: shared secret mismatch` | Выполните те же шаги: **Update RevitMCP** (или новый вход), перезапустите сессию помощника и затем Revit. Если mismatch остался — сообщите сопровождающему. |
+| `Revit extension files differ from the published manifest` / HTTP `423` | Переустановите RevitMCP через `install.cmd`, полностью перезапустите Revit и сообщите сопровождающему. |
+
 ### Нет вкладки pyRevit
 
 **Симптом.** В Гене нет инструментов Revit, а в самом Revit на ленте нет вкладки

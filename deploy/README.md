@@ -47,6 +47,9 @@ namespace migration; keep the foreign MCP unchanged.
 ├─ inbox\                          contributed tool packages
 ├─ contrib-kit\                    revitmcp-contrib-kit.zip for tool developers
 ├─ ext\revit-mcp-server.extension\ published, pruned; pyRevit loads this over UNC
+├─ ext-staging\                    next extension while it is built and gated; never register with pyRevit
+├─ ext-previous\                   one prior extension for rollback; never register with pyRevit
+├─ ext-rejected\                   extension displaced by a rollback; never register with pyRevit
 ├─ payload\                        mirrored to workstations
 │   ├─ VERSION                     written LAST by build-payload.cmd
 │   ├─ ENGINE                      pyRevit CPython the wheels were built for
@@ -70,8 +73,10 @@ anywhere — `publish-extension.cmd` and `build-payload.cmd` derive the repo roo
 relative to themselves (`%~dp0..`), so a local disk works just as well. Keeping
 it beside the published copies is convenience, not a requirement.
 
-`ext\`, `install\` and `payload\` are created by the publish scripts; do not
-create them by hand.
+`ext\`, `ext-staging\`, `ext-previous\`, `ext-rejected\`, `install\` and
+`payload\` are created by the publish scripts; do not create them by hand. Only
+`ext\` is in pyRevit's search path: never register any staging, previous or
+rejected folder with pyRevit.
 
 **The payload is staged in `%TEMP%` on the build host, not on the share.** The
 acceptance gate spawns the server out of the staging directory, and over SMB that
@@ -149,7 +154,10 @@ into a twin tree" below. `pushd`, not `cd`: cmd cannot hold a UNC path as its wo
 directory.
 
 Run whichever half you changed; running both is harmless. Neither requires any
-action from users.
+action from users. Extension publication is staged through `ext-staging` and keeps
+one prior copy in `ext-previous`; the R3 payload-first order, scanner, pilot
+rehearsal, user messages and fingerprint check are in [RELEASE-RUNBOOK.md](RELEASE-RUNBOOK.md)
+section 6.3.
 
 `build-payload.cmd` refuses to publish unless the bundled runtime imports
 cleanly and `tests/test_init_latency.py` passes under the **bundled**
@@ -284,6 +292,15 @@ echo <older>>"%LOCALAPPDATA%\RevitMCP\current-version.txt"
 
 `rmdir` **without** `/s`. `update.cmd` will not garbage-collect the version the
 junction points at, so a rollback survives until you deliberately move on.
+
+For the Revit half, run `deploy\rollback-extension.cmd` on the share: it swaps
+`ext-previous` back into `ext`, preserves the displaced build in `ext-rejected`,
+and requires every affected user to fully restart Revit. Do not roll the payload
+back while a new extension is live, or its mutations fail with `401 missing`.
+
+To rotate the secret, delete `MCP_SECRET_FILE`, rebuild both halves and restart
+Revit everywhere; also delete secret-bearing retained copies in `ext-previous` and
+`ext-rejected` before keeping the new rotation.
 
 ## Starting Revit from the MCP server
 

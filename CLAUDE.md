@@ -88,7 +88,7 @@ when Revit is closed) and `tools/family_tools.py` maps onto `revit_mcp/placement
 `tools/__init__.py` discover every module exposing a `register_*_routes` /
 `register_*_tools` callable. **Adding a capability is 2 files plus the manifest:**
 
-1. `revit_mcp/<domain>.py` — `@api.route("/<name>/", methods=[...])` handler taking pyRevit's injected `(doc, request)`
+1. `revit_mcp/<domain>.py` — `@api.route("/<name>/", methods=[...])` handler taking pyRevit's injected `(doc, request)`; a non-GET handler opens with the `gate_or_response` preamble before any document or body access
 2. `tools/<domain>_tools.py` — `@mcp.tool()` async function, `ctx: Context = None` **last**
 3. `tests/unit/tool_manifest.txt` — add the tool name, same commit
 
@@ -103,10 +103,17 @@ Discovery rules that matter when writing a module:
   (`?verbose=true` also lists the registered ones).
 - Imports still live *inside* the register functions, which keeps stdio cold start low.
 
-Current surface: 54 MCP tools over 51 routes across 23 domain modules. The authoritative
+Current surface: 59 MCP tools over 56 routes across 24 domain modules. The authoritative
 list is `tests/unit/tool_manifest.txt`; `deploy/gate.py` blocks a release that diverges from it.
 
 ## Non-negotiable invariants
+
+**Every non-GET route opens with the secret/integrity gate before the document guard.** Use
+`gate_refusal = gate_or_response(request)` from `revit_mcp/security.py`, then immediately return
+when it is not `None`; never add a bypass flag. The seven intentionally open POST reads instead
+call `strip_envelope(request)` and are listed in `trust.OPEN_POST_READ_ROUTES`, mirrored in
+`scripts/conventions.py`. `tests/unit/test_phase5_gate_wiring.py` is the closed-by-default
+sentinel: a route that forgets the preamble fails it.
 
 **Every document mutation runs in a transaction, and `suppress_warnings(t)` comes immediately
 after `t.Start()`.** Without it a routine Revit warning pops a modal dialog that blocks the
@@ -249,20 +256,26 @@ parameter including `ctx`. `check_clashes` in `tools/clash_tools.py` is the refe
 - Requests sent while Revit is still initializing **hang** rather than failing: handlers run
   through a Revit external event that does not pump until startup finishes. Poll `/status/`
   (a GET, which answers 503 promptly) before issuing the first POST.
-- **Shared secret and integrity manifest are built, not enforced until Phase 5.**
+- **Shared secret and integrity manifest are enforced (Phase 5).**
   `deploy/secret_tool.py` stages `_bridge_secret` from `MCP_SECRET_FILE` (`deploy/config.cmd`)
   into the extension (`revit_mcp\_bridge_secret`) and the payload (`app\_bridge_secret`). It is
   created once and no build regenerates it; rotation is delete the file, rebuild both halves,
   restart Revit everywhere. A request carries it in the body under the reserved `_mcp` key,
   never a header, and no tool may put `_mcp` in its own data. It is a network barrier against
   callers on the LAN, not protection from anyone who can read the share, `ext\` or an installed
-  payload. `deploy/make_manifest.py` writes `_manifest.json` from `git ls-files` over the
-  published copies right after the `revit_mcp` copy and fails the publish on an untracked
-  `.py`; both artifact names are gitignored and excluded from the extension robocopy. On a dev
-  machine run `uv run python scripts/dev_secret.py` once and run the server from the repo with
-  `uv run main.py`, not from an installed payload, or the two halves read different secrets.
-  The junction has no `_manifest.json`, so the integrity check reports `unverifiable` there and
-  blocks nothing.
+  payload. Every non-GET route uses the gate preamble; the seven open POST reads use
+  `strip_envelope(request)` instead and the sentinel is `tests/unit/test_phase5_gate_wiring.py`.
+  `401` means the secret is missing, different or not configured; `423` means extension files
+  differ from `_manifest.json`. Startup reads the secret and runs the integrity check once at
+  extension load, so an edit after load is observed only after a full Revit restart.
+  `deploy/make_manifest.py` writes `_manifest.json` from `git ls-files` over the published copies
+  right after the `revit_mcp` copy and fails the publish on an untracked `.py`; both artifact
+  names are gitignored and excluded from the extension robocopy. On a dev machine run
+  `uv run python scripts/dev_secret.py` once and run the server from the repo with `uv run main.py`,
+  not from an installed payload, or the two halves read different secrets. The junction has no
+  `_manifest.json`, so the integrity check reports `unverifiable` there and blocks nothing. A
+  temporary `deploy/make_manifest.py --allow-repo-dest --repo . --dest .` manifest for the D-11
+  live check blocks your own mutations after any edit to a listed file until you delete it.
 
 ## Reference documents
 

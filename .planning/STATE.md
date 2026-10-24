@@ -23,21 +23,20 @@ milestone_name: Доверенный мост
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-14)
+See: .planning/PROJECT.md (updated 2026-10-25)
 
 **Core value:** Ассистент может достоверно читать и изменять модель Revit — и инженер может доверять тому, что ответ сервера описывает то, что действительно произошло.
-**Current focus:** Phase 05 — Live secret gate and integrity enforcement
+**Current focus:** Phase 06 — Structured audit log of true outcomes
 
 ## Current Position
 
 Phase: 06 — Structured audit log of true outcomes
 Current Plan: Not started
-Total Plans in Phase: 16
-Plan: 4 of 16
+Total Plans in Phase: 0 (not planned)
 Status: Ready to plan
 Last activity: 2026-10-25 — Phase 5 complete, transitioned to Phase 06
 
-Progress: [███████░░░] 71% of phase 02 plans (19/20)
+Progress: [███████░░░] 71% (5 of 7 phases complete, 63/63 planned plans)
 
 ## Performance Metrics
 

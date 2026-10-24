@@ -9,6 +9,7 @@ from .utils import (
     parse_request_data, commit_and_report, finalize_outcome, exception_outcome,
 )
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .security import gate_or_response
 from pyrevit import routes, revit, DB
 from System.Collections.Generic import List
 import traceback
@@ -199,6 +200,10 @@ def register_room_routes(api):
     @api.route("/create_room/", methods=["POST"])
     def create_room_handler(uiapp, doc, request):
         """Create a room at a specified level."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -358,6 +363,10 @@ def register_room_routes(api):
     @api.route("/create_room_separation/", methods=["POST"])
     def create_room_separation_handler(uiapp, doc, request):
         """Create room separation lines."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)

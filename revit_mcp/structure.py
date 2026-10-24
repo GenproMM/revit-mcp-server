@@ -9,6 +9,7 @@ from .utils import (
     parse_request_data, commit_and_report, finalize_outcome, exception_outcome,
 )
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -133,6 +134,10 @@ def register_structure_routes(api):
     @api.route("/create_grid/", methods=["POST"])
     def create_grid_handler(uiapp, doc, request):
         """Create grid lines in the Revit model."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)
@@ -333,6 +338,10 @@ def register_structure_routes(api):
     @api.route("/create_framing/", methods=["POST"])
     def create_framing_handler(uiapp, doc, request):
         """Create structural framing (beams) in the Revit model."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)

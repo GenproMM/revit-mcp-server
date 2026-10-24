@@ -6,6 +6,7 @@ Handles element tagging with annotation symbols
 
 from .utils import get_element_name, get_element_id_value, make_element_id, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -242,6 +243,10 @@ def register_tag_routes(api):
     @api.route("/tag_elements/", methods=["POST"])
     def tag_elements_handler(uiapp, doc, request):
         """Tag elements with annotation symbols in a view."""
+        # Phase 5 gate (D-01): shared secret and integrity, before anything else.
+        gate_refusal = gate_or_response(request)
+        if gate_refusal is not None:
+            return gate_refusal
         # G1 explicit guard: first, before any document access or transaction.
         document, descriptor, refusal = mutation_document_or_response(
             request_document_selector(request), uiapp=uiapp)

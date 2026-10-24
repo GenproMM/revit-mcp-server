@@ -1694,20 +1694,6 @@ def test_every_transacting_500_carries_the_real_transaction_status(world, key):
 
 WRONG_SECRET = "wrong-secret-0123456789-abcdefXYZ-nope"
 
-_GATED_IN_TASK_2 = ("rooms", "structure", "tags")
-
-
-def _gate_keys():
-    keys = []
-    for key in MUTATIONS:
-        if key[0] in _GATED_IN_TASK_2:
-            keys.append(pytest.param(
-                key, marks=pytest.mark.xfail(strict=True, reason="gated in Task 2")))
-        else:
-            keys.append(key)
-    return keys
-
-
 def _mismatch_naming(*files):
     return {"state": trust.INTEGRITY_MISMATCH, "reason": None,
             "modified": sorted(files), "missing": [], "unexpected": []}
@@ -1729,21 +1715,21 @@ def _refused(world, key, request, status):
     return reply
 
 
-@pytest.mark.parametrize("key", _gate_keys(), ids=MUTATION_IDS)
+@pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
 def test_without_the_shared_secret_a_mutation_is_401_before_any_side_effect(world, key):
     request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=None))
     reply = _refused(world, key, request, 401)
     assert reply.data["auth"] == "missing"
 
 
-@pytest.mark.parametrize("key", _gate_keys(), ids=MUTATION_IDS)
+@pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
 def test_with_a_wrong_secret_a_mutation_is_401_before_any_side_effect(world, key):
     request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=WRONG_SECRET))
     reply = _refused(world, key, request, 401)
     assert reply.data["auth"] == "mismatch"
 
 
-@pytest.mark.parametrize("key", _gate_keys(), ids=MUTATION_IDS)
+@pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
 def test_with_an_integrity_mismatch_a_mutation_is_423_before_any_side_effect(
         world, monkeypatch, key):
     configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))

@@ -481,7 +481,13 @@ def _tag(value, provenance):
     elif isinstance(value, str):
         tagged = ProvenanceText(value)
     else:
-        return value  # image bytes and other non-text results have no text channel
+        # An image and other non-text results have no text channel: tag the object
+        # itself when it takes attributes, else leave it untouched (research Pitfall 7).
+        try:
+            setattr(value, PROVENANCE_ATTR, provenance)
+        except (AttributeError, TypeError):
+            pass
+        return value
     setattr(tagged, PROVENANCE_ATTR, provenance)
     return tagged
 
@@ -548,8 +554,11 @@ def _received_reply(result, identity, requested, method):
     Without a proven identity (a stubbed or skipped handshake) nothing is claimed
     and the result is returned untouched.
     """
-    if identity is None or not isinstance(result, (dict, str)):
+    if identity is None:
         return result
+    if not isinstance(result, (dict, str)):
+        # revit_image's fetch returns an Image only for HTTP 200.
+        return _tag(result, _meta("received", requested, _process_of(identity), 200, None))
     http_status = 200
     if isinstance(result, str):
         match = _HTTP_ERROR_TEXT.match(result)
@@ -576,7 +585,8 @@ def _received_reply(result, identity, requested, method):
 class _TargetState(object):
     """Pool, queue and bookkeeping of ONE process incarnation."""
 
-    __slots__ = ("key", "client", "lock", "users", "verified", "evicted", "identity")
+    __slots__ = ("key", "client", "lock", "users", "verified", "evicted", "identity",
+                 "active_title")
 
     def __init__(self, key):
         self.key = key
@@ -585,6 +595,7 @@ class _TargetState(object):
         self.users = 0          # calls currently queued on, holding or using this state
         self.verified = False   # an identity handshake has succeeded for this key
         self.identity = None    # the process_identity that handshake proved (read with the lock held)
+        self.active_title = None  # document_title that handshake reported: a labelled audit hint only
         self.evicted = False    # superseded: closed when the last user lets go
 
 
@@ -714,6 +725,7 @@ async def _verify_target(target, state, timeout):
     request was NOT sent.
     """
     state.identity = None
+    state.active_title = None
     try:
         # Capped: the lock is held, and a Revit that is still initializing hangs
         # instead of failing, so the handshake must never wait out a long call.
@@ -732,6 +744,8 @@ async def _verify_target(target, state, timeout):
         state.verified = False
         return _error_text(exc)
     state.identity = _process_of(payload["process_identity"])
+    title = payload.get("document_title")
+    state.active_title = title if isinstance(title, str) else None
     state.verified = True
     await _retire_stale(state.key[0], state.key[1], state.key)
     return None
@@ -790,7 +804,14 @@ async def revit_get(endpoint: str, ctx: Any = None, target: Optional[str] = None
                     timeout: float = 30.0, params: Optional[Dict] = None) -> Union[Dict, str]:
     """GET one Revit route, on the selected incarnation or the only usable one."""
     if endpoint == "/status/" and params is None:
-        return await _status_call(target, timeout)
+        started = time.monotonic()
+        result = await _status_call(target, timeout)
+        call = audit.current_call()
+        # Only the explicit status tool is logged (D-02): the process tools and the
+        # identity handshake call /status/ too, and that is bridge housekeeping.
+        if call is not None and call.tool in audit.AUDITED_STATUS_TOOLS:
+            _audit(call, "GET", endpoint, result, started)
+        return result
 
     async def read(client) -> Union[Dict, str]:
         return await _send(client, "GET", endpoint, None, timeout, params)
@@ -996,12 +1017,26 @@ async def _dispatch(method: str, endpoint: str, ctx: Any, timeout: float, exchan
     started = time.monotonic()
     progress = {"sent": False}  # whether the requested exchange was ever started
     call = audit.current_call() or audit.anonymous_call()
-    result = await _dispatch_core(method, endpoint, ctx, timeout, exchange, target, progress)
-    _audit(call, method, endpoint, result, started)
+    try:
+        result = await _dispatch_core(method, endpoint, ctx, timeout, exchange, target, progress)
+    except asyncio.CancelledError:
+        # A client that gave up after the request was sent may still have changed the
+        # model: record it as unknown, then let the cancellation through. A call that
+        # never left this process (still queued) writes nothing.
+        if progress["sent"]:
+            _audit(call, method, endpoint, None, started,
+                   active_title_hint=progress.get("active_title_hint"), cancelled=True,
+                   provenance=_meta("unknown" if method == "POST" else "no-reply",
+                                    progress.get("requested")))
+        raise
+    _audit(call, method, endpoint, result, started,
+           active_title_hint=progress.get("active_title_hint"))
     return result
 
 
-def _audit(call: Any, method: str, endpoint: str, result: Any, started: float) -> None:
+def _audit(call: Any, method: str, endpoint: str, result: Any, started: float,
+           active_title_hint: Optional[str] = None, cancelled: bool = False,
+           provenance: Optional[dict] = None) -> None:
     """Write one audit entry for a finished call and put its id on the provenance.
 
     Never raises: the log must not change what a call returns (D-18). The id is
@@ -1009,17 +1044,21 @@ def _audit(call: Any, method: str, endpoint: str, result: Any, started: float) -
     successful read stays quiet in the model's text.
     """
     try:
-        provenance = getattr(result, PROVENANCE_ATTR, None)
-        if isinstance(provenance, dict):
-            meta = provenance
+        attach_to = None  # the real provenance dict of the result, when it has one
+        if provenance is not None:
+            meta = provenance  # synthesized (a cancelled send): no result to attach an id to
         else:
-            http_status = None
-            if isinstance(result, dict):
-                http_status = 200
-            elif isinstance(result, str):
-                match = _HTTP_ERROR_TEXT.match(result)
-                http_status = int(match.group(1)) if match else None
-            meta = _meta(None, None, None, http_status)
+            real = getattr(result, PROVENANCE_ATTR, None)
+            if isinstance(real, dict):
+                meta = attach_to = real
+            else:
+                http_status = None
+                if isinstance(result, dict):
+                    http_status = 200
+                elif isinstance(result, str):
+                    match = _HTTP_ERROR_TEXT.match(result)
+                    http_status = int(match.group(1)) if match else None
+                meta = _meta(None, None, None, http_status)
         body = _reply_body(result) if isinstance(result, (dict, str)) else None
         try:
             secret = _secret()
@@ -1027,10 +1066,11 @@ def _audit(call: Any, method: str, endpoint: str, result: Any, started: float) -
             secret = None
         entry = audit.record_call(call, method, endpoint, meta, body,
                                   duration_ms=int((time.monotonic() - started) * 1000),
-                                  secret=secret)
-        if (entry is not None and isinstance(provenance, dict)
+                                  secret=secret, active_title_hint=active_title_hint,
+                                  cancelled=cancelled)
+        if (entry is not None and attach_to is not None
                 and (entry["mutation"] or entry["outcome"] != "success")):
-            provenance["audit_call_id"] = entry["call_id"]
+            attach_to["audit_call_id"] = entry["call_id"]
     except Exception:
         pass
 
@@ -1044,6 +1084,7 @@ async def _dispatch_core(method: str, endpoint: str, ctx: Any, timeout: float, e
     try:
         resolved = parse_target(target) if target is not None else await resolve_default_target()
         requested = _requested_of(resolved)
+        progress["requested"] = requested
         state = _state_for(resolved)
         state.users += 1
         if _is_locked(method, endpoint):
@@ -1095,6 +1136,7 @@ async def _verified_exchange(method: str, exchange: Any, state: "_TargetState", 
     if refusal is not None:
         return _uncertain(refusal, "not-sent", requested)
     identity = state.identity  # no await since the handshake: still this call's proof
+    progress["active_title_hint"] = state.active_title  # same reasoning, same line pair
     progress["sent"] = True
     client = _client_of(state, resolved)
     if not locked:

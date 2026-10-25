@@ -45,7 +45,8 @@ class Machine(object):
         self.requests = []        # httpx.Request, in arrival order
         self.gates = {}           # (port, path) -> Gate
         self.faults = {}          # (port, path) -> exception factory
-        self.replies = {}         # (port, path) -> (status_code, body_dict)
+        self.replies = {}         # (port, path) -> (status_code, body_dict or raw text)
+        self.titles = {PORT_A: "Project A", PORT_B: "Project B"}  # /status/ document_title
         self.clients = []         # every client the factory handed out
 
     def gate(self, port, route):
@@ -53,7 +54,10 @@ class Machine(object):
         return gate
 
     def reply(self, port, route_path, status_code, body):
-        """Answer one route (path as the bridge sends it, e.g. "/modify_element/")."""
+        """Answer one route (path as the bridge sends it, e.g. "/modify_element/").
+
+        A dict body is sent as JSON; a str body is sent as raw text (not JSON).
+        """
         self.replies[(port, PREFIX + route_path)] = (status_code, body)
 
     def snapshot(self, ports, **_kwargs):
@@ -67,9 +71,10 @@ class Machine(object):
             who = self.identity.get(port)
             if who is None:
                 raise httpx.ConnectError("refused", request=request)
-            return httpx.Response(200, json={"status": "active", "process_identity": {
-                "pid": who[0], "actual_port": port, "session_token": who[1],
-                "revit_version": "2024"}})
+            return httpx.Response(200, json={
+                "status": "active", "document_title": self.titles.get(port),
+                "process_identity": {"pid": who[0], "actual_port": port,
+                                     "session_token": who[1], "revit_version": "2024"}})
         fault = self.faults.get((port, path))
         if fault is not None:
             raise fault(request)
@@ -79,6 +84,8 @@ class Machine(object):
             await gate.release.wait()
         canned = self.replies.get((port, path))
         if canned is not None:
+            if isinstance(canned[1], str):
+                return httpx.Response(canned[0], content=canned[1].encode("utf-8"))
             return httpx.Response(canned[0], json=canned[1])
         if path.startswith(PREFIX + "/get_view/"):
             payload = base64.b64encode(b"\x89PNG-bytes").decode("ascii")

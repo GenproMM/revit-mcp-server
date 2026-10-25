@@ -568,7 +568,11 @@ def test_image_success_cannot_carry_text_but_an_image_error_is_attributed(machin
     png = base64.b64encode(b"\x89PNG").decode("ascii")
     machine.replies[(PORT_A, "/get_view/Level 1")] = httpx.Response(200, json={"image_data": png})
     image = run(bridge.revit_image("/get_view/Level 1", target=SEL_A))
-    assert not isinstance(image, str) and provenance(image) is None
+    # An image has no text channel, but the object itself carries the provenance (06-02):
+    # the audit log attributes it like any other reply; no line is ever rendered from it.
+    assert not isinstance(image, str)
+    assert provenance(image)["kind"] == "received" and provenance(image)["http_status"] == 200
+    assert provenance(image)["process"] == IDENT_A
     machine.replies[(PORT_A, "/get_view/Nope")] = httpx.Response(404, json={"error": "no such view"})
     result = run(bridge.revit_image("/get_view/Nope", target=SEL_A))
     assert result.startswith("Error: 404 - ") and provenance(result)["kind"] == "received"

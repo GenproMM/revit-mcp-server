@@ -13,6 +13,8 @@ except ValueError as exc:
 import anyio
 from mcp.server.fastmcp import FastMCP
 
+import audit
+
 # Create a generic MCP server for interacting with Revit
 # Use stateless_http=True and json_response=True for better compatibility
 mcp = FastMCP(
@@ -20,12 +22,12 @@ mcp = FastMCP(
     host="127.0.0.1", 
     port=8000,
     stateless_http=True,
-    json_response=True
+    json_response=True,
+    instructions=audit.SERVER_INSTRUCTIONS
 )
 
 # The audit wrapper is installed here, not inside register_tools, so the unit
 # tests that read the unwrapped tool signatures keep seeing them (06-RESEARCH Pitfall 1).
-import audit
 audit.install_audited_tools(mcp)
 
 # Register all tools BEFORE the main block

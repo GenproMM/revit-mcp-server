@@ -124,10 +124,20 @@ OPEN_POST_READ_ROUTES = frozenset({
     "/list_category_parameters/",
 })
 
+# The wording the model sees (D-12). The short form rides in every tool's schema; the full
+# rule is stated once, in SERVER_INSTRUCTIONS. tests/unit/test_audit_registration.py pins both.
 USER_REQUEST_DESCRIPTION = (
-    "The user's latest message, copied verbatim; if it is only a short confirmation such as "
-    "'да', 'согласую', 'делай' or 'ок', copy the last substantive request before it. "
-    "Recorded in the local audit log; optional."
+    "The user's latest message, copied verbatim. If that message is only a short confirmation "
+    "(for example 'да', 'согласую', 'делай', 'ок'), copy the last substantive request before it. "
+    "Optional; recorded in the local audit log as reported by you."
+)
+
+SERVER_INSTRUCTIONS = (
+    "Every tool of this server accepts an optional user_request argument. Put the user's latest "
+    "message in it, word for word. When that message is only a confirmation such as \"да\", "
+    "\"согласую\", \"делай\", \"ок\", \"yes\" or \"go ahead\", put the last substantive request "
+    "before it instead. The server cannot see the conversation: it records the value in the "
+    "local audit log as reported by the assistant, unverified. Omitting it never blocks a call."
 )
 
 _OUTCOME_STATUSES = ("success", "partial", "failed", "rolled_back")

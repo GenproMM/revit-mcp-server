@@ -33,7 +33,7 @@ Phase: 07 — Repository-owned mutation safety and human approval
 Current Plan: Not started
 Total Plans in Phase: 7
 Status: Ready to plan
-Last activity: 2026-10-25 — Phase 06 complete, transitioned to Phase 07
+Last activity: 2026-10-25 - Completed quick task 261025-ld5: open_model defaults to a local copy
 
 Progress: [█████████░] 86% (6 of 7 phases complete, 70/70 planned plans)
 
@@ -202,6 +202,12 @@ None yet.
 - [Phase 1] WR-01 (`01-REVIEW.md`): a POST answered 200 with an unparseable body returns a bare `Error: Expecting value ...` instead of outcome-UNKNOWN wording; fix before Phase 4 builds on this transport. WR-03: `REVIT_HOST` is not validated.
 - [Phase 1] UAT 2026-10-14 recorded pass for the pyRevit 6.5.5 overlap probe, `/model_info/` under overlap, simultaneous launch and a cross-version pair, but no verdicts, port/PID mapping or output were captured; `bridge.py` still says 6.5.5 was not benched and `/model_info/` stays locked. Record the measurements before anyone proposes unlocking a route.
 - [Coexistence] `%APPDATA%\pyRevit\Extensions\revit-mcp.extension` belongs to a foreign MCP: never modify it. Our `revit-mcp-server.extension` is the authorized repo junction and uses owned package/API genpro_revit_mcp. Repo extension edits are deployed immediately but need full Revit restart to load safely.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261025-ld5 | open_model: workshared default = local copy, existing copy renamed with date stamp (never deleted), fallback workset "Оси и уровни" | 2026-10-25 | eb05c2c | [261025-ld5-open-model-umolchanie-lokalnaya-kopiya-d](./quick/261025-ld5-open-model-umolchanie-lokalnaya-kopiya-d/) |
 
 ## Deferred Items
 

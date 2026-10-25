@@ -43,6 +43,22 @@ ARGUMENT_LINES = 10      # argument lines shown in the window
 VALUE_MAX = 120          # characters of one shown value
 KEY_MAX = 60             # characters of one shown argument name
 
+# Elicitation clients may coalesce visually similar simultaneous requests. Keep one window
+# open per running MCP event loop, while retaining per-loop ownership (an asyncio.Lock cannot
+# be safely shared by the separate loops the unit suite and some MCP hosts create).
+_WINDOW_LOCKS = {}
+
+
+def _window_lock():
+    """The confirmation-window lock for the active event loop."""
+    loop = asyncio.get_running_loop()
+    key = id(loop)
+    lock = _WINDOW_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _WINDOW_LOCKS[key] = lock
+    return lock
+
 
 @dataclasses.dataclass(frozen=True)
 class AuthorizationRequest:
@@ -101,8 +117,11 @@ def refusal_text(label: str, reasons) -> str:
     elif label == "expired" or "approval_timeout" in reasons:
         why = ("NOT CONFIRMED: no answer within the time limit (EXPIRED; "
                "подтверждение не получено).")
-    elif "approval_unavailable" in reasons or "approval_error" in reasons:
+    elif "approval_unavailable" in reasons:
         why = ("UNAVAILABLE: this client cannot show a confirmation window "
+               "(MCP elicitation).")
+    elif "approval_error" in reasons:
+        why = ("NOT CONFIRMED: the client failed to show or answer the confirmation window "
                "(MCP elicitation).")
     elif "policy_changed" in reasons:
         why = ("NOT CONFIRMED: the approval policy changed while the window was open; "
@@ -180,8 +199,9 @@ async def ask_human(ctx: Any, message: str, timeout_s: float) -> str:
         if not capable:
             return "unavailable"
         request_id = ctx.request_id
-        async with asyncio.timeout(timeout_s):
-            result = await session.elicit_form(message, EMPTY_FORM, request_id)
+        result = await session.elicit_form(message, EMPTY_FORM, request_id)
+    except asyncio.CancelledError:
+        raise
     except TimeoutError:
         return "expired"
     except Exception:
@@ -246,10 +266,17 @@ async def authorize(request: AuthorizationRequest):
         return _refuse("denied", ["unknown_decision"], pol)
 
     effective = dataclasses.replace(rule, decision="confirm", reasons=tuple(reasons))
-    code = operation_code()
-    message = build_message(request, effective, code, timeout_s=pol.confirm_timeout_s)
     started = time.monotonic()
-    answer = await ask_human(request.ctx, message, pol.confirm_timeout_s)
+    try:
+        # One policy deadline covers both waiting for an earlier window and the client answer.
+        # This is before bridge._dispatch, so no target lock or Revit transaction is held here.
+        async with asyncio.timeout(pol.confirm_timeout_s):
+            async with _window_lock():
+                code = operation_code()
+                message = build_message(request, effective, code, timeout_s=pol.confirm_timeout_s)
+                answer = await ask_human(request.ctx, message, pol.confirm_timeout_s)
+    except TimeoutError:
+        answer = "expired"
     wait_ms = int((time.monotonic() - started) * 1000)
     if answer == "accepted":
         # SAFE-13: an approval is for the policy that opened the window. Re-read the policy

@@ -198,7 +198,7 @@ routes = ["/transform_elements/"]
 method = "POST"
 decision = "allow"
 reasons = ["document_state"]
-document_bound = true
+document_bound = false
 facts = "none"
 
 [routes."/ai_filter/"]

@@ -15,18 +15,23 @@ is roughly ten extra discipline models and ten times the memory.
 
 from pyrevit import routes, DB
 from .utils import parse_request_data, build_outcome
-from .textutils import sanitize_string, describe_broken_path
+from .textutils import (
+    sanitize_string, describe_broken_path, local_copy_stamp, local_backup_dir,
+    stamped_local_paths, resolve_existing_local_mode, pick_axes_levels_workset,
+    AXES_LEVELS_WORKSET_MARKER,
+)
 from .security import gate_or_response, strip_envelope
 from .identity import (
     read_live_snapshot, get_document_registry, current_descriptor, process_identity_or_error,
 )
+import datetime
 import os
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Central/workshared models open detached with all user worksets closed by
-# default. The sentinel is handled by _matches_any and is not a workset name.
+# Workshared models open as a new local copy (detach "none") with all user worksets
+# closed by default. The sentinel is handled by _matches_any and is not a workset name.
 DEFAULT_LINK_WORKSET_PATTERNS = ["__ALL_USER_WORKSETS__"]
 
 # "preserve" is the Revit dialog option "Detach and preserve worksets".
@@ -35,6 +40,11 @@ _DETACH_MODES = {
     "discard": "DetachAndDiscardWorksets",
     "none": "DoNotDetach",
 }
+
+
+def _now():
+    """The clock behind the local-copy stamp; a seam so tests can pin it."""
+    return datetime.datetime.now()
 
 
 def _stamp_process(response, uiapp):
@@ -160,7 +170,50 @@ def _current_user(app):
     return os.environ.get("USERNAME") or os.environ.get("USER") or "local"
 
 
-def _make_local_copy(model_path, file_path, app, local_path=None, overwrite=True):
+def _rename_existing_local(local_path):
+    """
+    Move an existing local copy (and its <stem>_backup folder) aside under a date-time
+    stamp. Returns (renamed, error); renamed is {from, to, backup_from, backup_to}.
+    Nothing is ever deleted. The .rvt goes first, because that is the rename that fails
+    when the file is open in Revit and nothing has changed by then; if the folder rename
+    then fails, the .rvt is renamed back. Never raises.
+    """
+    new_rvt, new_backup = stamped_local_paths(
+        local_path, local_copy_stamp(_now()), os.path.exists)
+    if new_rvt is None:
+        return None, ("Could not rename the existing local copy at {}: no free "
+                      "date-stamped name was found next to it. Nothing was changed."
+                      ).format(local_path)
+    try:
+        os.rename(local_path, new_rvt)
+    except Exception as e:
+        return None, ("Could not rename the existing local copy at {} to {}: {}. It is "
+                      "most likely open in Revit. Nothing was changed or deleted."
+                      ).format(local_path, new_rvt, str(e))
+
+    backup = local_backup_dir(local_path)
+    backup_from = None
+    backup_to = None
+    if os.path.isdir(backup):
+        try:
+            os.rename(backup, new_backup)
+            backup_from = backup
+            backup_to = new_backup
+        except Exception as e:
+            try:
+                os.rename(new_rvt, local_path)
+                restored = "The local copy was renamed back to {}.".format(local_path)
+            except Exception as restore_error:
+                restored = ("Renaming the local copy back FAILED ({}): it is now at {}."
+                            ).format(str(restore_error), new_rvt)
+            return None, ("Could not rename the backup folder {} to {}: {}. {} Nothing was "
+                          "deleted; the backup folder is still at {}."
+                          ).format(backup, new_backup, str(e), restored, backup)
+    return {"from": local_path, "to": new_rvt,
+            "backup_from": backup_from, "backup_to": backup_to}, None
+
+
+def _make_local_copy(model_path, file_path, app, local_path=None, existing_mode="timestamp"):
     """
     Create a local copy of a central model and return (local ModelPath, report).
 
@@ -168,6 +221,11 @@ def _make_local_copy(model_path, file_path, app, local_path=None, overwrite=True
     Open dialog. Without it, opening a central without detaching edits the
     central file itself, which is exactly what corrupts a workshared model --
     and on Revit Server it is not even a file Revit can write back to.
+
+    existing_mode says what happens to a copy already sitting at local_path:
+    "timestamp" (default) renames it, with its backup folder, to a date-stamped name;
+    "overwrite" deletes it (explicit only); "error" refuses. The report always carries
+    local_path, existing_local, replaced_existing_local and renamed_existing_local.
     """
     if not local_path:
         local_path = os.path.join(
@@ -184,17 +242,19 @@ def _make_local_copy(model_path, file_path, app, local_path=None, overwrite=True
             return None, {"error": "Could not create {}: {}".format(parent, str(e))}
 
     existed = os.path.exists(local_path)
-    if existed and not overwrite:
+    replaced = False
+    renamed = None
+    if existed and existing_mode == "error":
         return None, {
-            "error": ("A local copy already exists at {}. Pass overwrite_local=true "
-                      "to replace it, or local_path to write elsewhere.").format(
-                          local_path)
+            "error": ("A local copy already exists at {}. Pass existing_local=\"timestamp\" "
+                      "to keep it under a date-stamped name, existing_local=\"overwrite\" "
+                      "to replace it, or local_path to write elsewhere.").format(local_path)
         }
 
-    # CreateNewLocal refuses to write over an existing file, so an overwrite
-    # has to remove it first. Any unsynchronised work in that copy is lost --
-    # which is why overwrite_local=false exists.
-    if existed:
+    if existed and existing_mode == "overwrite":
+        # CreateNewLocal refuses to write over an existing file, so an overwrite has to
+        # remove it first. Any unsynchronised work in that copy is lost -- which is why
+        # this branch runs only on an explicit existing_local="overwrite".
         try:
             os.remove(local_path)
         except Exception as e:
@@ -202,18 +262,29 @@ def _make_local_copy(model_path, file_path, app, local_path=None, overwrite=True
                 "error": ("Could not replace the existing local copy at {}: {}. "
                           "It is most likely open in Revit.").format(local_path, str(e))
             }
+        replaced = True
+    elif existed:
+        renamed, rename_error = _rename_existing_local(local_path)
+        if rename_error:
+            return None, {"error": rename_error}
 
     local_model_path = DB.ModelPathUtils.ConvertUserVisiblePathToModelPath(local_path)
     try:
         DB.WorksharingUtils.CreateNewLocal(model_path, local_model_path)
     except Exception as e:
-        return None, {
-            "error": "Could not create a local copy at {}: {}".format(
-                local_path, str(e))
+        failure = {
+            "error": "Could not create a local copy at {}: {}".format(local_path, str(e))
         }
+        if renamed:
+            failure["renamed_existing_local"] = renamed
+            failure["error"] += (". The previous local copy was kept at {}."
+                                 ).format(renamed["to"])
+        return None, failure
     return local_model_path, {
         "local_path": local_path,
-        "replaced_existing_local": bool(existed),
+        "existing_local": existing_mode,
+        "replaced_existing_local": replaced,
+        "renamed_existing_local": renamed,
     }
 
 
@@ -281,10 +352,12 @@ def _preview_worksets(model_path):
     return worksets, None
 
 
-def _build_workset_config(model_path, close_patterns):
+def _build_workset_config(model_path, close_patterns, keep_open=None):
     """
     Build a WorksetConfiguration opening everything except worksets matching
     close_patterns. Returns (config, report, error).
+
+    A workset whose name is in keep_open stays open even when it matches.
 
     CloseAllWorksets is deliberately not used: a closed workset is invisible to
     FilteredElementCollector, and the configuration applies only once at open
@@ -307,7 +380,7 @@ def _build_workset_config(model_path, close_patterns):
         except Exception as e:
             logger.warning("Skipping unreadable workset: {}".format(str(e)))
             continue
-        if _matches_any(name, close_patterns):
+        if name not in (keep_open or ()) and _matches_any(name, close_patterns):
             id_list.Add(info.Id)
             closed_names.append(name)
         else:
@@ -406,28 +479,44 @@ def register_worksharing_routes(api):
 
     def _open_model(uiapp, request):
         """
-        Open a model from disk, detaching from central and configuring worksets.
+        Open a model from disk, creating a local copy of a central or detaching it,
+        and configuring worksets.
 
         Payload: {
-            "file_path": "C:\\\\path\\\\to\\\\Model.rvt",
-            "detach": "preserve",
+            "file_path": "C:\\path\\to\\Model.rvt",
+            "detach": "none",
             "close_worksets_matching": ["#_RVT_LINK"],
             "activate": true,
             "audit": false,
             "local_path": null,
-            "overwrite_local": true
+            "existing_local": "timestamp",
+            "overwrite_local": null
         }
 
-        detach is preserve | discard | none; "preserve" is the Revit dialog
-        option "Detach and preserve worksets" and is the default. A
-        non-workshared file is opened with neither detach nor workset
-        configuration, because Revit rejects both on such a file.
+        detach is preserve | discard | none and defaults to "none". "preserve" is
+        the Revit dialog option "Detach and preserve worksets". A non-workshared
+        file is opened with neither detach nor workset configuration, because
+        Revit rejects both on such a file.
 
         detach="none" on a central model creates a local copy first
         (WorksharingUtils.CreateNewLocal, the API form of the Open dialog's
         "Create New Local" checkbox) and opens that copy. Opening a central
         directly is what corrupts workshared models, and a Revit Server
         central cannot be opened in place at all.
+
+        existing_local says what happens to a copy already at the target path:
+        "timestamp" (default) renames it, with its <stem>_backup folder, to
+        <stem>_<YYYYMMDD_HHMMSS>.rvt (suffix _2, _3 ... on a collision) and creates
+        a new copy; "overwrite" deletes it (the only way anything is deleted);
+        "error" refuses. overwrite_local is the deprecated spelling: true means
+        "overwrite", false means "error", and it must agree with existing_local.
+
+        When the caller omits close_worksets_matching, every user workset opens
+        closed; if Revit fails to open the model that way, the route retries once
+        on the same path with only the workset whose name contains the
+        axes-and-levels marker (AXES_LEVELS_WORKSET_MARKER, a Russian phrase)
+        open, and the reply names the variant in worksets_applied. An explicit
+        close_worksets_matching is never retried.
         """
         # Hoisted so a 500 can name the requested file in its outcome (D-06).
         file_path = None
@@ -462,7 +551,7 @@ def register_worksharing_routes(api):
                     status=404,
                 )
 
-            detach = str(data.get("detach", "preserve")).lower()
+            detach = str(data.get("detach", "none")).lower()
             if detach not in _DETACH_MODES:
                 return routes.make_response(
                     data={"error": "detach must be one of: {}".format(
@@ -470,13 +559,21 @@ def register_worksharing_routes(api):
                     status=400,
                 )
 
+            # Validation before any Revit call: a bad existing_local is a 400 with no outcome.
+            existing_mode, mode_error = resolve_existing_local_mode(
+                data.get("existing_local"), data.get("overwrite_local"))
+            if mode_error:
+                return routes.make_response(data={"error": mode_error}, status=400)
+
+            # Omitted (or null) means "the default", which is the only case that may be
+            # retried with the axes-and-levels workset open.
             patterns = data.get("close_worksets_matching")
-            if patterns is None:
+            default_worksets = patterns is None
+            if default_worksets:
                 patterns = DEFAULT_LINK_WORKSET_PATTERNS
             activate = bool(data.get("activate", True))
             audit = bool(data.get("audit", False))
             local_path = data.get("local_path")
-            overwrite_local = bool(data.get("overwrite_local", True))
 
             app = uiapp.Application
             if app is None:
@@ -532,48 +629,124 @@ def register_worksharing_routes(api):
                 if is_central is None or is_central or _is_revit_server_path(file_path):
                     local_model_path, local_report = _make_local_copy(
                         model_path, file_path, app,
-                        local_path=local_path, overwrite=overwrite_local,
+                        local_path=local_path, existing_mode=existing_mode,
                     )
                     if local_model_path is None:
-                        return routes.make_response(
-                            data={
-                                "error": local_report["error"],
-                                "file_path": file_path,
-                                "requested_detach": detach,
-                                "outcome": open_failed(local_report["error"]),
-                            },
-                            status=500,
-                        )
+                        local_failure = {
+                            "error": local_report["error"],
+                            "file_path": file_path,
+                            "requested_detach": detach,
+                            "outcome": open_failed(local_report["error"]),
+                        }
+                        if local_report.get("renamed_existing_local"):
+                            local_failure["renamed_existing_local"] = local_report[
+                                "renamed_existing_local"]
+                        return routes.make_response(data=local_failure, status=500)
                     open_path = local_model_path
                     logger.info("Opening local copy {} of {}".format(
                         local_report["local_path"], file_path))
 
             opened = None
             was_activated = False
-            try:
-                if activate:
-                    uidoc = uiapp.OpenAndActivateDocument(open_path, options, False)
-                    opened = uidoc.Document if uidoc else None
-                    was_activated = True
-                else:
-                    opened = app.OpenDocumentFile(open_path, options)
-            except Exception as oe:
-                error = "Open failed: {}".format(str(oe))
-                return routes.make_response(
-                    data={
-                        "error": error,
-                        "file_path": file_path,
-                        "requested_detach": detach,
-                        "is_workshared": is_workshared,
-                        "outcome": open_failed(error),
-                    },
-                    status=500,
-                )
+            fallback_workset = None
+            fallback_reason = None
+            # One retry at most, written as a loop (not a nested function) so the open
+            # call stays lexically inside _open_model.
+            for attempt in (1, 2):
+                opened = None
+                failure = None
+                raised = False
+                try:
+                    if activate:
+                        uidoc = uiapp.OpenAndActivateDocument(open_path, options, False)
+                        opened = uidoc.Document if uidoc else None
+                        was_activated = True
+                    else:
+                        opened = app.OpenDocumentFile(open_path, options)
+                except Exception as oe:
+                    raised = True
+                    failure = "Open failed: {}".format(str(oe))
+                if opened is not None:
+                    break
+                if failure is None:
+                    failure = "Revit returned no document for {}".format(file_path)
 
-            if opened is None:
-                error = "Revit returned no document for {}".format(file_path)
+                if attempt == 1 and is_workshared and default_worksets:
+                    workset_names = []
+                    for info in worksets_probe or []:
+                        try:
+                            workset_names.append(sanitize_string(info.Name))
+                        except Exception:
+                            logger.warning("Skipping unreadable workset name")
+                    fallback_workset = pick_axes_levels_workset(workset_names)
+                    if fallback_workset is None:
+                        error = ("Open with all user worksets closed failed ({}). No user "
+                                 "workset name contains '{}', so there was nothing to "
+                                 "retry with.").format(failure, AXES_LEVELS_WORKSET_MARKER)
+                        return routes.make_response(
+                            data={
+                                "error": error,
+                                "file_path": file_path,
+                                "requested_detach": detach,
+                                "is_workshared": is_workshared,
+                                "outcome": open_failed(error),
+                            },
+                            status=500,
+                        )
+                    retry_config, retry_report, retry_error = _build_workset_config(
+                        model_path, DEFAULT_LINK_WORKSET_PATTERNS,
+                        keep_open=[fallback_workset])
+                    if retry_error:
+                        error = ("Open with all user worksets closed failed ({}). Could "
+                                 "not build the retry workset configuration: {}"
+                                 ).format(failure, retry_error)
+                        return routes.make_response(
+                            data={
+                                "error": error,
+                                "file_path": file_path,
+                                "requested_detach": detach,
+                                "is_workshared": is_workshared,
+                                "fallback_workset": fallback_workset,
+                                "outcome": open_failed(error),
+                            },
+                            status=500,
+                        )
+                    options.SetOpenWorksetsConfiguration(retry_config)
+                    workset_report = retry_report
+                    fallback_reason = failure
+                    logger.warning("Retrying {} with only workset {} open: {}".format(
+                        file_path, fallback_workset, failure))
+                    continue
+
+                if fallback_workset is not None:
+                    error = ("Open failed with all user worksets closed ({}) and again "
+                             "with only workset '{}' open ({})").format(
+                                 fallback_reason, fallback_workset, failure)
+                    return routes.make_response(
+                        data={
+                            "error": error,
+                            "file_path": file_path,
+                            "requested_detach": detach,
+                            "is_workshared": is_workshared,
+                            "fallback_workset": fallback_workset,
+                            "fallback_reason": fallback_reason,
+                            "outcome": open_failed(error),
+                        },
+                        status=500,
+                    )
+                if raised:
+                    return routes.make_response(
+                        data={
+                            "error": failure,
+                            "file_path": file_path,
+                            "requested_detach": detach,
+                            "is_workshared": is_workshared,
+                            "outcome": open_failed(failure),
+                        },
+                        status=500,
+                    )
                 return routes.make_response(
-                    data={"error": error, "outcome": open_failed(error)},
+                    data={"error": failure, "outcome": open_failed(failure)},
                     status=500,
                 )
 
@@ -601,10 +774,21 @@ def register_worksharing_routes(api):
             }
             if local_report:
                 result["local_path"] = local_report["local_path"]
+                result["existing_local"] = local_report["existing_local"]
                 result["replaced_existing_local"] = local_report[
                     "replaced_existing_local"]
+                result["renamed_existing_local"] = local_report[
+                    "renamed_existing_local"]
             if workset_report:
                 result.update(workset_report)
+                if fallback_workset is not None:
+                    result["worksets_applied"] = "axes_and_levels_open"
+                    result["fallback_workset"] = fallback_workset
+                    result["fallback_reason"] = fallback_reason
+                elif not default_worksets:
+                    result["worksets_applied"] = "caller_patterns"
+                else:
+                    result["worksets_applied"] = "all_user_closed"
             else:
                 result["worksets_total"] = 0
                 result["message"] = ("The model is not workshared; opened without "

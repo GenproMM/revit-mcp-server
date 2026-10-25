@@ -98,6 +98,14 @@ queue busy, connect failure, no complete reply, outcome unknown) is tagged too
 but credits no process and no document. tools/utils.py format_response renders
 the tag; the document is only ever the one the route reports in its reply.
 
+Audit
+-----
+Every call that was sent goes to audit.record_call from _dispatch, with the outcome taken
+from this module's provenance and the reply body (schema 1 is in audit.py). GET /status/
+is audited only inside get_revit_status; the handshake, discovery probes and refusals that
+sent nothing write nothing. The POST envelope carries call_id beside the secret. The hook
+never raises and never prints: a writer failure costs the entry, never the call.
+
 This module must not import mcp at module level: it is imported on the cold
 start path and has to stay cheap.
 """

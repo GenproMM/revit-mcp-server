@@ -159,6 +159,33 @@ The lock does not cover another MCP server process (for example a second assista
 which runs its own server process), curl, or `/execute_code/` called directly. A call that timed
 out on the client may still be running in Revit, and the next call can overlap it.
 
+### Audit log
+
+Every call this server sends to Revit leaves one line in a local audit log, so an engineer can
+see afterwards what each call really did. Every tool also accepts an optional `user_request`
+argument: the assistant is asked to put the user's latest message there, and the log records it
+as the assistant reported it (unverified; omitting it never blocks a call).
+
+- **Where.** `%LOCALAPPDATA%\RevitMCP\audit` (`~/.revit-mcp/audit` on other systems), one
+  `audit-<UTC time>-<PID>.jsonl` file per server session; a long session continues in
+  `audit-<UTC time>-<PID>.0002.jsonl` and so on. Set `REVIT_MCP_AUDIT_DIR` to use another
+  folder. The default is per user, never a network share and never the repository.
+- **What an entry holds.** Time, tool, route, the target Revit process (PID, port, session
+  token, version), the document (token, title, path), the affected elements, the true outcome
+  (`success`, `partial`, `failed`, `rolled_back`, rejected by the gate or the document check,
+  `unknown` when no trustworthy reply came back), the Windows user, the tool arguments and the
+  user's request. The schema is documented at the top of `audit.py` (schema 1).
+- **What it never holds.** The shared secret, request bodies, or the data a read returned.
+- **Retention.** At start-up the server deletes `audit-*.jsonl` files older than
+  `REVIT_MCP_AUDIT_MAX_AGE_DAYS` (default 180) and then the oldest files until the folder is at
+  most `REVIT_MCP_AUDIT_MAX_TOTAL_MB` (default 500, MiB). It touches nothing else in the folder.
+- **Finding an entry.** A mutation, or any call that did not succeed, ends its reply with
+  `Audit: call_id <id>`; search the `.jsonl` files for that id. To find what touched an element,
+  search for its element id (it is listed in `succeeded` and `failed`).
+
+If the log cannot be written, the call still completes and the server prints one line to
+stderr naming the error class.
+
 ### Cursor / Windsurf / Other MCP Clients
 
 Use HTTP transport:

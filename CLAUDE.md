@@ -78,6 +78,8 @@ MCP client ──stdio/SSE/HTTP──> main.py + bridge.py + tools/ ──HTTP :
 `httpx.AsyncClient` and the lock, and exposes `revit_get` / `revit_post` / `revit_image`. Those
 three callables are **injected** into every tool registrar — tool modules never import the
 transport. The `bridge.py` module docstring is the full statement of what the lock covers.
+`audit.py` sits beside `bridge.py` as a root module the payload copies: it writes the audit log of
+what each call really did (see the audit invariant below).
 
 Mirroring by domain: `revit_mcp/clash.py` ⇄ `tools/clash_tools.py`. Each side has one
 registration entry point (`register_<domain>_routes(api)` / `register_<domain>_tools(mcp, revit_get, revit_post, revit_image=None)`).
@@ -175,9 +177,26 @@ model as errors.
 coerces exceptions to `"Error: …"` strings, so a bridge result may be `dict` or `str` — never
 index one directly.
 
-**Never `print()` in `main.py` or `bridge.py` under stdio transport** — it corrupts the protocol stream. The
+**Never `print()` in `main.py`, `bridge.py` or `audit.py` under stdio transport** — it corrupts the protocol stream. The
 one existing `print` is guarded to `--combined` mode. Revit-side logging goes through
 `logger = logging.getLogger(__name__)`; tool-side progress uses `await ctx.info(...)` guarded by `if ctx:`.
+`tests/unit/test_audit_stdio.py` enforces it: an AST check over `audit.py` and `bridge.py` (no `print`, no
+`sys.stdout`, no `StreamHandler`) and a real stdio session of `main.py` whose stdout must stay pure JSON-RPC.
+
+**Every call to Revit is audited on the CPython side (Phase 6).** `bridge._dispatch` hands every call that was
+sent to `audit.record_call` (GET, POST and image; `GET /status/` only inside `get_revit_status`; never the
+identity handshake, discovery probes or a refusal that sent nothing). The outcome comes from the provenance and
+the reply body, never from `format_response`. Schema 1 lives in the `audit.py` module docstring and
+`audit.SCHEMA_1_FIELDS`. The log is one JSONL file per server process under `%LOCALAPPDATA%\RevitMCP\audit`
+(`REVIT_MCP_AUDIT_DIR` overrides; never a share or the repository by default); segments roll forward instead of
+being renamed, and at start-up `audit.prune` deletes `audit-*.jsonl` files older than
+`REVIT_MCP_AUDIT_MAX_AGE_DAYS` (default 180) and then the oldest until the directory is within
+`REVIT_MCP_AUDIT_MAX_TOTAL_MB` (default 500, MiB). `main.py` injects the optional `user_request` parameter into
+every tool through `audit.install_audited_tools`, so a tool function never declares it and its `Args:` block does
+not list it. `format_response` appends `Audit: call_id <id>` for mutations and non-success outcomes. The shared
+secret is redacted in one place (`audit.redact_text`) and never reaches a file. A writer failure never changes a
+tool's result (one stderr line per process, naming only the exception class). A new route or tool needs nothing
+for the audit; unit tests isolate the directory through the `conftest.py` fixture.
 
 **All tool-facing dimensions are millimeters.** Routes convert to Revit's internal feet
 (`MM_TO_FEET = 1.0 / 304.8`). Any Revit-sourced name goes through `sanitize_string()` /

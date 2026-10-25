@@ -62,6 +62,48 @@ def _secret_line(response, revit_get):
             "RevitMCP, restart the assistant session, then fully restart Revit.".format(remote, local))
 
 
+def _permit_line(response):
+    """One line stating whether the Revit extension reports one-time permit enforcement."""
+    body = _body_of(response)
+    block = body.get("permit") if isinstance(body, dict) else None
+    if not isinstance(block, dict):
+        return ("One-time permits: the Revit extension does not report permit support (older than R5); "
+                "a direct HTTP mutation is not refused for lacking a permit.")
+    protocol = block.get("protocol")
+    if protocol is None:
+        return ("One-time permits: the Revit extension does not report permit support (older than R5); "
+                "a direct HTTP mutation is not refused for lacking a permit.")
+    return "One-time permits: the Revit extension enforces them (protocol {}).".format(protocol)
+
+
+async def _policy_line(revit_get):
+    """One approval-policy diagnostics line from the optional injected transport seam."""
+    reader = getattr(revit_get, "policy_status", None)
+    if not callable(reader):
+        return ""
+    try:
+        status = await reader(refresh=True)
+    except Exception:
+        return ""
+    if not isinstance(status, dict):
+        return ""
+    source = status.get("source")
+    version = status.get("hash")
+    if source is None and version is None and not status.get("blocked"):
+        return ""
+    line = "Approval policy: source {}, version {}.".format(source or "unknown", version or "unknown")
+    if status.get("blocked"):
+        return (line + " Every protected operation is refused because the base policy is invalid" +
+                (": {}.".format(status.get("blocked_reason")) if status.get("blocked_reason") else "."))
+    if status.get("operator_state") == "rejected":
+        diagnostic = status.get("diagnostic")
+        line += " Operator policy file not accepted (файл оператора не принят): rejected"
+        if diagnostic:
+            line += ": {}".format(diagnostic)
+        line += "."
+    return line
+
+
 def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
     """Register status-related tools"""
     _ = revit_post, revit_image  # Acknowledge unused parameters
@@ -96,7 +138,7 @@ def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
         was sent, the line says so and the verified-process line is the only
         statement of who answered.
 
-        The reply also carries three security blocks from the extension.
+        The reply also carries four security blocks from the extension.
         "secret" is whether the extension holds a shared secret plus its short
         fingerprint (8 hex characters of a SHA-256: it identifies the secret, it is
         not the secret). A line "Shared secret: ..." right after the status
@@ -109,7 +151,11 @@ def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
         restarted; unverifiable (for example a developer junction with no manifest)
         is reported but is not damage and blocks nothing. "bind" is
         loopback_only, exposed or unknown: exposed means Routes listens beyond this
-        machine, which is reported and degrades health but blocks nothing.
+        machine, which is reported and degrades health but blocks nothing. "permit"
+        names the one-time-permit protocol the extension enforces; its status line warns
+        when an older extension does not report it, because that extension still accepts
+        a direct HTTP mutation without a permit. A second status line names the active
+        approval-policy source and version and reports an invalid operator/base policy.
         "security_alerts" lists in plain words anything that needs action.
 
         Uses a 10-second HTTP timeout. Selected status first allows up to
@@ -129,9 +175,16 @@ def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
             options["target"] = target
         response = await revit_get("/status/", ctx, **options)
         text = format_response(response)
+        body = _body_of(response)
         secret_line = _secret_line(response, revit_get)
         if secret_line:
             text = "{}\n{}".format(text, secret_line)
+        permit_line = _permit_line(response)
+        if permit_line:
+            text = "{}\n{}".format(text, permit_line)
+        policy_line = await _policy_line(revit_get)
+        if policy_line:
+            text = "{}\n{}".format(text, policy_line)
         if target is None:
             configured = getattr(revit_get, "revit_target", None)
             if configured:

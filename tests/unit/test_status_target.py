@@ -75,7 +75,7 @@ def test_status_reports_target_when_payload_has_message():
 def test_status_unchanged_without_target_attribute():
     response = {"status": "active", "health": "healthy", "document_title": "M"}
     out = _run_status(_make_get(response, with_target=False))
-    assert out == format_response(response)
+    assert out == format_response(response) + "\n" + _old_permit_line()
     assert "MCP target" not in out
 
 
@@ -106,13 +106,19 @@ def _secret_lines(out):
     return [line for line in out.splitlines() if line.startswith("Shared secret:")]
 
 
+def _old_permit_line():
+    return ("One-time permits: the Revit extension does not report permit support (older than R5); "
+            "a direct HTTP mutation is not refused for lacking a permit.")
+
+
 def test_secret_line_same_secret_names_the_fingerprint():
     response = _status_body(secret={"configured": True, "fingerprint": _FP_REVIT})
     out = _run_status(_with_fingerprint(_make_get(response), lambda: _FP_REVIT))
     assert _secret_lines(out) == [
         "Shared secret: both halves hold the same secret (fingerprint aaaa1111)."]
     assert out.splitlines()[-1] == "MCP target: 127.0.0.1:48885"
-    assert out.splitlines().index(_secret_lines(out)[0]) == len(out.splitlines()) - 2
+    assert out.splitlines().index(_secret_lines(out)[0]) == len(out.splitlines()) - 3
+    assert out.splitlines()[-2] == _old_permit_line()
 
 
 def test_secret_line_halves_differ_names_both_and_the_fix():
@@ -154,7 +160,8 @@ def test_secret_line_extension_does_not_report():
 def test_secret_line_absent_when_neither_side_reports():
     out = _run_status(_make_get(_status_body()))
     assert _secret_lines(out) == []
-    assert out == format_response(_status_body()) + "\nMCP target: 127.0.0.1:48885"
+    assert out == (format_response(_status_body()) + "\n" + _old_permit_line() +
+                   "\nMCP target: 127.0.0.1:48885")
 
 
 def test_secret_line_for_a_503_text_reply():

@@ -1749,3 +1749,11 @@ def test_with_an_integrity_mismatch_a_mutation_is_423_before_any_side_effect(
     request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], route=key[1]), path=key[1])
     reply = _refused(world, key, request, 423)
     assert reply.data["files"] == ["revit_mcp/detail.py"]
+
+
+@pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
+def test_without_a_permit_a_mutation_is_403_before_any_side_effect(world, key):
+    request = types.SimpleNamespace(
+        data=enveloped_body(MUTATIONS[key], route=key[1], permit=False), path=key[1])
+    reply = _refused(world, key, request, 403)
+    assert reply.data["permit"] == "missing"

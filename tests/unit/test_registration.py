@@ -253,7 +253,10 @@ def test_no_revit_mcp_module_imports_another_revit_mcp_module():
     relative import is therefore no longer evidence of a violation on its own,
     and this checks the import's *target* instead.
     """
-    helpers = {"utils", "textutils", "registry", "identity", "trust", "integrity", "security"}
+    helpers = {
+        "utils", "textutils", "registry", "identity", "trust", "integrity", "security",
+        "permits",
+    }
     targets = re.compile(
         r"^from \.(\w+) import|^from revit_mcp\.(\w+) import|^\s*from \. import (\w+)",
         re.MULTILINE,

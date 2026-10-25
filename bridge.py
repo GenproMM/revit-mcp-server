@@ -140,6 +140,7 @@ from typing import Optional, Dict, Any, Union
 import approval
 import audit
 import permit
+import policy
 
 DEFAULT_REVIT_PORT = 48884  # Default pyRevit Routes port
 
@@ -845,6 +846,9 @@ revit_get.revit_target = REVIT_TARGET
 # Discovery facade (02-03): tools reach discovery through the injected callable,
 # never by importing this module, so the four-argument registrar stays fixed.
 revit_get.discover_targets = discover_targets
+# Approval status seam (Phase 7): status tools read it through the injected callable,
+# rather than importing this transport module.
+revit_get.policy_status = policy.status
 
 
 # The authorization seam (Phase 7). Production keeps approval.authorize; None means "no

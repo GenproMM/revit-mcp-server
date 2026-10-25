@@ -34,7 +34,7 @@ from revit_mcp import integrity as _integrity_module  # noqa: E402
 from revit_mcp import security as _security_module  # noqa: E402
 from revit_mcp import textutils as _textutils_module  # noqa: E402
 from revit_mcp import trust as _trust_module  # noqa: E402
-from gate_support import TEST_ROUTE, enveloped_body  # noqa: E402
+from gate_support import TEST_ROUTE, TEST_SESSION_TOKEN, configure_gate, enveloped_body  # noqa: E402
 from test_trust_listeners import TABLE as LISTENER_TABLE  # noqa: E402
 from test_trust_secret import VERDICT_TABLE  # noqa: E402
 
@@ -589,7 +589,7 @@ def test_dialect_security_imports_only_os_and_the_helper_siblings():
                 if isinstance(inner, ast.ImportFrom):
                     function_level.add(inner.module)
     assert absolute == set(["os"])
-    assert siblings == set(["integrity", "textutils", "trust"])
+    assert siblings == set(["identity", "integrity", "permits", "textutils", "trust"])
     # System.Net.NetworkInformation: the /status/ bind adapter (_dotnet_listeners, 05-07),
     # imported inside the function so CPython never needs it.
     assert function_level == set(["pyrevit", "System.Net.NetworkInformation"])
@@ -638,6 +638,9 @@ def _security_scenario(textutils, trust, security):
     real_json = textutils.json
     textutils.json = _IronPython3Json()
     saved_state = security._STATE
+    saved_token = security._process_token
+    saved_consumed = security.permits._CONSUMED
+    security.permits._CONSUMED = {}
     configured = {"secret": _TEST_SECRET,
                   "integrity": trust.unverifiable(trust.REASON_MANIFEST_MISSING)}
     mismatch = {"secret": _TEST_SECRET, "integrity": {
@@ -649,6 +652,7 @@ def _security_scenario(textutils, trust, security):
     try:
         for state in (None, configured, mismatch):
             security._STATE = state
+            security._process_token = lambda: TEST_SESSION_TOKEN
             for raw in bodies:
                 request = types.SimpleNamespace(data=raw, path=TEST_ROUTE)
                 refusal = security.gate_or_response(request)
@@ -659,6 +663,8 @@ def _security_scenario(textutils, trust, security):
     finally:
         textutils.json = real_json
         security._STATE = saved_state
+        security._process_token = saved_token
+        security.permits._CONSUMED = saved_consumed
     return rows
 
 

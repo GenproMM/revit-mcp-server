@@ -33,7 +33,9 @@ tests import this module directly.
 
 import os
 
+from . import identity
 from . import integrity
+from . import permits
 from . import textutils
 from . import trust
 
@@ -80,7 +82,7 @@ def status_block(port, listeners=None):
 
     Returns {"secret": {"configured", "fingerprint"}, "integrity": <the result
     initialize stored, or unverifiable/read_error when there is no usable state>,
-    "bind": <trust.classify_listeners verdict>}. The secret appears only as
+    "bind": <trust.classify_listeners verdict>, "permit": {"protocol"}}. The secret appears only as
     ``configured`` and its 8-hex SHA-256 fingerprint (D-08). ``listeners`` is a
     zero-argument callable returning (host text, port) pairs for ``port`` (default
     _dotnet_listeners); a raising callable or None reads as bind "unknown". A bind
@@ -101,12 +103,14 @@ def status_block(port, listeners=None):
             "secret": {"configured": fingerprint is not None, "fingerprint": fingerprint},
             "integrity": result,
             "bind": trust.classify_listeners(endpoints, port),
+            "permit": permits.status_info(),
         }
     except Exception:
         return {
             "secret": {"configured": False, "fingerprint": None},
             "integrity": trust.unverifiable(trust.REASON_READ_ERROR),
             "bind": trust.BIND_UNKNOWN,
+            "permit": permits.status_info(),
         }
 
 
@@ -121,17 +125,25 @@ def _raw_data(request):
     return getattr(request, "data", None)
 
 
+def _process_token():
+    """The current Revit process token for permit verification, or None; never raises."""
+    return identity.process_token()
+
+
 def gate_or_response(request):
     """None when the call may proceed, otherwise the routes response that refuses it.
 
     Order: no state gives 401 server_not_configured; then the shared secret
     (trust.check_secret, no compare of its own); then the integrity state, so a wrong
     secret is a 401 even when the integrity state is a mismatch (D-04); a verified
-    mismatch gives 423 naming the files. On success request.data is replaced by the
-    body without the reserved key, in the type it arrived in. An empty, non-JSON or
-    non-object body carries no envelope and is a 401 missing. Never raises: any
-    failure, a request whose data cannot be reassigned included, answers the fixed
-    HTTP 500 text of trust.gate_failure with no local, body or secret in it.
+    mismatch gives 423 naming the files; then one-time permit verification gives 403.
+    The permit binds the exact body text, route, process token, expiry and nonce and is
+    consumed only here, before a route sees the cleaned body. A process that can read
+    the shared secret can mint permits; this is an authorization boundary, not OS isolation.
+    On success request.data is replaced by the body without the reserved key, in the type
+    it arrived in. An empty, non-JSON or non-object body carries no envelope and is a 401
+    missing. Never raises: any failure, a request whose data cannot be reassigned included,
+    answers the fixed HTTP 500 text of trust.gate_failure with no local, body or secret in it.
     """
     try:
         state = _STATE
@@ -144,6 +156,10 @@ def gate_or_response(request):
             return _refusal(*trust.auth_failure(verdict))
         if state["integrity"].get("state") == trust.INTEGRITY_MISMATCH:
             return _refusal(*trust.integrity_failure(trust.mismatch_files(state["integrity"])))
+        permit_verdict = permits.check_and_consume(
+            raw, getattr(request, "path", None), state["secret"], _process_token())
+        if permit_verdict != permits.OK:
+            return _refusal(*permits.failure(permit_verdict))
         request.data = trust.clean_body(raw, payload)
         return None
     except Exception:

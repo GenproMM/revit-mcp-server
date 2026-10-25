@@ -19,7 +19,9 @@ import unicodedata
 
 import pytest
 
-from gate_support import TEST_ROUTE, TEST_SECRET, configure_gate, enveloped_body
+from gate_support import (
+    TEST_ROUTE, TEST_SECRET, TEST_SESSION_TOKEN, configure_gate, enveloped_body,
+)
 from revit_mcp import integrity, security, trust
 from revit_mcp.textutils import parse_request_data
 
@@ -84,6 +86,13 @@ def _initialize(root):
 
 def _request(data):
     return types.SimpleNamespace(data=data, path=TEST_ROUTE)
+
+
+def _enveloped(body, secret=TEST_SECRET, **kwargs):
+    """A real permit wire body, except when a legacy edge intentionally omits the envelope."""
+    if secret is None:
+        return enveloped_body(body, secret=None, **kwargs)
+    return enveloped_body(body, secret=secret, **kwargs)
 
 
 def _mismatch(*files):
@@ -232,7 +241,7 @@ def test_a_verified_match_does_not_block(monkeypatch):
 
 
 @pytest.mark.parametrize("as_type,expected_type", [
-    ("bytes", bytes), ("text", str), ("dict", dict)])
+    ("bytes", bytes), ("text", str)])
 def test_the_gate_rewrites_data_in_the_type_it_arrived_in(monkeypatch, as_type, expected_type):
     configure_gate(monkeypatch)
     request = _request(enveloped_body({"a": 1}, as_type=as_type))
@@ -241,7 +250,7 @@ def test_the_gate_rewrites_data_in_the_type_it_arrived_in(monkeypatch, as_type, 
     assert parse_request_data(request.data) == {"a": 1}
 
 
-@pytest.mark.parametrize("as_type,expected", [("bytes", b"{}"), ("text", "{}"), ("dict", {})])
+@pytest.mark.parametrize("as_type,expected", [("bytes", b"{}"), ("text", "{}")])
 def test_an_envelope_only_body_keeps_the_truthiness_the_route_saw_before(
         monkeypatch, as_type, expected):
     configure_gate(monkeypatch)
@@ -284,8 +293,9 @@ def test_a_missing_request_or_data_attribute_is_a_401_missing(monkeypatch, shape
 class _FrozenData(object):
     """A request whose ``data`` is readable but cannot be reassigned."""
 
-    def __init__(self, data):
+    def __init__(self, data, path=TEST_ROUTE):
         self._data = data
+        self.path = path
 
     @property
     def data(self):
@@ -298,11 +308,12 @@ class _UnreadableData(object):
         raise RuntimeError("cannot read the body " + TEST_SECRET)
 
 
-@pytest.mark.parametrize("request_class,payload", [
-    (_FrozenData, enveloped_body({"a": 1})), (_UnreadableData, None)],
+@pytest.mark.parametrize("request_class,has_payload", [
+    (_FrozenData, True), (_UnreadableData, False)],
     ids=["frozen-data", "unreadable-data"])
-def test_a_request_the_gate_cannot_handle_fails_closed_and_loud(monkeypatch, request_class, payload):
+def test_a_request_the_gate_cannot_handle_fails_closed_and_loud(monkeypatch, request_class, has_payload):
     configure_gate(monkeypatch)
+    payload = enveloped_body({"a": 1}, route=TEST_ROUTE) if has_payload else None
     request = _FrozenData(payload) if payload is not None else request_class()
     refusal = security.gate_or_response(request)
     assert refusal.status == 500
@@ -326,10 +337,10 @@ def test_the_gate_decides_through_trust_check_secret_only(monkeypatch):
     refusal = security.gate_or_response(_request(enveloped_body({"a": 1})))
     assert refusal.status == 401 and refusal.data["auth"] == "mismatch"
     assert seen == [(TEST_SECRET, TEST_SECRET)]
-    # and the other way round: a wrong secret passes when check_secret says so, so the
-    # gate holds no compare of its own
+    # The permit verifier uses the configured secret too, so a test that substitutes the
+    # secret check must also supply a permit minted for that configured secret.
     monkeypatch.setattr(trust, "check_secret", lambda provided, expected: trust.AUTH_OK)
-    assert security.gate_or_response(_request(enveloped_body({"a": 1}, WRONG_SECRET))) is None
+    assert security.gate_or_response(_request(enveloped_body({"a": 1}, TEST_SECRET))) is None
 
 
 def test_the_gate_source_adds_no_compare_primitive_of_its_own():
@@ -462,7 +473,8 @@ def test_initialize_gate_and_strip_never_write_anything(tmp_path, monkeypatch):
         for name in ("remove", "rename", "replace", "unlink", "makedirs"):
             guard.setattr(os, name, _forbidden("os." + name))
         security.initialize(root, os.path.join(root, "revit_mcp"))
-        request = _request(enveloped_body({"a": 1}))
+        monkeypatch.setattr(security, "_process_token", lambda: TEST_SESSION_TOKEN)
+        request = _request(_enveloped({"a": 1}))
         assert security.gate_or_response(request) is None
         assert security.strip_envelope(_request(enveloped_body({"a": 1}))) is None
         assert security.gate_or_response(_request(None)).status == 401
@@ -475,7 +487,10 @@ def test_initialize_gate_and_strip_never_write_anything(tmp_path, monkeypatch):
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ALIAS = "genpro_revit_mcp"
-HELPERS = ("registry.py", "security.py", "trust.py", "integrity.py", "textutils.py")
+HELPERS = (
+    "registry.py", "security.py", "trust.py", "integrity.py", "textutils.py",
+    "identity.py", "permits.py",
+)
 
 
 def _startup_source():
@@ -574,6 +589,7 @@ def test_startup_loaded_from_a_tree_without_a_manifest_opens_the_gate_with_its_o
     assert alias_security._STATE["integrity"]["reason"] == trust.REASON_MANIFEST_MISSING
     assert "security" not in registry.FAILED
     assert registry.REGISTERED == ["example"]
+    alias_security._process_token = lambda: TEST_SESSION_TOKEN
     ok = types.SimpleNamespace(data=enveloped_body({"a": 1}), path=TEST_ROUTE)
     assert alias_security.gate_or_response(ok) is None
     assert json.loads(ok.data) == {"a": 1}

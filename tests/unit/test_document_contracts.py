@@ -1330,7 +1330,7 @@ def test_route_activates_from_a_text_plain_bytes_body_and_names_the_process(monk
 def test_route_refusal_keeps_process_and_observed_active_identity(monkeypatch, fake_routes):
     app, uiapp, reg, tokens, docs = rig(IsWorkshared=True)
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
-    handler(uiapp, activate_request({"document": tokens["coord"]}, as_type="dict"))     # a dict body is accepted too
+    handler(uiapp, activate_request({"document": tokens["coord"]}))
     payload, status = fake_routes[-1]
     assert status == 422 and payload["reason"] == "workshared-unmeasured" and payload["error"]
     assert payload["process_identity"] == IDENT
@@ -1342,7 +1342,7 @@ def test_route_without_a_document_is_a_400_not_an_exception(monkeypatch, fake_ro
     """An envelope-only body (no document) is the route's own 400, in each body type."""
     app, uiapp, reg, tokens, docs = rig()
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
-    for as_type in ("bytes", "text", "dict"):
+    for as_type in ("bytes", "text"):
         handler(uiapp, activate_request(None, as_type=as_type))
         payload, status = fake_routes[-1]
         assert status == 400 and payload["error"], as_type

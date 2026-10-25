@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import re
+import sys
 import types
 
 import pytest
@@ -109,15 +110,20 @@ async def test_delete_is_confirmed_once_sent_once_and_the_revit_verifier_accepts
     assert envelope["permit"]["r"] == "/delete_elements/"
     assert envelope["permit"]["s"] == TOKEN_A
 
-    # The extension as it is before this phase: the gate is unchanged and strips the envelope.
-    configure_gate(monkeypatch)
-    gate_request = types.SimpleNamespace(data=content)
+    def make_response(data=None, status=200, headers=None):
+        return types.SimpleNamespace(status=status, data=data)
+
+    monkeypatch.setitem(sys.modules, "pyrevit", types.SimpleNamespace(
+        routes=types.SimpleNamespace(make_response=make_response)))
+    configure_gate(monkeypatch, session_token=TOKEN_A)
+    gate_request = types.SimpleNamespace(data=content, path="/delete_elements/")
     assert security.gate_or_response(gate_request) is None
     body = json.loads(gate_request.data.decode("utf-8"))
     assert "_mcp" not in body and body["element_ids"] == [101, 102]
 
-    assert verdict(sent[0], "/delete_elements/") == "ok"
-    assert verdict(sent[0], "/delete_elements/") == "replayed"
+    replay = security.gate_or_response(types.SimpleNamespace(
+        data=content, path="/delete_elements/"))
+    assert replay.status == 403 and replay.data["permit"] == "replayed"
 
 
 @pytest.mark.anyio

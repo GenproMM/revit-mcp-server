@@ -60,6 +60,20 @@ def initialize_process_identity():
     return token
 
 
+def process_token():
+    """The initialized process token as text, or None when it cannot be read; never raises.
+
+    This is the same owned AppDomain slot that get_process_identity reports. It is kept
+    small so the request gate can verify a permit before it accesses any Revit object.
+    """
+    try:
+        import System
+        token = System.AppDomain.CurrentDomain.GetData(_KEY)
+        return str(token) if token else None
+    except Exception:
+        return None
+
+
 def get_process_identity(revit_version):
     """Read the initialized token and actual bound primary RoutesServer port.
 

@@ -12,6 +12,47 @@ failure in here never breaks a tool call (D-18).
 Pieces: the per-call state (a contextvar set by the wrapper that
 install_audited_tools puts around every registered tool), the pure entry
 builder, and a queue-backed roll-forward JSONL writer.
+
+Schema 1
+--------
+One JSON object per line. SCHEMA_1_FIELDS lists every key this phase writes;
+ALWAYS_PRESENT_FIELDS the keys every entry carries (a None value means "not
+known", never "none happened"). All lengths count Python str code points.
+
+  ts, schema, call_id, tool       UTC time (ms), 1, the tool call's uuid4, tool name or null
+  route, route_arg, method        "/first_segment/", the tail after it (capped), GET or POST
+  mutation                        false only for GET and the seven open POST reads (D-03)
+  kind, http_status               the bridge's provenance kind and the reply's HTTP code
+  outcome                         one of OUTCOME_LABELS, from provenance and the reply's own
+                                  status, never from format_response (D-01, AUDIT-03)
+  reason                          rejected_*: the verdict word or refusal code (never a file list)
+  reply_status                    unrecognized only: the reply's raw top-level status or null
+  outcome_block_missing           true when a mutating 200/409/422 reply has no outcome block
+                                  (except ROUTES_WITHOUT_OUTCOME_BLOCK); otherwise absent
+  transaction_status, requested,  copied from the reply's outcome block whatever the HTTP code
+  succeeded, failed,              (a 500 after Commit() still shows Committed); succeeded keeps
+  revit_failures                  the first SUCCEEDED_MAX in order, failed the first FAILED_MAX as
+                                  {item, reason}, revit_failures the first REVIT_FAILURES_MAX
+  succeeded_count, failed_count   the true totals before capping
+  process, corroborated           the verified Revit process (pid, port, session_token,
+                                  revit_version), only for provenance kind received
+  requested_target                the {address, pid} the call asked for, whatever the kind
+  document                        {token, title, path} per D-09 or null; document.path is the
+                                  path Revit reports (doc.PathName): for a workshared local copy
+                                  that is the local file, and no route in this release reports
+                                  the central-model path (written as it is, not looked up)
+  document_source                 reply_document | documents_changed | request_argument |
+                                  handshake_active_title | none
+  document_role                   used (the route reported it) | addressed (named by the request
+                                  or the handshake, or /execute_code/) | null
+  documents_changed               the reply's list, reduced, first DOCUMENTS_CHANGED_MAX
+  observed_active_document        the reply's observation, kept apart from document
+  document_scope                  /execute_code/ only: the reply's notice (NOTICE_MAX)
+  cancelled                       true only for a send the client cancelled after it was sent
+  server_pid, duration_ms         the writing server process and the call's wall time
+
+Written by later plans (06-03): windows_user, args, args_truncated, code_length, code_sha256,
+user_request, user_request_missing, user_request_length, user_request_source.
 """
 
 import atexit
@@ -42,7 +83,7 @@ REDACTED = "[REDACTED]"
 
 # The POST routes that only read (D-03). A copy of revit_mcp/trust.py
 # OPEN_POST_READ_ROUTES: the payload ships no revit_mcp/ package, so this half
-# cannot import it. 06-02 pins the copy equal by test.
+# cannot import it. tests/unit/test_audit_entry.py pins the copy equal.
 OPEN_POST_READ_ROUTES = frozenset({
     "/document_summary/",
     "/document_levels/",
@@ -60,6 +101,65 @@ USER_REQUEST_DESCRIPTION = (
 )
 
 _OUTCOME_STATUSES = ("success", "partial", "failed", "rolled_back")
+
+OUTCOME_LABELS = (
+    "success", "partial", "failed", "rolled_back", "rejected_auth", "rejected_integrity",
+    "rejected_document", "error", "unknown", "no_reply", "unverified_reply", "unrecognized",
+)
+
+# The refusal codes of revit_mcp/identity.py (the document-* constants and
+# no-open-document), copied for the same reason as OPEN_POST_READ_ROUTES and pinned
+# equal by tests/unit/test_audit_entry.py. A bare 404 or 412 is not on this list: a 404
+# also means "element not found" on other routes.
+DOCUMENT_REFUSAL_CODES = frozenset({
+    "document-identity-unavailable",
+    "document-identity-ambiguous",
+    "document-active-unknown",
+    "document-selector-invalid",
+    "document-token-stale",
+    "document-closed",
+    "document-token-unknown",
+    "document-not-active",
+    "no-open-document",
+    "document-selector-required",
+    "document-registry-unavailable",
+})
+
+# The one gated POST route whose reply carries no outcome block (Phase 4 left
+# /activate_document/ without one on purpose). Every other mutating reply that lacks
+# the block is flagged, so a regression shows instead of being masked (D-08).
+ROUTES_WITHOUT_OUTCOME_BLOCK = frozenset({"/activate_document/"})
+
+# GET /status/ is logged only inside these tool calls. The process tools and the identity
+# handshake call /status/ through the bridge too; that is bridge housekeeping, not a call
+# the user's tool made, so it writes nothing (D-02, research Pitfall 8).
+AUDITED_STATUS_TOOLS = frozenset({"get_revit_status"})
+
+SUCCEEDED_MAX = 500
+FAILED_MAX = 100
+REVIT_FAILURES_MAX = 50
+REASON_MAX = 500
+DOCUMENTS_CHANGED_MAX = 20
+NOTICE_MAX = 500
+
+SCHEMA_1_FIELDS = (
+    "ts", "schema", "call_id", "tool", "route", "route_arg", "method", "mutation", "kind",
+    "http_status", "outcome", "reason", "reply_status", "outcome_block_missing",
+    "transaction_status", "requested", "succeeded", "succeeded_count", "failed", "failed_count",
+    "revit_failures", "process", "corroborated", "requested_target", "document",
+    "document_source", "document_role", "documents_changed", "observed_active_document",
+    "document_scope", "cancelled", "windows_user", "args", "args_truncated", "code_length",
+    "code_sha256", "user_request", "user_request_missing", "user_request_length",
+    "user_request_source", "server_pid", "duration_ms",
+)
+
+# 06-03 adds windows_user, args and the user_request fields to this tuple.
+ALWAYS_PRESENT_FIELDS = (
+    "ts", "schema", "call_id", "tool", "route", "route_arg", "method", "mutation", "kind",
+    "http_status", "outcome", "transaction_status", "requested", "succeeded", "succeeded_count",
+    "failed", "failed_count", "revit_failures", "process", "corroborated", "requested_target",
+    "document", "document_source", "document_role", "server_pid", "duration_ms",
+)
 
 
 # --------------------------------------------------------------- per-call state
@@ -180,33 +280,203 @@ def is_mutation(method: str, route: str) -> bool:
     return route not in OPEN_POST_READ_ROUTES
 
 
-def _outcome_label(kind, http_status, body, mutation):
+def _text(value, limit=REASON_MAX):
+    """A str copy of value cut to ``limit`` code points; None stays None. Never raises."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        try:
+            value = str(value)
+        except Exception:
+            return None
+    return value[:limit]
+
+
+def _scalar(value):
+    """An id, count or flag as it is; any other value as a capped string."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _text(value)
+
+
+def _outcome(kind, http_status, body, mutation):
+    """(label, reason, reply_status) in the fixed precedence of D-08 and AUDIT-03.
+
+    Provenance kind first, then HTTP 401/423, then a document refusal code, then the
+    reply's own top-level status, then any other 4xx/5xx as error, then a completed
+    read as success, else unrecognized. The label is never derived from the rendered
+    text, from the request's intent or from recomputed counts. ``kind`` None (a call
+    with no provenance) counts as received.
+    """
     if kind == "unknown":
-        return "unknown"
+        return "unknown", None, None
     if kind == "no-reply":
-        return "no_reply"
+        return "no_reply", None, None
     if kind == "unverified-reply":
-        return "unverified_reply"
-    status = body.get("status") if isinstance(body, dict) else None
-    if status in _OUTCOME_STATUSES:
-        return status
+        return "unverified_reply", None, None
+    if not isinstance(body, dict):
+        body = {}
+    if http_status == 401:
+        return "rejected_auth", _text(body.get("auth")), None
+    if http_status == 423:
+        return "rejected_integrity", _text(body.get("integrity")), None
+    code = body.get("error_code")
+    if isinstance(code, str) and code in DOCUMENT_REFUSAL_CODES:
+        return "rejected_document", code, None
+    status = body.get("status")
+    if isinstance(status, str) and status in _OUTCOME_STATUSES:
+        return status, None, None
     if isinstance(http_status, int) and http_status >= 400:
-        return "error"
+        return "error", None, None
     if http_status == 200 and not mutation:
-        return "success"
-    return "unrecognized"
+        return "success", None, None
+    return "unrecognized", None, (_text(status) if isinstance(status, str) else None)
 
 
-def build_entry(call, method, endpoint, provenance, body, *, duration_ms, now, server_pid):
+def _outcome_fields(body):
+    """The Phase 4 outcome block's fields, copied whatever the HTTP status.
+
+    A 500 after Commit() still carries transaction_status Committed and its succeeded
+    items: the model changed. Only these named keys are read; nothing else of the body
+    enters the entry (D-11, D-13). Without a block every list and count is None.
+    """
+    fields = {"transaction_status": None, "requested": None, "succeeded": None,
+              "succeeded_count": None, "failed": None, "failed_count": None,
+              "revit_failures": None}
+    if not isinstance(body, dict):
+        return fields
+    block = body.get("outcome")
+    block = block if isinstance(block, dict) else None
+    status = block.get("transaction_status") if block is not None else None
+    if status is None:
+        status = body.get("transaction_status")
+    fields["transaction_status"] = _text(status)
+    if block is None:
+        return fields
+    requested = block.get("requested")
+    fields["requested"] = requested if isinstance(requested, int) and not isinstance(
+        requested, bool) else None
+    succeeded = block.get("succeeded")
+    succeeded = succeeded if isinstance(succeeded, list) else []
+    fields["succeeded"] = [_scalar(item) for item in succeeded[:SUCCEEDED_MAX]]
+    fields["succeeded_count"] = len(succeeded)
+    failed = block.get("failed")
+    failed = failed if isinstance(failed, list) else []
+    reduced = []
+    for entry in failed[:FAILED_MAX]:
+        if isinstance(entry, dict):
+            reduced.append({"item": _scalar(entry.get("item")), "reason": _text(entry.get("reason"))})
+        else:
+            reduced.append({"item": _scalar(entry), "reason": None})
+    fields["failed"] = reduced
+    fields["failed_count"] = len(failed)
+    failures = block.get("revit_failures")
+    failures = failures if isinstance(failures, list) else []
+    fields["revit_failures"] = [_text(item) for item in failures[:REVIT_FAILURES_MAX]]
+    return fields
+
+
+def _triplet(descriptor):
+    """{token, title, path} of a document descriptor, or None when it names nothing.
+
+    Revit stores the token under the key "document" (identity._descriptor); the entry
+    calls it token. Never raises.
+    """
+    if not isinstance(descriptor, dict):
+        return None
+    token = descriptor.get("document")
+    if not isinstance(token, str):
+        token = descriptor.get("token")
+    title, path = descriptor.get("title"), descriptor.get("path")
+    triplet = {"token": _text(token) if isinstance(token, str) else None,
+               "title": _text(title) if isinstance(title, str) else None,
+               "path": _text(path) if isinstance(path, str) else None}
+    if triplet["token"] is None and triplet["title"] is None and triplet["path"] is None:
+        return None
+    return triplet
+
+
+def _changed_entry(descriptor):
+    entry = _triplet(descriptor) or {"token": None, "title": None, "path": None}
+    for key in ("role", "changed", "saved", "is_family_document"):
+        entry[key] = _scalar(descriptor.get(key))
+    return entry
+
+
+def document_of(route, body, args, active_title_hint):
+    """(document, document_source, document_role, extras) by the D-09 priority.
+
+    The reply's own document descriptor, then its documents_changed list (the project
+    entry first), then the tool's document argument, then the active title the
+    handshake reported just before the send, then nothing. Only the first two are
+    attributed by the route; the others are labelled lesser sources with role
+    "addressed". /execute_code/ is always "addressed" and never gets a changed
+    document (Phase 2 D-15). ``extras`` holds documents_changed,
+    observed_active_document and document_scope when the reply carries them.
+    """
+    body = body if isinstance(body, dict) else {}
+    args = args if isinstance(args, dict) else {}
+    execute_code = route == "/execute_code/"
+    changed = body.get("documents_changed")
+    entries = [item for item in changed if isinstance(item, dict)] if (
+        isinstance(changed, list) and not execute_code) else None
+    extras = {}
+    if entries is not None:
+        extras["documents_changed"] = [_changed_entry(item)
+                                       for item in entries[:DOCUMENTS_CHANGED_MAX]]
+    observed = _triplet(body.get("observed_active_document"))
+    if observed is not None:
+        extras["observed_active_document"] = observed
+    if execute_code and isinstance(body.get("document_scope"), str):
+        extras["document_scope"] = _text(body["document_scope"], NOTICE_MAX)
+
+    document, source, role = _triplet(body.get("document")), "reply_document", "used"
+    if document is None:
+        chosen = None
+        if entries:
+            chosen = next((item for item in entries if item.get("role") == "project"), None)
+            if chosen is None:
+                chosen = next((item for item in entries if _triplet(item) is not None), None)
+        document, source, role = _triplet(chosen), "documents_changed", "used"
+    if document is None:
+        selector = args.get("document")
+        if isinstance(selector, str) and selector:
+            document = {"token": _text(selector), "title": None, "path": None}
+        source, role = "request_argument", "addressed"
+    if document is None:
+        if isinstance(active_title_hint, str) and active_title_hint:
+            document = {"token": None, "title": _text(active_title_hint), "path": None}
+        source, role = "handshake_active_title", "addressed"
+    if document is None:
+        source, role = "none", None
+    if execute_code and document is not None:
+        role = "addressed"
+    return document, source, role, extras
+
+
+def _outcome_block_missing(mutation, kind, http_status, route, body):
+    if not mutation or kind not in (None, "received"):
+        return False
+    if http_status not in (200, 409, 422) or route in ROUTES_WITHOUT_OUTCOME_BLOCK:
+        return False
+    return not (isinstance(body, dict) and isinstance(body.get("outcome"), dict))
+
+
+def build_entry(call, method, endpoint, provenance, body, *, duration_ms, now, server_pid,
+                active_title_hint=None, cancelled=False):
     """One audit entry as a dict, or None for a call that never left this process (D-02).
 
-    Pure: no I/O and no clock. ``provenance`` is the bridge's meta dict, ``body``
-    the parsed reply object (or None). The outcome is read from the reply's own
-    status, never guessed from rendered text.
+    Pure: no I/O, no clock, no environment. ``provenance`` is the bridge's meta dict,
+    ``body`` the parsed reply object (or None). The outcome is the reply's own
+    statement under a fixed precedence (see _outcome), never guessed from rendered
+    text. Only named fields of the body are copied: no message or error text, no 423
+    file list, no read results.
     """
     kind = provenance.get("kind")
     if kind == "not-sent":
         return None
+    received = kind in (None, "received")
+    reply = body if received and isinstance(body, dict) else None
     route, route_arg = route_parts(endpoint)
     mutation = is_mutation(method, route)
     http_status = provenance.get("http_status")
@@ -217,7 +487,16 @@ def build_entry(call, method, endpoint, provenance, body, *, duration_ms, now, s
                    "revit_version": process.get("revit_version")}
     else:
         process = None
-    return {
+    requested_target = provenance.get("requested")
+    if isinstance(requested_target, dict):
+        requested_target = {"address": requested_target.get("address"),
+                            "pid": requested_target.get("pid")}
+    else:
+        requested_target = None
+    label, reason, reply_status = _outcome(kind, http_status, reply, mutation)
+    document, document_source, document_role, extras = document_of(
+        route, reply, call.args, active_title_hint)
+    entry = {
         "ts": now.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "schema": SCHEMA_VERSION,
         "call_id": call.call_id,
@@ -228,12 +507,29 @@ def build_entry(call, method, endpoint, provenance, body, *, duration_ms, now, s
         "mutation": mutation,
         "kind": kind,
         "http_status": http_status,
-        "outcome": _outcome_label(kind, http_status, body, mutation),
+        "outcome": label,
+    }
+    if reason is not None:
+        entry["reason"] = reason
+    if label == "unrecognized":
+        entry["reply_status"] = reply_status
+    if _outcome_block_missing(mutation, kind, http_status, route, reply):
+        entry["outcome_block_missing"] = True
+    entry.update(_outcome_fields(reply))
+    entry.update({
         "process": process,
         "corroborated": provenance.get("corroborated"),
-        "server_pid": server_pid,
-        "duration_ms": duration_ms,
-    }
+        "requested_target": requested_target,
+        "document": document,
+        "document_source": document_source,
+        "document_role": document_role,
+    })
+    entry.update(extras)
+    if cancelled is True:
+        entry["cancelled"] = True
+    entry["server_pid"] = server_pid
+    entry["duration_ms"] = duration_ms
+    return entry
 
 
 def _type_name(value):
@@ -371,11 +667,13 @@ def _writer() -> logging.Logger:
         return _WRITER.logger
 
 
-def record_call(call, method, endpoint, provenance, body, *, duration_ms, secret):
+def record_call(call, method, endpoint, provenance, body, *, duration_ms, secret,
+                active_title_hint=None, cancelled=False):
     """Write one entry for a finished bridge call; return the entry, or None. Never raises (D-18)."""
     try:
         entry = build_entry(call, method, endpoint, provenance, body, duration_ms=duration_ms,
-                            now=datetime.now(timezone.utc), server_pid=os.getpid())
+                            now=datetime.now(timezone.utc), server_pid=os.getpid(),
+                            active_title_hint=active_title_hint, cancelled=cancelled)
         if entry is None:
             return None
         # The message is the finished line: QueueHandler would stringify a dict.

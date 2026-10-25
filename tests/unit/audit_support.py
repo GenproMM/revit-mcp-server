@@ -122,6 +122,19 @@ def release_machine():
         states.clear()
 
 
+def _segment_order(path):
+    """(writer stem, segment number): "<stem>.jsonl" is segment 1, "<stem>.0002.jsonl" the next.
+
+    A plain name sort would put ".0002.jsonl" before ".jsonl", so the first segment of a
+    writer would read last.
+    """
+    stem = os.path.basename(path)[:-len(".jsonl")]
+    head, dot, tail = stem.rpartition(".")
+    if dot and tail.isdigit():
+        return head, int(tail)
+    return stem, 1
+
+
 def read_entries(directory=None):
     """Flush the writer, then return every audit entry in the directory, oldest file first.
 
@@ -130,7 +143,7 @@ def read_entries(directory=None):
     assert audit.flush(), "audit writer did not drain"
     directory = directory or os.environ[audit.AUDIT_DIR_ENV]
     entries = []
-    for path in sorted(glob.glob(os.path.join(directory, "audit-*.jsonl"))):
+    for path in sorted(glob.glob(os.path.join(directory, "audit-*.jsonl")), key=_segment_order):
         with open(path, "rb") as handle:
             data = handle.read()
         assert b"\r\n" not in data, path

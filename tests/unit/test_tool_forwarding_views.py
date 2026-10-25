@@ -104,7 +104,7 @@ TASK_TWO_TOOLS = {
     "open_model": _row(
         "worksharing", "file_open", "POST", "/open_model/",
         ["file_path", "detach", "close_worksets_matching", "activate", "audit", "local_path",
-         "overwrite_local"],
+         "overwrite_local", "existing_local"],
         {"file_path": "C:/Models/Tower.rvt"}),
 }
 
@@ -424,22 +424,76 @@ def test_list_model_worksets_keeps_its_default_workset_filter_and_forwards_the_t
 
 def test_open_model_is_process_level_and_sends_the_exact_target_and_no_document_token():
     text, calls = run_tool("open_model", target=PROCESS_SELECTOR)
+    # 261025-ld5: a central opens as a local copy by default; the body always names the
+    # existing-copy mode and pairs it with overwrite_local=False so an extension that has
+    # not been restarted (old default overwrite_local=True) refuses instead of deleting.
+    # close_worksets_matching is absent so the route knows the caller took the default.
     assert calls == [("POST", "/open_model/",
-                      {"file_path": "C:/Models/Tower.rvt", "detach": "preserve", "activate": True,
-                       "audit": False, "overwrite_local": True,
-                       "close_worksets_matching": ["__ALL_USER_WORKSETS__"]},
+                      {"file_path": "C:/Models/Tower.rvt", "detach": "none", "activate": True,
+                       "audit": False, "existing_local": "timestamp", "overwrite_local": False},
                       {"target": PROCESS_SELECTOR})]
     assert "document" not in calls[0][2]
+    assert "close_worksets_matching" not in calls[0][2]
 
 
 def test_open_model_forwards_its_own_options_unchanged_including_activate_false():
     text, calls = run_tool("open_model", detach="none", activate=False, audit=True,
-                           local_path="C:/Local/Tower_user.rvt", overwrite_local=False,
+                           local_path="C:/Local/Tower_user.rvt", existing_local="error",
                            close_worksets_matching=["#_RVT_LINK"], target=PROCESS_SELECTOR)
     assert calls == [("POST", "/open_model/",
                       {"file_path": "C:/Models/Tower.rvt", "detach": "none", "activate": False,
-                       "audit": True, "overwrite_local": False, "local_path": "C:/Local/Tower_user.rvt",
+                       "audit": True, "existing_local": "error", "overwrite_local": False,
+                       "local_path": "C:/Local/Tower_user.rvt",
                        "close_worksets_matching": ["#_RVT_LINK"]}, {"target": PROCESS_SELECTOR})]
+
+
+def test_open_model_explicit_detach_modes_are_forwarded_unchanged():
+    for detach in ("preserve", "discard"):
+        _, calls = run_tool("open_model", detach=detach, target=PROCESS_SELECTOR)
+        assert calls[0][2]["detach"] == detach
+
+
+@pytest.mark.parametrize("kwargs, mode, flag", [
+    ({"overwrite_local": True}, "overwrite", True),
+    ({"overwrite_local": False}, "error", False),
+    ({"existing_local": "overwrite"}, "overwrite", True),
+    ({"existing_local": "TimeStamp"}, "timestamp", False),
+    ({"existing_local": "overwrite", "overwrite_local": True}, "overwrite", True),
+])
+def test_open_model_maps_the_legacy_overwrite_flag_and_always_pairs_it_with_existing_local(
+        kwargs, mode, flag):
+    _, calls = run_tool("open_model", target=PROCESS_SELECTOR, **kwargs)
+    assert calls[0][2]["existing_local"] == mode
+    assert calls[0][2]["overwrite_local"] is flag
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"existing_local": "bogus"},
+    {"existing_local": "timestamp", "overwrite_local": True},
+    {"existing_local": "overwrite", "overwrite_local": False},
+])
+def test_open_model_refuses_an_invalid_or_conflicting_existing_local_without_sending(kwargs):
+    text, calls = run_tool("open_model", target=PROCESS_SELECTOR, **kwargs)
+    assert calls == []
+    assert "existing_local" in text
+
+
+def test_open_model_forwards_an_explicit_all_worksets_sentinel_as_given():
+    _, calls = run_tool("open_model", close_worksets_matching=["__ALL_USER_WORKSETS__"],
+                        target=PROCESS_SELECTOR)
+    assert calls[0][2]["close_worksets_matching"] == ["__ALL_USER_WORKSETS__"]
+
+
+def test_open_model_docstring_states_the_local_copy_contract():
+    tools, _ = register_module("worksharing")
+    lowered = normalized(tools["open_model"].__doc__)
+    for phrase in ("new local copy", "create new local", "yyyymmdd_hhmmss", "_backup",
+                   "nothing is deleted", 'existing_local="overwrite"',
+                   "retries once", "close_worksets_matching is never retried",
+                   "worksets_applied", "renamed_existing_local", "fallback_workset",
+                   "fallback_reason", "get_revit_status"):
+        assert phrase in lowered, phrase
+    assert "partial" not in lowered and "rolled_back" not in lowered
 
 
 def test_open_model_reports_the_document_the_reply_names_not_the_requested_path():

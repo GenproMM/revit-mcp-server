@@ -316,6 +316,124 @@ def describe_broken_path(path):
     )
 
 
+# ---------------------------------------------------------------- open_model local copies
+#
+# Pure decisions behind open_model's defaults (quick task 261025-ld5). A route module
+# cannot be imported under CPython, so the naming, mode resolution and workset-name
+# matching live here where they can be unit tested. Paths are cut by hand at the last
+# "/" or "\" instead of through os.path so Windows, UNC and forward-slash inputs behave
+# the same under CPython on any OS and under IronPython.
+
+# The text "оси и уровни" (Russian: axes and levels), lower case, written as \u escapes.
+AXES_LEVELS_WORKSET_MARKER = "\u043e\u0441\u0438 \u0438 \u0443\u0440\u043e\u0432\u043d\u0438"
+
+_EXISTING_LOCAL_MODES = ("error", "overwrite", "timestamp")
+
+
+def local_copy_stamp(moment):
+    """Return the date-time stamp YYYYMMDD_HHMMSS for a datetime (zero padded, locale free).
+
+    ASSUMED to match Revit's own "Append timestamp to existing copy" naming; the live
+    check in the quick-task summary compares it against Revit's dialog.
+    """
+    return "{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}".format(
+        moment.year, moment.month, moment.day, moment.hour, moment.minute, moment.second)
+
+
+def _split_local_path(path):
+    """Return (directory including its trailing separator or "", base name)."""
+    cut = max(path.rfind("/"), path.rfind("\\"))
+    return path[:cut + 1], path[cut + 1:]
+
+
+def _split_stem(base):
+    """Return (stem, extension); the extension is kept only for ".rvt" in any case."""
+    if base.lower().endswith(".rvt"):
+        return base[:-4], base[-4:]
+    return base, ""
+
+
+def local_backup_dir(local_path):
+    """Return the Revit "<stem>_backup" folder that belongs to a local copy."""
+    directory, base = _split_local_path(local_path)
+    stem, _ = _split_stem(base)
+    return directory + stem + "_backup"
+
+
+def stamped_local_paths(local_path, stamp, exists, limit=100):
+    """Return (new .rvt path, new backup folder) for renaming an existing local copy.
+
+    The new stem is "<stem>_<stamp>", then "<stem>_<stamp>_2", "_3", ... for the first
+    candidate where exists() is False for BOTH the file and its backup folder. Never
+    returns the input path. Returns (None, None) when every candidate up to ``limit``
+    is taken.
+    """
+    directory, base = _split_local_path(local_path)
+    stem, extension = _split_stem(base)
+    for n in range(1, limit + 1):
+        new_stem = "{}_{}".format(stem, stamp)
+        if n >= 2:
+            new_stem = "{}_{}".format(new_stem, n)
+        new_rvt = directory + new_stem + extension
+        new_backup = directory + new_stem + "_backup"
+        if new_rvt == local_path:
+            continue
+        if not exists(new_rvt) and not exists(new_backup):
+            return new_rvt, new_backup
+    return None, None
+
+
+def resolve_existing_local_mode(existing_local, overwrite_local):
+    """Resolve open_model's existing_local / legacy overwrite_local into (mode, error).
+
+    mode is "timestamp" (default), "overwrite" or "error". Given existing_local wins and
+    a given overwrite_local must agree with it (equal to mode == "overwrite"). Without
+    existing_local the legacy flag maps true -> overwrite, false -> error. Kept in step
+    with _resolve_existing_local in tools/worksharing_tools.py (the halves share no
+    interpreter).
+    """
+    allowed = ", ".join(_EXISTING_LOCAL_MODES)
+    if overwrite_local is not None and not isinstance(overwrite_local, bool):
+        return None, "overwrite_local must be true or false"
+    if existing_local is None:
+        if overwrite_local is None:
+            return "timestamp", None
+        return ("overwrite" if overwrite_local else "error"), None
+    if not isinstance(existing_local, _TEXT_TYPE):
+        return None, "existing_local must be one of: {}".format(allowed)
+    mode = existing_local.strip().lower()
+    if mode not in _EXISTING_LOCAL_MODES:
+        return None, "existing_local must be one of: {}".format(allowed)
+    if overwrite_local is not None and overwrite_local != (mode == "overwrite"):
+        return None, ("existing_local={} conflicts with overwrite_local={}; "
+                      "overwrite_local is deprecated, pass only existing_local").format(
+                          mode, "true" if overwrite_local else "false")
+    return mode, None
+
+
+def _normalise_workset_name(name):
+    return " ".join(name.lower().replace("_", " ").split())
+
+
+def pick_axes_levels_workset(names):
+    """Return the workset name to keep open in the retry, or None.
+
+    Matching is case-insensitive, treats "_" as a space and collapses whitespace; the
+    marker must be a substring. An exact normalised match wins, otherwise the first
+    containing name in input order.
+    """
+    first = None
+    for name in names:
+        if not name or not isinstance(name, _TEXT_TYPE):
+            continue
+        normal = _normalise_workset_name(name)
+        if normal == AXES_LEVELS_WORKSET_MARKER:
+            return name
+        if first is None and AXES_LEVELS_WORKSET_MARKER in normal:
+            first = name
+    return first
+
+
 # ---------------------------------------------------------------- honest outcomes
 #
 # One schema and one classifier for what a mutating route reports (phase 4; D-03,

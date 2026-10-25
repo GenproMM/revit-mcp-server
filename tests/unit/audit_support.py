@@ -6,6 +6,9 @@ import base64
 import glob
 import json
 import os
+import threading
+import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 
@@ -155,3 +158,74 @@ def read_entries(directory=None):
             assert isinstance(entry, dict), raw
             entries.append(entry)
     return entries
+
+
+class FakeRevitServer(object):
+    """An in-process fake Revit on a loopback port, for a real subprocess to talk to.
+
+    Its identity PID is the test process, so the real ``netstat`` listener snapshot and the
+    identity handshake of a server subprocess accept it: the LISTENING owner of the port is
+    this process. ``selector`` addresses it explicitly (never default discovery).
+    Windows only (netstat); use as a context manager.
+    """
+
+    def __init__(self):
+        self.token = str(uuid.uuid4())
+        self.identity = None
+        self.selector = None
+        self.port = None
+        self._server = None
+        self._thread = None
+
+    def __enter__(self):
+        owner = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.0"
+
+            def log_message(self, *_args):
+                pass
+
+            def _send(self, status, payload):
+                data = json.dumps(payload).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self):
+                if self.path.rstrip("/").endswith("/status"):
+                    self._send(200, {"status": "active", "document_title": "Fake",
+                                     "process_identity": owner.identity})
+                else:
+                    self._send(404, {"error": "not found"})
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                if self.path.rstrip("/").endswith("/execute_code"):
+                    self._send(200, {
+                        "status": "success",
+                        "outcome": {"transaction_status": "Committed", "requested": None,
+                                    "succeeded": [], "failed": [], "revit_failures": []},
+                        "document_scope": "fake scope notice",
+                        "process_identity": owner.identity})
+                else:
+                    self._send(404, {"error": "not found"})
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._server.daemon_threads = True
+        self.port = self._server.server_address[1]
+        self.identity = {"pid": os.getpid(), "actual_port": self.port,
+                         "session_token": self.token, "revit_version": "2024"}
+        self.selector = bridge._selector_for({"host": "127.0.0.1", "port": self.port,
+                                              "pid": os.getpid(), "session_token": self.token})
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc):
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(5)
+        return False

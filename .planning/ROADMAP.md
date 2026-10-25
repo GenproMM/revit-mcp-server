@@ -285,7 +285,7 @@ Plans:
 
 **Note (planning, 2026-10-25):** per 06-CONTEXT D-02 every sent Revit call is logged (reads included, with a `mutation` flag), not only mutations; `revit_mcp/` is not changed in this phase (D-06).
 
-**Plans:** 4/7 plans executed
+**Plans:** 5/7 plans executed
 
 Plans:
 **Wave 1**
@@ -306,7 +306,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 06-05-PLAN.md — Rotation and start-up retention, held readers, two incarnations and two server processes, never-break writer; stdio session stays clean; docs
+- [x] 06-05-PLAN.md — Rotation and start-up retention, held readers, two incarnations and two server processes, never-break writer; stdio session stays clean; docs
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -353,7 +353,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Secret gate and payload integrity (unit-verified) | 9/9 | Complete    | 2026-10-23 |
 | 4. Honest outcomes on every mutating route | 11/11 | Complete    | 2026-10-23 |
 | 5. Live secret gate and integrity enforcement | 16/16 | Complete    | 2026-10-25 |
-| 6. Structured audit log of true outcomes | 4/7 | In Progress|  |
+| 6. Structured audit log of true outcomes | 5/7 | In Progress|  |
 | 7. Repository-owned mutation safety and human approval | 0/TBD | Not planned | - |
 
 ## Backlog

@@ -29,10 +29,12 @@ Nothing here touches Revit.
 """
 
 import asyncio
+import datetime
 import importlib
 import inspect
 import json
 import math
+import os
 import sys
 import types
 from pathlib import Path
@@ -250,8 +252,9 @@ class RouteApplication(object):
         """Open without activating: what Revit opened is world.open_plan, not ``path``."""
         w = self._world
         w.open_calls.append(("open", path, options))
-        if w.open_error:
-            raise RuntimeError(w.open_error)
+        error = w.next_open_error()
+        if error:
+            raise RuntimeError(error)
         if w.open_returns_none:
             return None
         title, actual = w.open_plan
@@ -277,8 +280,9 @@ class RouteUIApp(object):
     def OpenAndActivateDocument(self, path, options, flag):
         w = self._world
         w.open_calls.append(("activate", path, options))
-        if w.open_error:
-            raise RuntimeError(w.open_error)
+        error = w.next_open_error()
+        if error:
+            raise RuntimeError(error)
         if w.open_returns_none:
             return None
         title, actual = w.open_plan
@@ -299,6 +303,7 @@ class World(object):
         self.break_start = set()
         self.open_calls = []
         self.open_error = None
+        self.open_errors = []
         self.open_returns_none = False
         self.open_plan = ("Gamma", "C:/Models/Actual.rvt")
         self.app = RouteApplication(self)
@@ -306,6 +311,12 @@ class World(object):
         self.injected = InjectedDocument(self)
         self.registry = identity.DocumentRegistry()
         self.db = None
+
+    def next_open_error(self):
+        """A queued per-attempt error (None entry = succeed), else the standing open_error."""
+        if self.open_errors:
+            return self.open_errors.pop(0)
+        return self.open_error
 
     def record(self, kind, doc, detail=None):
         label = getattr(doc, "label", "?") if isinstance(doc, _Touchable) else "?"
@@ -1313,7 +1324,7 @@ def test_open_model_keeps_the_workset_aware_opening_untouched(world, model_file)
     config = db.WorksetConfiguration.return_value
     info = types.SimpleNamespace(Name="Workset1", Id=MagicMock(name="WorksetId"))
     db.WorksharingUtils = types.SimpleNamespace(GetUserWorksetInfo=lambda model_path: [info])
-    reply = open_model(world, {"file_path": model_file})
+    reply = open_model(world, {"file_path": model_file, "detach": "preserve"})
     assert reply.status == 200, reply.data
     options.SetOpenWorksetsConfiguration.assert_called_once_with(config)
     config.Close.assert_called_once()
@@ -1413,6 +1424,295 @@ def test_open_model_validation_and_missing_file_replies_carry_no_outcome(world, 
     assert absent.status == 404 and "outcome" not in absent.data
     bad = open_model(world, {"file_path": str(tmp_path), "detach": "sideways"})
     assert "outcome" not in bad.data
+
+
+# ------------------------------------------- open_model: local copy by default (261025-ld5)
+
+
+# The Russian "axes and levels" workset name, written as \u escapes so this file stays ASCII.
+AXES = "\u041e\u0441\u0438 \u0438 \u0443\u0440\u043e\u0432\u043d\u0438"
+STAMP_MOMENT = datetime.datetime(2026, 10, 25, 9, 5, 3)
+
+
+def workshared_world(world, names):
+    """A fake workshared central: workset names, CreateNewLocal that writes b"new", and a
+    ModelPath that is the path itself. Returns (OpenOptions instance, WorksetConfiguration
+    instance). Tests that reach the local-copy path must always pass local_path under tmp_path."""
+    db = world.db
+    db.OpenOptions = MagicMock(name="OpenOptions")
+    db.WorksetConfiguration = MagicMock(name="WorksetConfiguration")
+    infos = [types.SimpleNamespace(Name=name, Id=MagicMock(name="WorksetId:" + name))
+             for name in names]
+    world.created_locals = []
+
+    def create_new_local(central, local):
+        world.created_locals.append((central, local))
+        with open(local, "wb") as handle:
+            handle.write(b"new")
+
+    db.WorksharingUtils = types.SimpleNamespace(
+        GetUserWorksetInfo=lambda model_path: list(infos), CreateNewLocal=create_new_local)
+    db.ModelPathUtils = types.SimpleNamespace(
+        ConvertUserVisiblePathToModelPath=lambda path: path)
+    world.workset_infos = infos
+    return db.OpenOptions.return_value, db.WorksetConfiguration.return_value
+
+
+def pin_clock(monkeypatch, world):
+    handler_of(world, *OPEN)  # loads revit_mcp.worksharing
+    module = sys.modules["revit_mcp.worksharing"]
+    monkeypatch.setattr(module, "_now", lambda: STAMP_MOMENT)
+
+
+@pytest.fixture
+def local_target(tmp_path):
+    return str(tmp_path / "local" / "Requested_u.rvt")
+
+
+def make_existing_local(tmp_path, with_backup=True):
+    folder = tmp_path / "local"
+    folder.mkdir()
+    (folder / "Requested_u.rvt").write_bytes(b"old")
+    if with_backup:
+        backup = folder / "Requested_u_backup"
+        backup.mkdir()
+        (backup / "f.dat").write_bytes(b"x")
+    return folder
+
+
+def test_open_model_defaults_to_a_new_local_copy_of_a_workshared_central(
+        world, model_file, local_target):
+    options, _ = workshared_world(world, ["Workset1"])
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target})
+    assert reply.status == 200, reply.data
+    assert world.created_locals == [(model_file, local_target)]
+    assert world.open_calls[0][1] == local_target
+    data = reply.data
+    assert data["detach"] == "none" and data["requested_detach"] == "none"
+    assert data["is_local_copy"] is True and data["local_path"] == local_target
+    assert data["existing_local"] == "timestamp"
+    assert data["renamed_existing_local"] is None
+    assert data["replaced_existing_local"] is False
+    assert data["worksets_applied"] == "all_user_closed"
+    assert options.DetachFromCentralOption not in ("PRESERVE", "DISCARD")
+
+
+def test_open_model_explicit_discard_still_detaches_without_a_local_copy(world, model_file):
+    options, _ = workshared_world(world, ["Workset1"])
+    reply = open_model(world, {"file_path": model_file, "detach": "discard"})
+    assert reply.status == 200, reply.data
+    assert options.DetachFromCentralOption == "DISCARD"
+    assert world.created_locals == [] and reply.data["is_local_copy"] is False
+    assert world.open_calls[0][1] == model_file
+
+
+def test_open_model_renames_an_existing_local_copy_and_its_backup_folder(
+        world, model_file, local_target, tmp_path, monkeypatch):
+    workshared_world(world, ["Workset1"])
+    folder = make_existing_local(tmp_path)
+    pin_clock(monkeypatch, world)
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target})
+    assert reply.status == 200, reply.data
+    assert (folder / "Requested_u.rvt").read_bytes() == b"new"
+    assert (folder / "Requested_u_20261025_090503.rvt").read_bytes() == b"old"
+    assert (folder / "Requested_u_20261025_090503_backup" / "f.dat").read_bytes() == b"x"
+    assert not (folder / "Requested_u_backup").exists()
+    assert reply.data["renamed_existing_local"] == {
+        "from": str(folder / "Requested_u.rvt"),
+        "to": str(folder / "Requested_u_20261025_090503.rvt"),
+        "backup_from": str(folder / "Requested_u_backup"),
+        "backup_to": str(folder / "Requested_u_20261025_090503_backup"),
+    }
+    assert reply.data["replaced_existing_local"] is False
+
+
+def test_open_model_stamped_name_collision_lands_on_suffix_2(
+        world, model_file, local_target, tmp_path, monkeypatch):
+    workshared_world(world, ["Workset1"])
+    folder = make_existing_local(tmp_path)
+    (folder / "Requested_u_20261025_090503.rvt").write_bytes(b"older")
+    pin_clock(monkeypatch, world)
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target})
+    assert reply.status == 200, reply.data
+    assert (folder / "Requested_u_20261025_090503.rvt").read_bytes() == b"older"
+    assert (folder / "Requested_u_20261025_090503_2.rvt").read_bytes() == b"old"
+    assert reply.data["renamed_existing_local"]["to"].endswith("_20261025_090503_2.rvt")
+
+
+def test_open_model_existing_copy_without_a_backup_folder_is_renamed_alone(
+        world, model_file, local_target, tmp_path, monkeypatch):
+    workshared_world(world, ["Workset1"])
+    folder = make_existing_local(tmp_path, with_backup=False)
+    pin_clock(monkeypatch, world)
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target})
+    assert reply.status == 200, reply.data
+    renamed = reply.data["renamed_existing_local"]
+    assert renamed["backup_from"] is None and renamed["backup_to"] is None
+    assert (folder / "Requested_u_20261025_090503.rvt").read_bytes() == b"old"
+
+
+def test_open_model_rename_failure_is_an_error_and_deletes_nothing(
+        world, model_file, local_target, tmp_path, monkeypatch):
+    workshared_world(world, ["Workset1"])
+    folder = make_existing_local(tmp_path)
+
+    def refuse(src, dst):
+        raise OSError("used by another process")
+
+    monkeypatch.setattr(os, "rename", refuse)
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target})
+    assert reply.status == 500
+    assert local_target in reply.data["error"] and "used by another process" in reply.data["error"]
+    assert (folder / "Requested_u.rvt").read_bytes() == b"old"
+    assert world.created_locals == [] and world.open_calls == []
+    (entry,) = reply.data["outcome"]["failed"]
+    assert entry["item"] == model_file
+
+
+def test_open_model_backup_folder_rename_failure_restores_the_file(
+        world, model_file, local_target, tmp_path, monkeypatch):
+    workshared_world(world, ["Workset1"])
+    folder = make_existing_local(tmp_path)
+    real_rename = os.rename
+
+    def only_the_folder_fails(src, dst):
+        if str(src).endswith("_backup"):
+            raise OSError("folder is locked")
+        return real_rename(src, dst)
+
+    monkeypatch.setattr(os, "rename", only_the_folder_fails)
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target})
+    assert reply.status == 500 and "folder is locked" in reply.data["error"]
+    assert (folder / "Requested_u.rvt").read_bytes() == b"old", "the .rvt was renamed back"
+    assert (folder / "Requested_u_backup" / "f.dat").exists()
+    assert world.created_locals == [] and world.open_calls == []
+
+
+def test_open_model_existing_local_error_refuses_and_touches_nothing(
+        world, model_file, local_target, tmp_path):
+    workshared_world(world, ["Workset1"])
+    folder = make_existing_local(tmp_path)
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target,
+                               "existing_local": "error"})
+    assert reply.status == 500 and "already exists" in reply.data["error"]
+    assert (folder / "Requested_u.rvt").read_bytes() == b"old"
+    assert (folder / "Requested_u_backup" / "f.dat").exists()
+    assert world.created_locals == [] and world.open_calls == []
+
+
+@pytest.mark.parametrize("extra", [{"existing_local": "overwrite"}, {"overwrite_local": True}])
+def test_open_model_explicit_overwrite_replaces_the_copy(
+        world, model_file, local_target, tmp_path, extra):
+    workshared_world(world, ["Workset1"])
+    folder = make_existing_local(tmp_path)
+    body = {"file_path": model_file, "local_path": local_target}
+    body.update(extra)
+    reply = open_model(world, body)
+    assert reply.status == 200, reply.data
+    assert (folder / "Requested_u.rvt").read_bytes() == b"new"
+    assert reply.data["replaced_existing_local"] is True
+    assert reply.data["renamed_existing_local"] is None
+    assert [p.name for p in folder.iterdir() if p.name.startswith("Requested_u_2")] == []
+
+
+def test_open_model_legacy_overwrite_local_false_behaves_as_error(
+        world, model_file, local_target, tmp_path):
+    workshared_world(world, ["Workset1"])
+    folder = make_existing_local(tmp_path)
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target,
+                               "overwrite_local": False})
+    assert reply.status == 500 and "already exists" in reply.data["error"]
+    assert (folder / "Requested_u.rvt").read_bytes() == b"old"
+
+
+@pytest.mark.parametrize("extra", [
+    {"existing_local": "bogus"},
+    {"existing_local": "timestamp", "overwrite_local": True},
+])
+def test_open_model_invalid_or_conflicting_existing_local_is_a_400_without_outcome(
+        world, model_file, local_target, tmp_path, extra):
+    workshared_world(world, ["Workset1"])
+    folder = make_existing_local(tmp_path)
+    body = {"file_path": model_file, "local_path": local_target}
+    body.update(extra)
+    reply = open_model(world, body)
+    assert reply.status == 400 and "outcome" not in reply.data
+    assert world.open_calls == [] and world.created_locals == []
+    assert (folder / "Requested_u.rvt").read_bytes() == b"old"
+
+
+def test_open_model_retries_once_with_the_axes_and_levels_workset(
+        world, model_file, local_target):
+    options, config = workshared_world(world, ["Workset1", "02_" + AXES, "Links"])
+    world.open_errors = ["boom", None]
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target})
+    assert reply.status == 200, reply.data
+    assert [c[1] for c in world.open_calls] == [local_target, local_target]
+    assert len(world.created_locals) == 1
+    data = reply.data
+    assert data["worksets_applied"] == "axes_and_levels_open"
+    assert data["fallback_workset"] == "02_" + AXES
+    assert "boom" in data["fallback_reason"]
+    assert data["worksets_opened"] == ["02_" + AXES]
+    assert options.SetOpenWorksetsConfiguration.call_count == 2
+    assert config.Close.call_count == 2
+
+
+def test_open_model_retry_also_fires_when_the_first_open_returns_no_document(
+        world, model_file, local_target):
+    workshared_world(world, ["Workset1", AXES])
+    world.open_returns_none = True
+    original = world.uiapp.OpenAndActivateDocument
+
+    def second_attempt_succeeds(path, options, flag):
+        result = original(path, options, flag)
+        world.open_returns_none = False
+        return result
+
+    world.uiapp.OpenAndActivateDocument = second_attempt_succeeds
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target})
+    assert reply.status == 200, reply.data
+    assert reply.data["worksets_applied"] == "axes_and_levels_open"
+    assert "returned no document" in reply.data["fallback_reason"]
+
+
+def test_open_model_retry_without_a_matching_workset_is_an_error_after_one_open(
+        world, model_file, local_target):
+    workshared_world(world, ["Workset1", "Links"])
+    world.open_errors = ["boom"]
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target})
+    assert reply.status == 500
+    assert "boom" in reply.data["error"] and "No user workset" in reply.data["error"]
+    assert len(world.open_calls) == 1 and "outcome" in reply.data
+
+
+def test_open_model_failed_retry_reports_both_reasons(world, model_file, local_target):
+    workshared_world(world, ["Workset1", AXES])
+    world.open_errors = ["first problem", "second problem"]
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target})
+    assert reply.status == 500
+    assert "first problem" in reply.data["error"] and "second problem" in reply.data["error"]
+    assert reply.data["fallback_workset"] == AXES
+    assert len(world.open_calls) == 2
+
+
+@pytest.mark.parametrize("patterns", [["__ALL_USER_WORKSETS__"], ["#_RVT_LINK"]])
+def test_open_model_explicit_patterns_are_never_retried(
+        world, model_file, local_target, patterns):
+    workshared_world(world, ["Workset1", AXES])
+    world.open_error = "boom"
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target,
+                               "close_worksets_matching": patterns})
+    assert reply.status == 500 and "boom" in reply.data["error"]
+    assert len(world.open_calls) == 1
+
+
+def test_open_model_explicit_patterns_report_caller_patterns(world, model_file, local_target):
+    workshared_world(world, ["Workset1", "Links"])
+    reply = open_model(world, {"file_path": model_file, "local_path": local_target,
+                               "close_worksets_matching": ["Links"]})
+    assert reply.status == 200, reply.data
+    assert reply.data["worksets_applied"] == "caller_patterns"
 
 
 def test_open_model_source_still_configures_worksets_and_never_reads_host_app():

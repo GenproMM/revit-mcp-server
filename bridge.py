@@ -837,9 +837,15 @@ async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None,
     The envelope is built here, before _dispatch: a refusal raised inside
     _verified_exchange after the exchange started would read as "outcome unknown",
     while a body the model built wrongly was certainly never sent.
+
+    The call's identity is decided once, here: the tool call this task runs inside, or
+    an anonymous call with a fresh id. The same CallState goes into the envelope (when a
+    secret is loaded) and into _dispatch, so the body Revit receives and the audit entry
+    share one call_id (D-05, D-06).
     """
+    call = audit.current_call() or audit.anonymous_call()
     try:
-        body = with_envelope(data, _secret())
+        body = with_envelope(data, _secret(), call_id=call.call_id)
     except ValueError as exc:  # fixed text: carries neither the body nor the secret
         return _uncertain("Error: the request was NOT sent to Revit: {}".format(exc),
                           "not-sent", None)
@@ -847,7 +853,7 @@ async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None,
     async def write(client) -> Union[Dict, str]:
         return await _send(client, "POST", endpoint, body, timeout, params)
 
-    return await _dispatch("POST", endpoint, ctx, timeout, write, target)
+    return await _dispatch("POST", endpoint, ctx, timeout, write, target, call=call)
 
 
 async def revit_image(endpoint: str, ctx: Any = None, timeout: float = 60.0,
@@ -1000,7 +1006,7 @@ def _queue_busy_message(timeout: float) -> str:
 
 
 async def _dispatch(method: str, endpoint: str, ctx: Any, timeout: float, exchange: Any,
-                    target: Optional[str] = None) -> Union[Dict, str, Any]:
+                    target: Optional[str] = None, call: Any = None) -> Union[Dict, str, Any]:
     """The one bounded-wait, per-incarnation lock path for every non-status call.
 
     ``exchange`` is a coroutine function taking the incarnation's client and
@@ -1009,6 +1015,9 @@ async def _dispatch(method: str, endpoint: str, ctx: Any, timeout: float, exchan
     GET /status/ runs inside that incarnation's lock (d27-b, D-03), and the
     incarnation is proven again with the lock held, right before the send.
 
+    ``call`` is the audit CallState the caller already decided on (revit_post, whose
+    envelope carries its id); None means decide here from the current tool call.
+
     A locked call's wait for the lock is bounded by the call's own timeout, and
     that bound stops applying the moment the lock is held. The request then gets
     its full timeout counted from acquisition, so queueing never shrinks a
@@ -1016,7 +1025,8 @@ async def _dispatch(method: str, endpoint: str, ctx: Any, timeout: float, exchan
     """
     started = time.monotonic()
     progress = {"sent": False}  # whether the requested exchange was ever started
-    call = audit.current_call() or audit.anonymous_call()
+    # A POST passes the CallState it already put in its envelope; GET and image calls decide here.
+    call = call or audit.current_call() or audit.anonymous_call()
     try:
         result = await _dispatch_core(method, endpoint, ctx, timeout, exchange, target, progress)
     except asyncio.CancelledError:
@@ -1169,18 +1179,26 @@ async def _verified_exchange(method: str, exchange: Any, state: "_TargetState", 
 # it is given. GET calls carry no body and so no envelope. The Revit half
 # (revit_mcp/security.py) checks and strips it. ENVELOPE_KEY is the reserved body key
 # that half reads (revit_mcp/trust.py); a test pins the two constants equal.
+#
+# CALL_ID_KEY rides in the same envelope for correlation (D-06): the audit entry of the call
+# and the body Revit receives then name the same tool call. The Revit half reads only
+# SECRET_KEY from the envelope and strips the whole envelope, so it ignores the extra key and
+# revit_mcp/ needs no change (tests/unit/test_audit_correlation.py runs the real gate on it).
 ENVELOPE_KEY = "_mcp"
 SECRET_KEY = "secret"
+CALL_ID_KEY = "call_id"
 
 
-def with_envelope(data: Optional[Dict[str, Any]], secret: Optional[str]) -> Dict[str, Any]:
+def with_envelope(data: Optional[Dict[str, Any]], secret: Optional[str],
+                  call_id: Optional[str] = None) -> Dict[str, Any]:
     """Return a copy of a request body that carries the shared secret under ENVELOPE_KEY.
 
     None data becomes {}. A body that is not a dict, or that already holds the
     reserved key, is refused with a fixed text (never the body, never the secret):
     a model-built argument must not pre-seed the envelope. A None secret adds no
-    envelope at all, so the Revit half answers "missing". The argument is never
-    mutated.
+    envelope at all, so the Revit half answers "missing", and then no call_id is
+    sent either: the call_id rides in the envelope only beside a secret, and only when
+    it is a non-empty str. The argument is never mutated.
     """
     if data is None:
         data = {}
@@ -1191,7 +1209,10 @@ def with_envelope(data: Optional[Dict[str, Any]], secret: Optional[str]) -> Dict
                          "refusing to merge it into the shared-secret envelope")
     body = dict(data)
     if secret is not None:
-        body[ENVELOPE_KEY] = {SECRET_KEY: secret}
+        envelope = {SECRET_KEY: secret}
+        if isinstance(call_id, str) and call_id:
+            envelope[CALL_ID_KEY] = call_id
+        body[ENVELOPE_KEY] = envelope
     return body
 
 

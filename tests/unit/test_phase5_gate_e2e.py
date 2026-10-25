@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import types
+import uuid
 
 import httpx
 import pytest
@@ -114,7 +115,11 @@ async def test_revit_post_sends_the_loaded_secret_and_the_handler_sees_the_tool_
     posts = _posts(seen)
     assert len(posts) == 1
     assert posts[0].headers["content-type"] == "text/plain; charset=utf-8"
-    assert json.loads(posts[0].content)["_mcp"] == {"secret": TEST_SECRET}
+    envelope = json.loads(posts[0].content)["_mcp"]
+    # Phase 6 (D-06): the call_id rides beside the secret; the real gate above accepted it.
+    assert set(envelope) == {"secret", "call_id"}
+    assert envelope["secret"] == TEST_SECRET
+    assert uuid.UUID(envelope["call_id"]).version == 4
 
 
 @pytest.mark.anyio
@@ -187,7 +192,10 @@ async def test_a_none_body_is_sent_as_an_empty_object_with_the_envelope(monkeypa
     _install(seen)
     result = await bridge.revit_post("/create_level/", None)
     assert result["received"] == {}
-    assert json.loads(_posts(seen)[0].content) == {"_mcp": {"secret": TEST_SECRET}}
+    sent = json.loads(_posts(seen)[0].content)
+    assert set(sent) == {"_mcp"}
+    assert sent["_mcp"]["secret"] == TEST_SECRET
+    assert uuid.UUID(sent["_mcp"]["call_id"]).version == 4
 
 
 def test_secret_is_loaded_lazily_once_and_memoized_none_included(monkeypatch):

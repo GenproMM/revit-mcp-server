@@ -39,7 +39,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Secret gate and payload integrity (unit-verified)** - The shared-secret compare and the file-manifest integrity check are built and unit-tested on both runtimes, plus the build pipeline that generates the secret and the manifest, ready to wire in (completed 2026-10-23)
 - [x] **Phase 4: Honest outcomes on every mutating route** - Every mutating route, including the two known stragglers, reports what actually happened in Revit rather than an assumed success (completed 2026-10-23)
 - [x] **Phase 5: Live secret gate and integrity enforcement** - The Phase 3 secret gate and integrity check are wired into the live chokepoint and binding (completed 2026-10-25)
-- [ ] **Phase 6: Structured audit log of true outcomes** - Every mutation lands in a local, rotation-capped JSONL log carrying the same honest outcome the client saw, without leaking the secret
+- [x] **Phase 6: Structured audit log of true outcomes** - Every mutation lands in a local, rotation-capped JSONL log carrying the same honest outcome the client saw, without leaking the secret (completed 2026-10-25)
 - [ ] **Phase 7: Repository-owned mutation safety and human approval** - Редактируемые правила, объяснение риска и одноразовое подтверждение опасных операций реализованы в этом репозитории; Hermes Fork не изменяется, Jev необязателен и не ослабляет правила
 
 ## Phase Details
@@ -285,7 +285,7 @@ Plans:
 
 **Note (planning, 2026-10-25):** per 06-CONTEXT D-02 every sent Revit call is logged (reads included, with a `mutation` flag), not only mutations; `revit_mcp/` is not changed in this phase (D-06).
 
-**Plans:** 7/7 plans executed
+**Plans:** 7/7 plans complete
 
 Plans:
 **Wave 1**
@@ -353,7 +353,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Secret gate and payload integrity (unit-verified) | 9/9 | Complete    | 2026-10-23 |
 | 4. Honest outcomes on every mutating route | 11/11 | Complete    | 2026-10-23 |
 | 5. Live secret gate and integrity enforcement | 16/16 | Complete    | 2026-10-25 |
-| 6. Structured audit log of true outcomes | 7/7 | In Progress|  |
+| 6. Structured audit log of true outcomes | 7/7 | Complete    | 2026-10-25 |
 | 7. Repository-owned mutation safety and human approval | 0/TBD | Not planned | - |
 
 ## Backlog

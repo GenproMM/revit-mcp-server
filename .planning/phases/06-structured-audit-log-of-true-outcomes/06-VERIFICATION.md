@@ -1,9 +1,10 @@
 ---
 phase: 06-structured-audit-log-of-true-outcomes
 verified: 2026-10-25T12:00:00Z
-status: human_needed
+status: passed
 score: 7/7 must-haves verified
 covered_files:
+
   - .planning/REQUIREMENTS.md
   - .planning/phases/06-structured-audit-log-of-true-outcomes/06-01-PLAN.md
   - .planning/phases/06-structured-audit-log-of-true-outcomes/06-01-SUMMARY.md
@@ -27,11 +28,13 @@ covered_files:
   - tests/unit/audit_support.py
   - tests/unit/conftest.py
   - tools/utils.py
+
 covered_digest: "v1:sha256:1a1df2637b200300b04f11ab345833cacc1c0c47a7c3dbed0d035a17d20ad3ed"
 behavior_unverified: 0
 overrides_applied: 0
 gaps: []
 review_warnings_carried:
+
   - id: WR-01
     summary: "A lone surrogate in any entry after the first of a segment drops that entry (UnicodeEncodeError in SegmentHandler.shouldRollover)"
     reproduced: true
@@ -42,6 +45,7 @@ review_warnings_carried:
     summary: "NaN / Infinity in succeeded, failed.item or documents_changed fields are written as bare NaN / Infinity (invalid JSON for strict readers)"
     reproduced: true
 human_verification:
+
   - test: "Decide whether ROADMAP criterion 3 (one correlation id across several underlying Revit operations) is accepted on offline evidence"
     expected: "tests/unit/test_audit_correlation.py runs a synthetic tool (read + mutation + image) through the real audit wrapper and the real bridge and gets three ordered entries with one call_id equal to the Audit line id. No shipped tool makes more than one bridge call (checked by AST over tools/*_tools.py), so a live demonstration is not possible today. Accept, or require a live proof when a multi-call tool exists."
     why_human: "The criterion's wording does not say 'with a synthetic tool'; whether a proof that cannot use a real multi-call tool satisfies it is a product decision, not a code fact."

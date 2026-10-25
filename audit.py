@@ -67,6 +67,18 @@ known", never "none happened"). All lengths count Python str code points.
   user_request_missing            true when the argument was absent or blank (D-12)
   user_request_source             "assistant" when a value was supplied, else null; unverified
 
+Retention (D-16, AUDIT-07)
+--------------------------
+Growth is bounded from the first write. A line that would take the active segment past
+SEGMENT_MAX_BYTES (10 MiB) starts a new segment (a single larger line is written whole into
+a fresh one); each server process keeps its newest SEGMENT_KEEP (10) segments. When the writer
+starts, prune() deletes audit-*.jsonl files older than REVIT_MCP_AUDIT_MAX_AGE_DAYS (whole days,
+default 180) and then the oldest until the directory total is at or below
+REVIT_MCP_AUDIT_MAX_TOTAL_MB (MiB = 1024 * 1024 bytes, default 500). A bad value (empty,
+non-numeric, zero or negative) means the default. prune() touches only regular files named
+audit-*.jsonl directly inside the audit directory, and runs before this process's own segment
+exists.
+
 Lengths and caps count code points of the Python str, not UTF-8 bytes. Redaction happens before
 any cut (_clip), once more over the whole entry (redact) and a last time on the finished line
 (serialize_entry): the configured secret, raw and JSON-escaped, never reaches a file (D-13).
@@ -75,6 +87,7 @@ any cut (_clip), once more over the whole entry (redact) and a last time on the 
 import atexit
 import contextvars
 import dataclasses
+import fnmatch
 import functools
 import getpass
 import hashlib
@@ -98,6 +111,11 @@ LOGGER_NAME = "revit_mcp.audit"
 AUDIT_DIR_ENV = "REVIT_MCP_AUDIT_DIR"
 SEGMENT_MAX_BYTES = 10 * 1024 * 1024
 SEGMENT_KEEP = 10
+MAX_AGE_DAYS_ENV = "REVIT_MCP_AUDIT_MAX_AGE_DAYS"
+MAX_TOTAL_MB_ENV = "REVIT_MCP_AUDIT_MAX_TOTAL_MB"
+DEFAULT_MAX_AGE_DAYS = 180
+DEFAULT_MAX_TOTAL_MB = 500
+AUDIT_FILE_GLOB = "audit-*.jsonl"
 QUEUE_MAX = 10000
 ROUTE_ARG_MAX = 200
 REDACTED = "[REDACTED]"
@@ -838,6 +856,90 @@ def audit_dir() -> str:
     return os.path.join(os.path.expanduser("~"), ".revit-mcp", "audit")
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    """The environment variable as a whole number above zero, else ``default``. Never raises."""
+    try:
+        text = os.environ.get(name)
+        if text is None:
+            return default
+        text = text.strip()
+        if not (text.isascii() and text.isdigit()):
+            return default
+        value = int(text)
+        return value if value > 0 else default
+    except Exception:
+        return default
+
+
+def retention_settings():
+    """(max_age_seconds, max_total_bytes) from the environment; MB means MiB (1024 * 1024 bytes)."""
+    days = _positive_int_env(MAX_AGE_DAYS_ENV, DEFAULT_MAX_AGE_DAYS)
+    megabytes = _positive_int_env(MAX_TOTAL_MB_ENV, DEFAULT_MAX_TOTAL_MB)
+    return days * 86400, megabytes * 1024 * 1024
+
+
+def prune(directory, now, max_age_seconds, max_total_bytes):
+    """Delete old, then surplus audit files; return the names this call deleted (D-16, AUDIT-07).
+
+    Touches only regular files directly inside ``directory`` whose names match
+    AUDIT_FILE_GLOB (case-sensitive, no recursion, symlinks skipped), so a directory
+    that also holds other data loses nothing else. A file older than
+    ``max_age_seconds`` (strictly: a file aged exactly the limit stays) goes first; then,
+    oldest mtime first, files go until the summed size of those left is at or below
+    ``max_total_bytes``. Sizes are whole bytes from os.path.getsize, ages are seconds
+    against mtime, nothing is rounded. A file that cannot be deleted (another live server
+    holds it) is skipped and still counts toward the total; one that is already gone
+    (another server pruning at the same time) is not counted and not reported as ours.
+    Never raises.
+    """
+    deleted = []
+    try:
+        candidates = []
+        for name in os.listdir(directory):
+            if not fnmatch.fnmatchcase(name, AUDIT_FILE_GLOB):
+                continue
+            path = os.path.join(directory, name)
+            try:
+                if os.path.islink(path) or not os.path.isfile(path):
+                    continue
+                candidates.append((os.path.getmtime(path), name, path, os.path.getsize(path)))
+            except OSError:
+                continue
+        candidates.sort(key=lambda item: (item[0], item[1]))
+
+        def remove(path):
+            """(gone, ours): gone afterwards, and removed by this call rather than by someone else."""
+            try:
+                os.remove(path)
+                return True, True
+            except FileNotFoundError:
+                return True, False
+            except OSError:
+                return False, False
+
+        remaining = []
+        for mtime, name, path, size in candidates:
+            if now - mtime > max_age_seconds:
+                gone, ours = remove(path)
+                if ours:
+                    deleted.append(name)
+                if gone:
+                    continue
+            remaining.append((mtime, name, path, size))
+        total = sum(item[3] for item in remaining)
+        for mtime, name, path, size in remaining:
+            if total <= max_total_bytes:
+                break
+            gone, ours = remove(path)
+            if ours:
+                deleted.append(name)
+            if gone:
+                total -= size
+    except Exception:
+        pass
+    return deleted
+
+
 def _writer() -> logging.Logger:
     """The audit logger; the directory, listener thread and file appear on the first call."""
     global _WRITER, _atexit_registered
@@ -845,6 +947,10 @@ def _writer() -> logging.Logger:
         if _WRITER is None:
             directory = audit_dir()
             os.makedirs(directory, exist_ok=True)
+            try:  # before this process's own segment exists, so it can never delete it
+                prune(directory, time.time(), *retention_settings())
+            except Exception:
+                pass
             stem = "audit-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") \
                 + "-" + str(os.getpid())
             handler = SegmentHandler(directory, stem, SEGMENT_MAX_BYTES, SEGMENT_KEEP)

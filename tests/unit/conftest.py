@@ -95,15 +95,16 @@ def _no_live_revit_from_the_bridge(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _allow_all_authorizer(monkeypatch):
-    """The unit suite's authorizer: grants every call and mints no permit (Phase 7).
+    """The unit suite's authorizer: grants every call and mints a real permit (Phase 7).
 
     Production's default is approval.authorize, and a bridge with no authorizer refuses
     every gated POST. Most tests exercise something else (forwarding, locking, audit), so
-    they get a permissive authorizer: the body keeps today's envelope (secret and call_id,
-    or no envelope without a secret) and only the wire form is the exact argument text.
+    they get a permissive authorizer: it grants without a window, but when a shared secret
+    and the target's session token both exist it mints a real permit for the request's own
+    route and exact argument text, so a body the bridge sends in a unit test is one the
+    enforcing Revit gate accepts. Without a secret or a token the grant carries no permit.
     A test of the real flow restores ``approval.authorize`` itself; the production code
-    carries no flag that skips the authorizer. Plan 07-07 switches this fixture to mint
-    real permits when the Revit gate starts to require them.
+    carries no flag that skips the authorizer or the permit check.
     """
     import bridge
 
@@ -113,7 +114,27 @@ def _allow_all_authorizer(monkeypatch):
     import permit
 
     async def allow_all(request):
-        return approval.Grant(data=request.data, args_text=permit.args_text(request.data),
-                              permit=None, audit_fields={})
+        text = permit.args_text(request.data)
+        target = request.target if isinstance(request.target, dict) else {}
+        token = target.get("session_token")
+        minted = None
+        if request.secret and token:
+            minted = permit.mint(request.secret, request.route, text, token, "000000000000", 60)
+        return approval.Grant(data=request.data, args_text=text, permit=minted, audit_fields={})
 
     monkeypatch.setattr(bridge, "_authorize", allow_all)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_permit_registry(monkeypatch):
+    """Every test starts with an empty single-use permit registry (Phase 7).
+
+    The registry is module state of revit_mcp.permits; a nonce consumed in one test must
+    never make the next test's permit read as replayed. The guard keeps the fixture safe
+    in a tree that has no permits module.
+    """
+    try:
+        from revit_mcp import permits
+    except ImportError:
+        return
+    monkeypatch.setattr(permits, "_CONSUMED", {})

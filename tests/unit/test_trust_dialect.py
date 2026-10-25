@@ -34,6 +34,7 @@ from revit_mcp import integrity as _integrity_module  # noqa: E402
 from revit_mcp import security as _security_module  # noqa: E402
 from revit_mcp import textutils as _textutils_module  # noqa: E402
 from revit_mcp import trust as _trust_module  # noqa: E402
+from gate_support import TEST_ROUTE, enveloped_body  # noqa: E402
 from test_trust_listeners import TABLE as LISTENER_TABLE  # noqa: E402
 from test_trust_secret import VERDICT_TABLE  # noqa: E402
 
@@ -612,6 +613,26 @@ _TEST_SECRET = "unit-secret-0123456789-abcdefXYZ"
 _WRONG = "unit-wrongg-9876543210-zyxwvuABC"
 
 
+_SECURITY_BODIES = []
+
+
+def _security_bodies():
+    """The table of bytes bodies, built once: a minted permit carries a random nonce, so the two
+    scenario runs (plain and engine) must replay the very same bytes to be comparable.
+
+    Gated bodies are envelope first with a real permit for TEST_ROUTE, as the bridge sends them
+    (Phase 7); the rest carry no envelope.
+    """
+    if not _SECURITY_BODIES:
+        _SECURITY_BODIES.extend([
+            enveloped_body({"a": 1}, _TEST_SECRET), enveloped_body({"a": 1}, _WRONG),
+            enveloped_body({"a": 1}, None), enveloped_body({}, _TEST_SECRET),
+            enveloped_body({"name": u"Стена"}, _TEST_SECRET),
+            b"", b"{not json", b"[1, 2]",
+        ])
+    return list(_SECURITY_BODIES)
+
+
 def _security_scenario(textutils, trust, security):
     """Every verdict and rewrite the gate and the strip produce for a table of bytes bodies."""
     real_json = textutils.json
@@ -623,27 +644,17 @@ def _security_scenario(textutils, trust, security):
         "state": trust.INTEGRITY_MISMATCH, "reason": None,
         "modified": ["revit_mcp/b.py", "revit_mcp/a.py"], "missing": [], "unexpected": []}}
 
-    def body(value, secret=_TEST_SECRET):
-        data = dict(value)
-        if secret is not None:
-            data["_mcp"] = {"secret": secret}
-        return json.dumps(data).encode("utf-8")
-
-    bodies = [
-        body({"a": 1}), body({"a": 1}, _WRONG), body({"a": 1}, None), body({}),
-        body({"name": u"Стена"}),
-        b"", b"{not json", b"[1, 2]",
-    ]
+    bodies = _security_bodies()
     rows = {"gate": [], "strip": []}
     try:
         for state in (None, configured, mismatch):
             security._STATE = state
             for raw in bodies:
-                request = types.SimpleNamespace(data=raw)
+                request = types.SimpleNamespace(data=raw, path=TEST_ROUTE)
                 refusal = security.gate_or_response(request)
                 rows["gate"].append(
                     (None if refusal is None else (refusal.status, refusal.data), request.data))
-                request = types.SimpleNamespace(data=raw)
+                request = types.SimpleNamespace(data=raw, path=TEST_ROUTE)
                 rows["strip"].append((security.strip_envelope(request), request.data))
     finally:
         textutils.json = real_json

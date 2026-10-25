@@ -71,6 +71,8 @@ def _harness(monkeypatch):
         routes=types.SimpleNamespace(make_response=make_response)))
     monkeypatch.setattr("revit_mcp.textutils.json", _IronPython3Json())
     configure_gate(monkeypatch)
+    # Phase 7: the Revit side reports the incarnation token the bridge's permits bind to.
+    monkeypatch.setattr(security, "_process_token", lambda: TOKEN, raising=False)
     yield
     bridge._states.clear()
 
@@ -82,7 +84,9 @@ def _handler(seen):
         seen.append(request)
         if request.method != "POST":
             return httpx.Response(200, json={"status": "success", "body": request.content.decode()})
-        double = types.SimpleNamespace(data=request.content)
+        # pyRevit's request.path is the API-relative route, e.g. "/create_level/".
+        route = request.url.path[len("/genpro_revit_mcp"):]
+        double = types.SimpleNamespace(data=request.content, path=route)
         refusal = security.gate_or_response(double)
         if refusal is not None:
             return httpx.Response(refusal.status, json=refusal.data)
@@ -117,9 +121,12 @@ async def test_revit_post_sends_the_loaded_secret_and_the_handler_sees_the_tool_
     assert posts[0].headers["content-type"] == "text/plain; charset=utf-8"
     envelope = json.loads(posts[0].content)["_mcp"]
     # Phase 6 (D-06): the call_id rides beside the secret; the real gate above accepted it.
-    assert set(envelope) == {"secret", "call_id"}
+    # Phase 7 (D-18): a one-time permit rides there too, bound to this route and this incarnation.
+    assert set(envelope) == {"secret", "call_id", "permit"}
     assert envelope["secret"] == TEST_SECRET
     assert uuid.UUID(envelope["call_id"]).version == 4
+    assert envelope["permit"]["r"] == "/create_level/"
+    assert envelope["permit"]["s"] == TOKEN
 
 
 @pytest.mark.anyio

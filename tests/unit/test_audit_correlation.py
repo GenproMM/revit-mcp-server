@@ -12,10 +12,11 @@ from mcp.server.fastmcp import Context, FastMCP
 
 import audit
 import bridge
+import permit as permit_module
 from audit_support import (
-    PID_A, PID_B, PORT_A, PORT_B, PREFIX, SEL_A, SEL_B, make_machine, read_entries,
+    PID_A, PID_B, PORT_A, PORT_B, PREFIX, SEL_A, SEL_B, TOKEN_A, make_machine, read_entries,
     release_machine)
-from gate_support import TEST_SECRET, configure_gate
+from gate_support import TEST_ROUTE, TEST_SECRET, TEST_SESSION_TOKEN, configure_gate
 from tools.utils import format_response
 
 AUDIT_LINE = "Audit: call_id "
@@ -203,8 +204,13 @@ async def test_every_post_body_carries_the_secret_and_the_call_id_of_its_entry(m
     call_id = audit_id_of(text)
     bodies = posts(machine)
     assert len(bodies) == 2
-    for _path, body in bodies:
-        assert body["_mcp"] == {"secret": TEST_SECRET, "call_id": call_id}
+    for path, body in bodies:
+        envelope = dict(body["_mcp"])
+        permit = envelope.pop("permit")
+        assert envelope == {"secret": TEST_SECRET, "call_id": call_id}
+        # Phase 7 (D-18): a one-time permit rides beside them, bound to this route and this incarnation.
+        assert permit["r"] == "/modify_element/" and path.endswith(permit["r"])
+        assert permit["s"] == TOKEN_A
     assert [entry["call_id"] for entry in read_entries()] == [call_id, call_id]
     assert TEST_SECRET not in json.dumps(read_entries())
 
@@ -247,8 +253,11 @@ def test_the_real_gate_accepts_an_envelope_with_a_call_id_and_strips_it(monkeypa
     from revit_mcp import security
 
     configure_gate(monkeypatch)
-    sent = json.dumps({"x": 1, "_mcp": {"secret": TEST_SECRET, "call_id": "abc"}}).encode("utf-8")
-    request = types.SimpleNamespace(data=sent)
+    args = permit_module.args_text({"x": 1})
+    minted = permit_module.mint(TEST_SECRET, TEST_ROUTE, args, TEST_SESSION_TOKEN, "000000000000", 60)
+    sent = permit_module.wire_text(
+        args, {"secret": TEST_SECRET, "call_id": "abc", "permit": minted}).encode("ascii")
+    request = types.SimpleNamespace(data=sent, path=TEST_ROUTE)
 
     assert security.gate_or_response(request) is None
     assert json.loads(request.data) == {"x": 1}
@@ -259,10 +268,12 @@ async def test_the_gate_accepts_the_exact_bytes_the_bridge_sent(machine, monkeyp
     from revit_mcp import security
 
     configure_gate(monkeypatch)
+    # The Revit side of PORT_A reports the token its permit was minted for.
+    monkeypatch.setattr(security, "_process_token", lambda: TOKEN_A, raising=False)
     mcp = build_server()
     await call(mcp, "one_post_probe", {"target": SEL_A})
     [post] = [r for r in machine.requests if r.method == "POST"]
-    request = types.SimpleNamespace(data=post.content)
+    request = types.SimpleNamespace(data=post.content, path="/modify_element/")
 
     assert security.gate_or_response(request) is None
     assert json.loads(request.data) == {"element_id": 1}

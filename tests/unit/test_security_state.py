@@ -19,7 +19,7 @@ import unicodedata
 
 import pytest
 
-from gate_support import TEST_SECRET, configure_gate, enveloped_body
+from gate_support import TEST_ROUTE, TEST_SECRET, configure_gate, enveloped_body
 from revit_mcp import integrity, security, trust
 from revit_mcp.textutils import parse_request_data
 
@@ -83,7 +83,7 @@ def _initialize(root):
 
 
 def _request(data):
-    return types.SimpleNamespace(data=data)
+    return types.SimpleNamespace(data=data, path=TEST_ROUTE)
 
 
 def _mismatch(*files):
@@ -574,10 +574,10 @@ def test_startup_loaded_from_a_tree_without_a_manifest_opens_the_gate_with_its_o
     assert alias_security._STATE["integrity"]["reason"] == trust.REASON_MANIFEST_MISSING
     assert "security" not in registry.FAILED
     assert registry.REGISTERED == ["example"]
-    ok = types.SimpleNamespace(data=enveloped_body({"a": 1}))
+    ok = types.SimpleNamespace(data=enveloped_body({"a": 1}), path=TEST_ROUTE)
     assert alias_security.gate_or_response(ok) is None
     assert json.loads(ok.data) == {"a": 1}
-    refused = alias_security.gate_or_response(types.SimpleNamespace(data=enveloped_body({"a": 1}, secret=None)))
+    refused = alias_security.gate_or_response(types.SimpleNamespace(data=enveloped_body({"a": 1}, secret=None), path=TEST_ROUTE))
     assert refused.status == 401 and refused.data["auth"] == "missing"
 
 
@@ -626,6 +626,6 @@ def test_startup_check_integrity_raising_keeps_the_gate_closed(monkeypatch, tmp_
     with pytest.raises(RuntimeError):
         _initialize(root)
     assert security._STATE is None
-    refused = security.gate_or_response(types.SimpleNamespace(data=enveloped_body({"a": 1})))
+    refused = security.gate_or_response(types.SimpleNamespace(data=enveloped_body({"a": 1}), path=TEST_ROUTE))
     assert refused.status == 401
     assert refused.data["auth"] == "server_not_configured"

@@ -31,6 +31,10 @@ def format_response(response):
     A result without bridge provenance (a refusal built inside a tool, or a
     body that merely contains ``process_identity``) is rendered exactly as before.
 
+    * audit: a last line ``Audit: call_id <id>`` appears only when the bridge
+      recorded an audit entry and the call was a mutation or did not succeed
+      (D-07); a successful read carries none.
+
     Args:
         response: The response from a revit_get or revit_post call, can be dict or string
 
@@ -42,6 +46,9 @@ def format_response(response):
     if not isinstance(provenance, dict):
         return text
     lines = _provenance_lines(response, provenance, text)
+    audit_call_id = provenance.get("audit_call_id")
+    if audit_call_id:
+        lines.append("Audit: call_id {}".format(audit_call_id))
     if not lines:
         return text
     return "\n".join([str(text)] + lines)

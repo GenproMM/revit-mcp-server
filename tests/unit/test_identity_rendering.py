@@ -368,7 +368,9 @@ def test_a_received_200_is_tagged_with_the_handshake_identity(machine):
     assert meta["process"] == IDENT_A
     assert meta["requested"] == {"address": "127.0.0.1:48884", "pid": PID_A}
     assert meta["corroborated"] is None           # the reply carries no process stamp
-    assert format_response(result).splitlines()[-1] == PROCESS_LINE_A
+    lines = format_response(result).splitlines()
+    assert lines[-2] == PROCESS_LINE_A             # a mutation: the Audit line is last (D-07)
+    assert lines[-1].startswith("Audit: call_id ")
 
 
 def test_a_matching_reply_stamp_corroborates_the_verified_process(machine):

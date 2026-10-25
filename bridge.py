@@ -112,9 +112,14 @@ import ipaddress
 import re
 import subprocess
 import sys
+import time
 import uuid
 import httpx
 from typing import Optional, Dict, Any, Union
+
+# Imported eagerly on purpose: a payload built without audit.py must fail the
+# deploy/gate.py cold start rather than ship a server that cannot log.
+import audit
 
 DEFAULT_REVIT_PORT = 48884  # Default pyRevit Routes port
 
@@ -988,10 +993,54 @@ async def _dispatch(method: str, endpoint: str, ctx: Any, timeout: float, exchan
     its full timeout counted from acquisition, so queueing never shrinks a
     call's own budget (SER-04). Worst case is about twice the call timeout.
     """
+    started = time.monotonic()
+    progress = {"sent": False}  # whether the requested exchange was ever started
+    call = audit.current_call() or audit.anonymous_call()
+    result = await _dispatch_core(method, endpoint, ctx, timeout, exchange, target, progress)
+    _audit(call, method, endpoint, result, started)
+    return result
+
+
+def _audit(call: Any, method: str, endpoint: str, result: Any, started: float) -> None:
+    """Write one audit entry for a finished call and put its id on the provenance.
+
+    Never raises: the log must not change what a call returns (D-18). The id is
+    attached only for a mutation or a call that did not succeed (D-07), so a
+    successful read stays quiet in the model's text.
+    """
+    try:
+        provenance = getattr(result, PROVENANCE_ATTR, None)
+        if isinstance(provenance, dict):
+            meta = provenance
+        else:
+            http_status = None
+            if isinstance(result, dict):
+                http_status = 200
+            elif isinstance(result, str):
+                match = _HTTP_ERROR_TEXT.match(result)
+                http_status = int(match.group(1)) if match else None
+            meta = _meta(None, None, None, http_status)
+        body = _reply_body(result) if isinstance(result, (dict, str)) else None
+        try:
+            secret = _secret()
+        except Exception:
+            secret = None
+        entry = audit.record_call(call, method, endpoint, meta, body,
+                                  duration_ms=int((time.monotonic() - started) * 1000),
+                                  secret=secret)
+        if (entry is not None and isinstance(provenance, dict)
+                and (entry["mutation"] or entry["outcome"] != "success")):
+            provenance["audit_call_id"] = entry["call_id"]
+    except Exception:
+        pass
+
+
+async def _dispatch_core(method: str, endpoint: str, ctx: Any, timeout: float, exchange: Any,
+                         target: Optional[str], progress: dict) -> Union[Dict, str, Any]:
+    """_dispatch without the audit hook; ``progress`` is created by the caller."""
     budget = None  # must exist before the except clause reads it
     state = None
     requested = None
-    progress = {"sent": False}  # whether the requested exchange was ever started
     try:
         resolved = parse_target(target) if target is not None else await resolve_default_target()
         requested = _requested_of(resolved)

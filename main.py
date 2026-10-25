@@ -23,6 +23,11 @@ mcp = FastMCP(
     json_response=True
 )
 
+# The audit wrapper is installed here, not inside register_tools, so the unit
+# tests that read the unwrapped tool signatures keep seeing them (06-RESEARCH Pitfall 1).
+import audit
+audit.install_audited_tools(mcp)
+
 # Register all tools BEFORE the main block
 from tools import register_tools
 register_tools(mcp, revit_get, revit_post, revit_image)

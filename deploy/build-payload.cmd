@@ -108,6 +108,7 @@ mkdir "%BUILD%\app" 2>nul
 move /y "%BUILD%\libs" "%BUILD%\app\libs" >nul || exit /b 1
 copy /y "%REPO%\main.py"            "%BUILD%\app\" >nul || exit /b 1
 copy /y "%REPO%\bridge.py"          "%BUILD%\app\" >nul || exit /b 1
+copy /y "%REPO%\audit.py"           "%BUILD%\app\" >nul || exit /b 1
 copy /y "%~dp0server.py"            "%BUILD%\app\" >nul || exit /b 1
 copy /y "%~dp0gate.py"              "%BUILD%\app\" >nul || exit /b 1
 copy /y "%~dp0warm.py"              "%BUILD%\app\" >nul || exit /b 1

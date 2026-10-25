@@ -18,6 +18,35 @@ if REPO_ROOT not in sys.path:
 import pytest  # noqa: E402
 
 
+@pytest.fixture(scope="session")
+def _audit_base_dir(tmp_path_factory):
+    """One temp base for every test's audit directory; nothing is written to the real one."""
+    return tmp_path_factory.mktemp("audit-logs")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_audit_log(monkeypatch, _audit_base_dir):
+    """No unit test may write into the developer's real audit directory (Phase 6).
+
+    REVIT_MCP_AUDIT_DIR points at a fresh, not yet created path under the session
+    base; the audit writer is reset before and after the test, so its thread,
+    queue and file never leak from one test into the next. The guard keeps the
+    fixture safe in a tree that has no audit module.
+    """
+    import uuid
+
+    try:
+        import audit
+    except ImportError:
+        audit = None
+    monkeypatch.setenv("REVIT_MCP_AUDIT_DIR", os.path.join(str(_audit_base_dir), uuid.uuid4().hex))
+    if audit is not None and hasattr(audit, "_reset"):
+        audit._reset()
+    yield
+    if audit is not None and hasattr(audit, "_reset"):
+        audit._reset()
+
+
 @pytest.fixture(autouse=True)
 def _no_live_revit_from_the_bridge(monkeypatch):
     """No unit test may reach a real Revit through bridge.py.

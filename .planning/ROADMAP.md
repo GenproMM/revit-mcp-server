@@ -283,7 +283,38 @@ Plans:
   6. The log file is subject to a rotation or size cap from its first write, not appended to unbounded.
   7. Grepping the log for the configured secret value returns nothing, across a request that included it, an auth failure, and an exception path.
 
-**Plans**: TBD
+**Note (planning, 2026-10-25):** per 06-CONTEXT D-02 every sent Revit call is logged (reads included, with a `mutation` flag), not only mutations; `revit_mcp/` is not changed in this phase (D-06).
+
+**Plans:** 7 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 06-01-PLAN.md — Tracer: one audited tool call through the bridge writes one honest JSONL line and the reply shows its call_id; audit.py ships in the payload
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 06-02-PLAN.md — Full schema 1: outcome table in fixed precedence, per-element lists, reported document; per-kind entries through the real bridge (image, /status/, cancel)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 06-03-PLAN.md — Who asked and what: Windows user, tool arguments, execute_code text and hash, user_request; single-point secret redaction and the criterion 7 file grep
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 06-04-PLAN.md — Published user_request schema and server instructions; call_id shared per tool call, distinct across concurrency, in the POST envelope, on the Audit line
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 06-05-PLAN.md — Rotation and start-up retention, held readers, two incarnations and two server processes, never-break writer; stdio session stays clean; docs
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 06-06-PLAN.md — One-shot live gate runner and classifiers (offline-tested): rollback, partial, two Revit instances plus a second server process
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 06-07-PLAN.md — Human-run live gate (criteria 2 and 5) and the recorded verdicts
 
 ### Phase 7: Repository-owned mutation safety and human approval
 

@@ -32,7 +32,7 @@ def _tree(name):
 
 # ---------------------------------------------------------------- static rows
 
-@pytest.mark.parametrize("module", ["audit.py", "bridge.py"])
+@pytest.mark.parametrize("module", ["audit.py", "bridge.py", "policy.py", "approval.py", "permit.py"])
 def test_static_no_path_to_stdout_in_the_audit_and_bridge_sources(module):
     offenders = []
     for node in ast.walk(_tree(module)):

@@ -66,9 +66,23 @@ def test_payload_copies_every_root_module_reachable_from_main():
     # bridge.py really does import audit (the transitive step this test exists for).
     assert "bridge" in root_modules, root_modules
     assert "audit" in root_modules, root_modules
+    # Phase 7: the authorization modules bridge.py imports eagerly (D-01, D-16).
+    assert {"policy", "approval", "permit"} <= root_modules, root_modules
     assert "main" in copied, copied
     missing = sorted(root_modules - copied)
     assert not missing, (
         "main.py reaches repo-root modules the payload does not copy: {} -- add "
         'a copy /y "%REPO%\\<name>.py" line to deploy/build-payload.cmd'.format(missing)
     )
+
+
+_POLICY_COPY = re.compile(r'^\s*copy\s+/y\s+"%REPO%\\policy\.base\.toml"\s+"%BUILD%\\app\\"', re.IGNORECASE)
+
+
+def test_payload_copies_the_base_policy_file():
+    """The base policy is data the payload reads beside policy.py; the .py-only walk above cannot see it."""
+    with open(BUILD, encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+    matches = [line for line in lines if _POLICY_COPY.match(line)]
+    assert len(matches) == 1, matches
+    assert os.path.isfile(os.path.join(REPO, "policy.base.toml"))

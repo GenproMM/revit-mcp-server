@@ -293,7 +293,7 @@ Then open `http://127.0.0.1:6274` in your browser.
 | `load_family` | Load a Revit family (`.rfa`) from disk so its types can be placed |
 | `edit_family` | Edit a loaded family's type parameters and reload it into the project |
 | `list_model_worksets` | Read a model's worksets from disk without opening it |
-| `open_model` | Open a model, detaching from central and choosing which worksets open |
+| `open_model` | Open a model: a central opens as a new local copy by default (an existing copy is kept under a date-stamped name), or detached on request, choosing which worksets open |
 | `save_document` | Save / Save-As the model to disk (as a new central when workshared) |
 
 ### Advanced (1)

@@ -127,6 +127,39 @@ def _resolve_path_or_error(file_path: str) -> tuple[str, str | None]:
         return file_path, str(exc)
 
 
+_EXISTING_LOCAL_MODES = ("error", "overwrite", "timestamp")
+
+
+def _resolve_existing_local(existing_local, overwrite_local) -> tuple[str | None, str | None]:
+    """
+    Resolve open_model's existing_local / deprecated overwrite_local into (mode, error).
+
+    Deliberately duplicated from revit_mcp/textutils.resolve_existing_local_mode: the two
+    halves never share an interpreter (same precedent as describe_broken_path in
+    tools/utils.py), and the two must stay in step. mode is "timestamp" (default),
+    "overwrite" or "error".
+    """
+    allowed = ", ".join(_EXISTING_LOCAL_MODES)
+    if overwrite_local is not None and not isinstance(overwrite_local, bool):
+        return None, "overwrite_local must be true or false"
+    if existing_local is None:
+        if overwrite_local is None:
+            return "timestamp", None
+        return ("overwrite" if overwrite_local else "error"), None
+    if not isinstance(existing_local, str):
+        return None, "existing_local must be one of: {}".format(allowed)
+    mode = existing_local.strip().lower()
+    if mode not in _EXISTING_LOCAL_MODES:
+        return None, "existing_local must be one of: {}".format(allowed)
+    if overwrite_local is not None and overwrite_local != (mode == "overwrite"):
+        return None, (
+            "existing_local={} conflicts with overwrite_local={}; overwrite_local is "
+            "deprecated, pass only existing_local".format(
+                mode, "true" if overwrite_local else "false")
+        )
+    return mode, None
+
+
 def _target_options(target):
     """Transport keyword for the per-call process selector; absent when not given."""
     return {} if target is None else {"target": target}
@@ -148,8 +181,8 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
         Reads the .rvt header and its workset table straight from disk, so it is
         cheap and safe to call on a heavy federated model before deciding how to
         open it. Use it to confirm a model is workshared and to preview which
-        worksets open_model would close. The safe default for a central model is
-        to detach, preserve worksets, and close every user workset.
+        worksets open_model would close. open_model's default for a central model
+        is a new local copy with every user workset closed.
 
         Returns the file's workshared/central flags, the Revit version it was
         saved in, every user workset with its id and name, and a would_close
@@ -204,49 +237,63 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
     @mcp.tool()
     async def open_model(
         file_path: str,
-        detach: str = "preserve",
+        detach: str = "none",
         close_worksets_matching: list[str] = None,
         activate: bool = True,
         audit: bool = False,
         local_path: str = None,
-        overwrite_local: bool = True,
+        overwrite_local: bool = None,
+        existing_local: str = None,
         target: str = None,
         ctx: Context = None,
     ) -> str:
-        """Open a Revit model from disk, detaching from central and choosing worksets.
+        """Open a Revit model from disk as a new local copy, or detached, choosing worksets.
 
         This is the way to get a model into Revit for the other tools to work on.
-        By default it detaches from central while preserving worksets — the Revit
-        dialog's "Detach and preserve worksets" — and closes every user workset.
-        This preserves the worksharing data without loading model contents.
 
-        Closing link worksets matters on federated models: left open, Revit loads
-        every attached RVT as its own document, which on a large model means
-        roughly ten extra discipline models and ten times the memory.
+        A workshared central model, including every Revit Server (RSN://) model,
+        opens by default as a NEW LOCAL COPY (the Open dialog's "Create New Local")
+        and the central itself is never opened, so edits and synchronising behave
+        the way they do for a normal user. The copy is written to local_path, by
+        default Documents/<ModelName>_<username>.rvt.
 
-        A model that is not workshared is opened plainly, with neither detach nor
-        workset configuration, because Revit rejects both on such a file; the
-        response says so via is_workshared.
+        An existing local copy at that path is kept, never silently deleted: it is
+        renamed to <name>_<YYYYMMDD_HHMMSS>.rvt (with _2, _3 ... on a collision)
+        together with its <name>_backup folder, and a new copy is created at the
+        original path. If the rename fails (for example the copy is open in Revit)
+        the call returns an error and nothing is deleted. Only
+        existing_local="overwrite" deletes an existing copy.
 
-        detach="none" on a central model — including every Revit Server
-        (RSN://) model — does NOT open the central itself. A local copy is
-        created first, the equivalent of the Open dialog's "Create New Local"
-        checkbox, and that copy is opened, so edits and synchronising behave
-        the way they do for a normal user. The response reports is_local_copy
-        and local_path. This is the mode to use when the work is meant to be
-        synchronised back to central.
+        Every user workset is opened closed by default, which preserves the
+        worksharing data without loading model contents. If Revit cannot open the
+        model that way, the call retries once with only the workset whose name
+        contains "Оси и уровни" (case-insensitive) open. An explicit
+        close_worksets_matching is never retried. Closing link worksets matters on
+        federated models: left open, Revit loads every attached RVT as its own
+        document, which on a large model means roughly ten extra discipline
+        models and ten times the memory.
 
-        Returns the opened document's title, the detach mode actually applied,
-        whether it became the active document, and the worksets opened vs closed.
-        For a central/workshared model, the default result is all user worksets
-        closed while the worksharing data remains preserved.
+        detach="preserve" or detach="discard" detaches from central instead (the
+        Revit dialog's "Detach and preserve worksets" or "Detach and discard
+        worksets") and opens no local copy. A model that is not workshared is
+        opened plainly, with neither detach nor workset configuration, because
+        Revit rejects both on such a file; the response says so via is_workshared.
+
+        Returns document_title, detach (the mode applied) and requested_detach,
+        is_workshared, is_local_copy, local_path, existing_local,
+        replaced_existing_local and renamed_existing_local ({from, to,
+        backup_from, backup_to}, or null when nothing was renamed), worksets_applied
+        (all_user_closed, axes_and_levels_open or caller_patterns), fallback_workset
+        and fallback_reason after a retry, worksets_opened and worksets_closed,
+        and activated.
 
         Limitations: a closed workset cannot be opened later without reopening
         the model, so choose close_worksets_matching deliberately. Opening is
-        synchronous and a large model can exceed the 30s bridge timeout — the
-        open usually completes in Revit even when the call times out, so check
-        get_revit_status rather than retrying blindly. Detaching leaves an unsaved
-        document; use save_document with a file_path to persist it.
+        synchronous and a large model can exceed the 30s bridge timeout, and the
+        workset retry can double the open time — the open usually completes in
+        Revit even when the call times out, so check get_revit_status rather than
+        retrying blindly. A detached model is an unsaved document; use
+        save_document with a file_path to persist it.
 
         Process-level, not document-level: this tool opens a file in the
         selected Revit process, so it has no document argument and no document
@@ -265,23 +312,30 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
                 ("G:/Models/Tower.rvt"); a single backslash before a digit or
                 letter becomes a control character and the file is reported
                 missing. Non-ASCII names (Cyrillic etc.) are fully supported.
-            detach: "preserve" keeps worksets (default), "discard" drops them,
-                "none" opens a freshly created local copy of the central,
-                still attached to it and able to synchronise back
-            local_path: Where to write the local copy when detach="none".
-                Defaults to Revit's own convention,
-                Documents/<ModelName>_<username>.rvt. Ignored otherwise.
-            overwrite_local: Replace an existing local copy at that path
-                (default True). False makes an existing local copy an error
-                instead of silently discarding its unsynchronised changes.
+            detach: "none" (default) opens a freshly created local copy of a
+                central, still attached to it and able to synchronise back;
+                "preserve" detaches and keeps worksets; "discard" detaches and
+                drops them
             close_worksets_matching: Substrings marking worksets to leave closed,
-                matched case-insensitively. The default sentinel
-                ["__ALL_USER_WORKSETS__"] closes every user workset. Pass an
-                explicit list such as ["#_RVT_LINK"] to close only matching
-                worksets, or [] to open every workset.
+                matched case-insensitively. Omit it for the default: every user
+                workset closed, with the one-time retry described above. Any
+                explicit list is used as given and is never retried, for example
+                ["#_RVT_LINK"] to close only matching worksets, [] to open every
+                workset, or ["__ALL_USER_WORKSETS__"] to close every user workset
+                without a retry.
             activate: Make the opened model the active document, which the other
                 tools operate on (defaults to True)
             audit: Run Revit's audit while opening — slow, for suspect files
+            local_path: Where to write the local copy, and where an existing copy
+                is found and stamped. Defaults to Revit's own convention,
+                Documents/<ModelName>_<username>.rvt. Ignored when detaching.
+            overwrite_local: Deprecated, use existing_local. True means
+                existing_local="overwrite", False means existing_local="error".
+                Must agree with existing_local when both are given.
+            existing_local: What to do with a local copy already at that path:
+                "timestamp" (default) renames it with a date-time stamp and creates
+                a new copy; "overwrite" deletes it, losing unsynchronised changes;
+                "error" refuses
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable. It names
                 the process that opens the file.
@@ -295,19 +349,24 @@ def register_worksharing_tools(mcp, revit_get, revit_post, revit_image=None):
         resolved_path, resolution_error = _resolve_path_or_error(file_path)
         if resolution_error:
             return "Error: " + resolution_error
+        mode, mode_error = _resolve_existing_local(existing_local, overwrite_local)
+        if mode_error:
+            return format_response({"error": mode_error})
+        # Both are always sent: a Revit that still runs the old route defaults
+        # overwrite_local to true and would delete the copy; sending false makes it refuse.
         data = {
             "file_path": resolved_path,
             "detach": detach,
             "activate": activate,
             "audit": audit,
-            "overwrite_local": overwrite_local,
+            "existing_local": mode,
+            "overwrite_local": mode == "overwrite",
         }
         if local_path:
             data["local_path"] = local_path
-        data["close_worksets_matching"] = (
-            _DEFAULT_CLOSE_WORKSETS
-            if close_worksets_matching is None
-            else close_worksets_matching
-        )
+        # Omitted means "the default" to the route (which then may retry with the
+        # axes-and-levels workset); only an explicit list is forwarded.
+        if close_worksets_matching is not None:
+            data["close_worksets_matching"] = close_worksets_matching
         response = await revit_post("/open_model/", data, ctx, **_target_options(target))
         return format_response(response)

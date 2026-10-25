@@ -203,7 +203,7 @@ class FakeRevitServer(object):
 
             def do_POST(self):
                 self.rfile.read(int(self.headers.get("Content-Length") or 0))
-                if self.path.rstrip("/").endswith("/execute_code"):
+                if self.path.rstrip("/").endswith(("/execute_code", "/create_level")):
                     self._send(200, {
                         "status": "success",
                         "outcome": {"transaction_status": "Committed", "requested": None,

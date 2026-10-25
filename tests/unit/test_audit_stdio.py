@@ -175,8 +175,9 @@ def test_session_stdout_stays_pure_json_rpc_while_the_audit_file_fills(tmp_path)
             session.send({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
                 "name": "get_revit_status", "arguments": {"target": fake.selector}}})
             session.send({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
-                "name": "execute_revit_code", "arguments": {
-                    "code": "print(1)", "target": fake.selector, "user_request": USER_REQUEST}}})
+                "name": "create_level", "arguments": {
+                    "levels": [{"elevation": 0}], "target": fake.selector,
+                    "user_request": USER_REQUEST}}})
             lines = session.collect({1, 2, 3})
         finally:
             lines_after = session.finish()
@@ -203,7 +204,7 @@ def test_session_stdout_stays_pure_json_rpc_while_the_audit_file_fills(tmp_path)
     assert TEST_SECRET not in stderr
     entries = [json.loads(raw.decode("utf-8")) for raw in data.split(b"\n") if raw]
     status = [e for e in entries if e["tool"] == "get_revit_status"]
-    code = [e for e in entries if e["tool"] == "execute_revit_code"]
+    code = [e for e in entries if e["tool"] == "create_level"]
     assert len(status) == 1 and len(code) == 1
     assert code[0]["outcome"] == "success"
     assert code[0]["user_request"] == USER_REQUEST

@@ -106,6 +106,15 @@ is audited only inside get_revit_status; the handshake, discovery probes and ref
 sent nothing write nothing. The POST envelope carries call_id beside the secret. The hook
 never raises and never prints: a writer failure costs the entry, never the call.
 
+Authorization
+-------------
+Every POST outside the open reads passes revit_post's authorization seam (_authorize,
+approval.py) before _dispatch: the policy decides, a confirm-class call waits for the
+human in the MCP client, and only then a one-time permit (permit.py) is minted and the
+body goes out as the exact text the permit hashes. The human wait therefore holds no
+per-incarnation lock (D-07). With no authorizer installed (_authorize is None) every such
+POST is refused before sending: the seam fails closed.
+
 This module must not import mcp at module level: it is imported on the cold
 start path and has to stay cheap.
 """
@@ -126,8 +135,11 @@ import httpx
 from typing import Optional, Dict, Any, Union
 
 # Imported eagerly on purpose: a payload built without audit.py must fail the
-# deploy/gate.py cold start rather than ship a server that cannot log.
+# deploy/gate.py cold start rather than ship a server that cannot log. The same holds
+# for the authorization modules: a payload without them must not start.
+import approval
 import audit
+import permit
 
 DEFAULT_REVIT_PORT = 48884  # Default pyRevit Routes port
 
@@ -835,6 +847,18 @@ revit_get.revit_target = REVIT_TARGET
 revit_get.discover_targets = discover_targets
 
 
+# The authorization seam (Phase 7). Production keeps approval.authorize; None means "no
+# authorizer installed", and then every POST outside the open reads is refused before
+# sending. The unit suite's conftest swaps in a permissive authorizer; nothing in this
+# module reads an environment variable or a flag to skip it.
+_authorize = approval.authorize
+
+_NOT_SENT_PREFIX = "Error: the request was NOT sent to Revit: "
+_NO_AUTHORIZER_TEXT = _NOT_SENT_PREFIX + "no authorization layer is installed in this MCP server."
+_AUTHORIZATION_FAILED_TEXT = _NOT_SENT_PREFIX + "the authorization step failed. Nothing was changed."
+_OPEN_READ_ONLY_TEXT = _NOT_SENT_PREFIX + "only an open read route may be called by the authorization step."
+
+
 async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None,
                      target: Optional[str] = None, timeout: float = 30.0,
                      params: Optional[Dict] = None) -> Union[Dict, str]:
@@ -850,18 +874,71 @@ async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None,
     an anonymous call with a fresh id. The same CallState goes into the envelope (when a
     secret is loaded) and into _dispatch, so the body Revit receives and the audit entry
     share one call_id (D-05, D-06).
+
+    Authorization (Phase 7): a POST outside the open reads first resolves its target once,
+    then awaits _authorize, which may open a confirmation window in the MCP client. That
+    wait happens here, before _dispatch, so no per-incarnation lock is held while a human
+    decides (D-07). A refusal is returned as a not-sent text; nothing reached Revit. A grant
+    adds the one-time permit to the envelope beside the secret and call_id, and the body is
+    sent as the exact text that permit hashes (envelope member first, argument text
+    unchanged), never re-serialized.
     """
     call = audit.current_call() or audit.anonymous_call()
+    route = audit.route_parts(endpoint)[0]
+    if route in audit.OPEN_POST_READ_ROUTES:
+        try:
+            body = with_envelope(data, _secret(), call_id=call.call_id)
+        except ValueError as exc:  # fixed text: carries neither the body nor the secret
+            return _uncertain(_NOT_SENT_PREFIX + "{}".format(exc), "not-sent", None)
+
+        async def read(client) -> Union[Dict, str]:
+            return await _send(client, "POST", endpoint, body, timeout, params)
+
+        return await _dispatch("POST", endpoint, ctx, timeout, read, target, call=call)
+
+    data = {} if data is None else data
     try:
-        body = with_envelope(data, _secret(), call_id=call.call_id)
+        permit.args_text(data)  # the refusals with_envelope gives: not an object, reserved key, NaN
     except ValueError as exc:  # fixed text: carries neither the body nor the secret
-        return _uncertain("Error: the request was NOT sent to Revit: {}".format(exc),
-                          "not-sent", None)
+        return _uncertain(_NOT_SENT_PREFIX + "{}".format(exc), "not-sent", None)
+    try:
+        resolved = parse_target(target) if target is not None else await resolve_default_target()
+    except Exception as exc:
+        return _uncertain(_error_text(exc), "not-sent", None)
+    requested = _requested_of(resolved)
+    selector = _selector_for(resolved)
+    authorize = _authorize
+    if authorize is None:
+        return _uncertain(_NO_AUTHORIZER_TEXT, "not-sent", requested)
+
+    async def read_post(open_endpoint: str, open_body: Dict[str, Any]) -> Union[Dict, str]:
+        if audit.route_parts(open_endpoint)[0] not in audit.OPEN_POST_READ_ROUTES:
+            return _uncertain(_OPEN_READ_ONLY_TEXT, "not-sent", requested)
+        return await revit_post(open_endpoint, open_body, ctx, target=selector, timeout=timeout)
+
+    request = approval.AuthorizationRequest(
+        route=route, endpoint=endpoint, data=data, ctx=ctx, target=resolved, call=call,
+        secret=_secret(), read_post=read_post, timeout=timeout)
+    try:
+        outcome = await authorize(request)
+    except Exception:  # fixed text: an authorizer failure never reaches the model verbatim
+        return _uncertain(_AUTHORIZATION_FAILED_TEXT, "not-sent", requested)
+    if isinstance(outcome, approval.Refusal):
+        return _uncertain(outcome.text, "not-sent", requested)
+    if not isinstance(outcome, approval.Grant):
+        return _uncertain(_AUTHORIZATION_FAILED_TEXT, "not-sent", requested)
+    try:
+        envelope = with_envelope(outcome.data, request.secret, call_id=call.call_id).get(ENVELOPE_KEY)
+    except ValueError as exc:  # fixed text: carries neither the body nor the secret
+        return _uncertain(_NOT_SENT_PREFIX + "{}".format(exc), "not-sent", requested)
+    if envelope is not None and outcome.permit is not None:
+        envelope[PERMIT_KEY] = outcome.permit
+    body = outcome.args_text if envelope is None else permit.wire_text(outcome.args_text, envelope)
 
     async def write(client) -> Union[Dict, str]:
         return await _send(client, "POST", endpoint, body, timeout, params)
 
-    return await _dispatch("POST", endpoint, ctx, timeout, write, target, call=call)
+    return await _dispatch("POST", endpoint, ctx, timeout, write, selector, call=call)
 
 
 async def revit_image(endpoint: str, ctx: Any = None, timeout: float = 60.0,
@@ -886,9 +963,14 @@ async def revit_image(endpoint: str, ctx: Any = None, timeout: float = 60.0,
     return await _dispatch("GET", endpoint, ctx, timeout, fetch, target)
 
 
-async def _send(client: httpx.AsyncClient, method: str, endpoint: str, data: Optional[Dict],
-                timeout: float, params: Optional[Dict]) -> Union[Dict, str]:
-    """The one HTTP send. Does no locking; callers decide."""
+async def _send(client: httpx.AsyncClient, method: str, endpoint: str,
+                data: Union[Dict, str, None], timeout: float,
+                params: Optional[Dict]) -> Union[Dict, str]:
+    """The one HTTP send. Does no locking; callers decide.
+
+    A POST ``data`` that is already text (the exact wire text a permit hashes) is sent
+    unchanged; a dict is serialized here.
+    """
     if method == "GET":
         response = await client.get(endpoint, params=params, timeout=timeout)
     else:  # POST
@@ -902,7 +984,7 @@ async def _send(client: httpx.AsyncClient, method: str, endpoint: str, data: Opt
         # the other half of this contract.
         response = await client.post(
             endpoint,
-            content=json.dumps(data).encode("utf-8"),
+            content=(data if isinstance(data, str) else json.dumps(data)).encode("utf-8"),
             headers={"Content-Type": "text/plain; charset=utf-8"},
             timeout=timeout,
         )
@@ -1195,6 +1277,7 @@ async def _verified_exchange(method: str, exchange: Any, state: "_TargetState", 
 ENVELOPE_KEY = "_mcp"
 SECRET_KEY = "secret"
 CALL_ID_KEY = "call_id"
+PERMIT_KEY = permit.PERMIT_KEY
 
 
 def with_envelope(data: Optional[Dict[str, Any]], secret: Optional[str],

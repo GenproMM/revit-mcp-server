@@ -91,3 +91,29 @@ def _no_live_revit_from_the_bridge(monkeypatch):
         monkeypatch.setattr(bridge, "_selected_client", refusing_client)
     if hasattr(bridge, "_http_client"):  # the single-target client, until it is retired
         monkeypatch.setattr(bridge, "_http_client", refusing_client())
+
+
+@pytest.fixture(autouse=True)
+def _allow_all_authorizer(monkeypatch):
+    """The unit suite's authorizer: grants every call and mints no permit (Phase 7).
+
+    Production's default is approval.authorize, and a bridge with no authorizer refuses
+    every gated POST. Most tests exercise something else (forwarding, locking, audit), so
+    they get a permissive authorizer: the body keeps today's envelope (secret and call_id,
+    or no envelope without a secret) and only the wire form is the exact argument text.
+    A test of the real flow restores ``approval.authorize`` itself; the production code
+    carries no flag that skips the authorizer. Plan 07-07 switches this fixture to mint
+    real permits when the Revit gate starts to require them.
+    """
+    import bridge
+
+    if not hasattr(bridge, "_authorize"):
+        return
+    import approval
+    import permit
+
+    async def allow_all(request):
+        return approval.Grant(data=request.data, args_text=permit.args_text(request.data),
+                              permit=None, audit_fields={})
+
+    monkeypatch.setattr(bridge, "_authorize", allow_all)

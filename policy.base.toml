@@ -1,0 +1,604 @@
+# Base mutation-safety policy of the Revit MCP server (Phase 7, D-14..D-17).
+#
+# Closed vocabulary: a route is classified here or it is denied (unknown_route).
+# decision: allow | confirm | deny | check.  check names a built-in Python check, never an
+# expression.  facts names the read-only preflight facts a confirmation window may show.
+# Every key below is a route as the bridge addresses it (first path segment, slashes both
+# sides); tools map to the route keys their transport calls address.
+schema = 1
+
+[settings]
+confirm_timeout_s = 300
+permit_ttl_s = 60
+# D-22: the company shared-parameter file; the file is not read by this plan.
+shared_parameters_file = '\\Srv-dfs\BIM\01_Ресурсы плагинов\2_Shared_parameters\ГП_ФОП2025.txt'
+
+# ---------------------------------------------------------------- tools (59)
+[tools.activate_document]
+routes = ["/activate_document/"]
+
+[tools.ai_element_filter]
+routes = ["/ai_filter/"]
+
+[tools.analyze_model_statistics]
+routes = ["/model_statistics/"]
+
+[tools.check_clashes]
+routes = ["/clash_check/"]
+
+[tools.clear_colors]
+routes = ["/clear_colors/"]
+
+[tools.color_splash]
+routes = ["/color_splash/"]
+
+[tools.create_detail_line]
+routes = ["/create_detail_line/"]
+
+[tools.create_dimensions]
+routes = ["/create_dimensions/"]
+
+[tools.create_duct]
+routes = ["/create_duct/"]
+
+[tools.create_grid]
+routes = ["/create_grid/"]
+
+[tools.create_level]
+routes = ["/create_level/"]
+
+[tools.create_line_based_element]
+routes = ["/create_line/"]
+
+[tools.create_mep_system]
+routes = ["/create_mep_system/"]
+
+[tools.create_pipe]
+routes = ["/create_pipe/"]
+
+[tools.create_room]
+routes = ["/create_room/"]
+
+[tools.create_room_separation]
+routes = ["/create_room_separation/"]
+
+[tools.create_schedule]
+routes = ["/create_schedule/"]
+
+[tools.create_sheet]
+routes = ["/create_sheet/"]
+
+[tools.create_structural_framing]
+routes = ["/create_framing/"]
+
+[tools.create_surface_based_element]
+routes = ["/create_surface/"]
+
+[tools.create_view]
+routes = ["/create_view/"]
+
+[tools.delete_elements]
+routes = ["/delete_elements/"]
+
+[tools.discover_revit_targets]
+routes = []
+local = true
+
+[tools.edit_family]
+routes = ["/edit_family/"]
+
+[tools.execute_revit_code]
+routes = ["/execute_code/"]
+
+[tools.export_document]
+routes = ["/export_document/"]
+
+[tools.export_ifc]
+routes = ["/export_ifc/"]
+
+[tools.export_room_data]
+routes = ["/room_data/"]
+
+[tools.get_current_view_elements]
+routes = ["/current_view_elements/"]
+
+[tools.get_current_view_info]
+routes = ["/current_view_info/"]
+
+[tools.get_element_properties]
+routes = ["/element_properties/"]
+
+[tools.get_material_quantities]
+routes = ["/material_quantities/"]
+
+[tools.get_revit_model_info]
+routes = ["/model_info/"]
+
+[tools.get_revit_process_status]
+routes = ["/status/"]
+
+[tools.get_revit_status]
+routes = ["/status/"]
+
+[tools.get_revit_view]
+routes = ["/get_view/"]
+
+[tools.get_selected_elements]
+routes = ["/selected_elements/"]
+
+[tools.link_file]
+routes = ["/link_file/"]
+
+[tools.list_category_parameters]
+routes = ["/list_category_parameters/"]
+
+[tools.list_documents]
+routes = ["/documents/"]
+
+[tools.list_families]
+routes = ["/list_families/"]
+
+[tools.list_family_categories]
+routes = ["/list_family_categories/"]
+
+[tools.list_levels]
+routes = ["/list_levels/"]
+
+[tools.list_model_worksets]
+routes = ["/model_worksets/"]
+
+[tools.list_project_parameters]
+routes = ["/project_parameters/"]
+
+[tools.list_revit_views]
+routes = ["/list_views/"]
+
+[tools.load_family]
+routes = ["/load_family/"]
+
+[tools.modify_element]
+routes = ["/modify_element/"]
+
+[tools.open_model]
+routes = ["/open_model/"]
+
+[tools.place_family]
+routes = ["/place_family/"]
+
+[tools.read_document_levels]
+routes = ["/document_levels/"]
+
+[tools.read_document_summary]
+routes = ["/document_summary/"]
+
+[tools.save_document]
+routes = ["/save_document/"]
+
+[tools.set_active_view]
+routes = ["/set_active_view/"]
+
+[tools.set_parameter]
+routes = ["/set_parameter/"]
+
+[tools.start_revit]
+routes = []
+local = true
+
+[tools.tag_elements]
+routes = ["/tag_elements/"]
+
+[tools.tag_walls]
+routes = ["/tag_walls/"]
+
+[tools.transform_elements]
+routes = ["/transform_elements/"]
+
+# --------------------------------------------------------------- routes (56)
+[routes."/activate_document/"]
+method = "POST"
+decision = "allow"
+reasons = ["document_state"]
+document_bound = true
+facts = "none"
+
+[routes."/ai_filter/"]
+method = "POST"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/clash_check/"]
+method = "POST"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/clear_colors/"]
+method = "POST"
+decision = "allow"
+reasons = ["view_state"]
+document_bound = true
+facts = "none"
+
+[routes."/color_splash/"]
+method = "POST"
+decision = "allow"
+reasons = ["view_state"]
+document_bound = true
+facts = "none"
+
+[routes."/create_detail_line/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_dimensions/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_duct/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_framing/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_grid/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_level/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_line/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_mep_system/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_pipe/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_room/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_room_separation/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_schedule/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_sheet/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_surface/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/create_view/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/current_view_elements/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/current_view_info/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+# D-23: delete_elements, edit_family and execute_code are the typed paths that can
+# redefine or remove an existing parameter, so each stays confirm or stricter.
+# D-11: always confirmed.
+[routes."/delete_elements/"]
+method = "POST"
+decision = "confirm"
+reasons = ["delete"]
+document_bound = true
+facts = "elements"
+
+[routes."/document_levels/"]
+method = "POST"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/document_summary/"]
+method = "POST"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/documents/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+# D-23: edit_family can add or overwrite family parameters (typed path).
+# D-12, D-22: confirm; deny when a shared parameter is not from the company file.
+[routes."/edit_family/"]
+method = "POST"
+decision = "check"
+reasons = ["edit_family"]
+check = "family_edit"
+confirm_when = []
+document_bound = true
+facts = "family"
+
+[routes."/element_properties/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+# D-23: arbitrary code can redefine parameters; every call is confirmed.
+# D-12: always confirmed.
+[routes."/execute_code/"]
+method = "POST"
+decision = "confirm"
+reasons = ["execute_code"]
+document_bound = false
+facts = "code"
+
+[routes."/export_document/"]
+method = "POST"
+decision = "allow"
+reasons = ["file_io"]
+document_bound = true
+facts = "none"
+
+[routes."/export_ifc/"]
+method = "POST"
+decision = "allow"
+reasons = ["file_io"]
+document_bound = true
+facts = "none"
+
+[routes."/get_view/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/link_file/"]
+method = "POST"
+decision = "allow"
+reasons = ["file_io"]
+document_bound = true
+facts = "none"
+
+[routes."/list_category_parameters/"]
+method = "POST"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/list_families/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/list_family_categories/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/list_levels/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/list_views/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+# D-11: always confirmed.
+[routes."/load_family/"]
+method = "POST"
+decision = "confirm"
+reasons = ["load_family", "family_contents_unchecked"]
+document_bound = true
+facts = "load"
+
+[routes."/material_quantities/"]
+method = "POST"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/model_info/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/model_statistics/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/model_worksets/"]
+method = "POST"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+# D-10: conditional; without facts the answer is confirm.
+[routes."/modify_element/"]
+method = "POST"
+decision = "check"
+reasons = ["parameter_write"]
+check = "parameter_write"
+confirm_when = ["type_parameter", "multiple_elements", "overwrites_value", "facts_unavailable", "group_member"]
+document_bound = true
+facts = "parameter"
+
+[routes."/open_model/"]
+method = "POST"
+decision = "allow"
+reasons = ["file_io"]
+document_bound = false
+facts = "none"
+
+[routes."/place_family/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/project_parameters/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/room_data/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/save_document/"]
+method = "POST"
+decision = "allow"
+reasons = ["file_io"]
+document_bound = true
+facts = "none"
+
+[routes."/selected_elements/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/set_active_view/"]
+method = "POST"
+decision = "allow"
+reasons = ["view_state"]
+document_bound = true
+facts = "none"
+
+# D-10: conditional; without facts the answer is confirm.
+[routes."/set_parameter/"]
+method = "POST"
+decision = "check"
+reasons = ["parameter_write"]
+check = "parameter_write"
+confirm_when = ["type_parameter", "multiple_elements", "overwrites_value", "facts_unavailable", "group_member"]
+document_bound = true
+facts = "parameter"
+
+[routes."/status/"]
+method = "GET"
+decision = "allow"
+reasons = ["read"]
+document_bound = false
+facts = "none"
+
+[routes."/tag_elements/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+[routes."/tag_walls/"]
+method = "POST"
+decision = "allow"
+reasons = ["create"]
+document_bound = true
+facts = "none"
+
+# D-11: always confirmed.
+[routes."/transform_elements/"]
+method = "POST"
+decision = "confirm"
+reasons = ["transform"]
+document_bound = true
+facts = "elements"

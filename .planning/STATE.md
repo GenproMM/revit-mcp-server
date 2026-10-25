@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v0.1
 current_phase: 06
 current_phase_name: Structured audit log of true outcomes
-current_plan: 2
+current_plan: 3
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-10-25T09:49:55.511Z"
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-10-25T10:03:53.668Z"
 last_activity: 2026-10-25
 last_activity_desc: Phase 06 execution started
-state_head: 566aac428835eb55d3a82438d5f0119ba74afd7d
+state_head: e58c35347a542500d5261875714f9283af175842
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 70
-  completed_plans: 64
+  completed_plans: 65
 milestone_name: Доверенный мост
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 ## Current Position
 
 Phase: 06 (Structured audit log of true outcomes) — EXECUTING
-Current Plan: 2
+Current Plan: 3
 Total Plans in Phase: 7
 Status: Ready to execute
 Last activity: 2026-10-25 — Phase 06 execution started
@@ -120,6 +120,7 @@ Progress: [███████░░░] 71% (5 of 7 phases complete, 63/63 pl
 | Phase 05 P14 | 35min | 3 tasks | 1 files |
 | Phase 05 P15 | n/a | 3 tasks | 1 files |
 | Phase 06 P01 | 8 min | 2 tasks | 10 files |
+| Phase 06 P02 | 11 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -167,6 +168,8 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 05]: 05-07: health degrades for verified_mismatch, exposed bind and missing extension secret; unverifiable integrity never degrades — INTG-07 and 03 D-16: reported, never blocking
 - [Phase 05]: 05-13: live match stage PASS (PHASE5_GATE_OK, POSTS_SENT=7, S1-match-3.json) on a user-approved one-time rerun after runner fixes 9aa9876; temporary manifest kept for 05-14, no tracked revit_mcp/startup.py/extension.json edits until 05-15
 - [Phase 06]: 06-01: audit outcome label comes from the reply's top-level status (never outcome.status, never format_response); a not-sent call writes no entry and shows no Audit line; wrapper installed from main.py so unwrapped-signature tests stay valid — Research Pitfalls 1 and 10, Open Question 2
+- [Phase 06]: 06-02: document_role is 'used' for a route-reported document and 'addressed' for lesser sources and /execute_code/; reason/reply_status keys appear only for rejected_*/unrecognized outcomes
+- [Phase 06]: 06-02: non-received provenance kinds ignore the reply body; cancelled sent calls record unknown (POST) or no_reply (GET) with cancelled true
 
 ### Roadmap Evolution
 
@@ -199,7 +202,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-25T09:49:55.257Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-10-25T10:03:53.406Z
+Stopped at: Completed 06-02-PLAN.md
 Resume file: None
 Next boundary: prepare bounded 02-02 recheck and require full Revit close/reopen before any live route; no G6 or broad rollout

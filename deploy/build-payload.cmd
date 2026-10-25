@@ -129,6 +129,13 @@ rem before Phase 5. secret_tool.py creates MCP_SECRET_FILE once and never
 rem overwrites it. It runs before gate.py, which checks the pair.
 "%MCP_PYEXE%" "%~dp0secret_tool.py" stage --secret-file "%MCP_SECRET_FILE%" --dest "%BUILD%\app\_bridge_secret" || (echo ERROR: could not stage the shared secret. & exit /b 1)
 
+rem The operator policy lives on the share, not in the payload. Stage only its path
+rem (app\policy_source, one UNC line) so policy.py can find it at run time, then check
+rem the file with the servers' own validator. A missing or rejected file only warns: the
+rem fleet then runs the base policy. gate.py refuses a payload whose base policy is bad.
+"%MCP_PYEXE%" "%~dp0policy_tool.py" stage --policy-file "%MCP_POLICY_FILE%" --dest "%BUILD%\app\policy_source" || (echo ERROR: could not stage the operator policy path. & exit /b 1)
+"%MCP_PYEXE%" "%~dp0policy_tool.py" check --policy-file "%MCP_POLICY_FILE%"
+
 >"%BUILD%\ENGINE" echo %MCP_ENGINE%
 "%MCP_PYEXE%" -m compileall -q "%BUILD%\app" >nul 2>&1
 

@@ -46,6 +46,15 @@ rem can read the share or an installed payload holds the secret: it is a barrier
 rem against callers on the LAN, not against people who have access to the share.
 if not defined MCP_SECRET_FILE set "MCP_SECRET_FILE=%MCP_SHARE_ROOT%\_build\bridge_secret"
 
+rem Operator policy for the whole fleet (D-14, D-27). One optional TOML file that every
+rem RevitMCP server reads at run time from this UNC path; build-payload.cmd stages the
+rem path into payload\app\policy_source (policy_tool.py), it does not copy the file. An
+rem absent file means the base policy that ships in the payload. The file can relax or
+rem tighten any rule, so ordinary users must have read-only access to it: the operator
+rem verifies that, the build does not. A bad file is never applied; the servers keep the
+rem base policy (or their last valid version) and say so in the status.
+if not defined MCP_POLICY_FILE set "MCP_POLICY_FILE=%MCP_SHARE_ROOT%\_build\operator_policy.toml"
+
 rem No Python version to set: we build against the CPython that pyRevit ships,
 rem so pyRevit must be installed on this build server too. If it is not, point
 rem MCP_PYEXE at a copy of the fleet's bin\cengines\CPY*\python.exe before

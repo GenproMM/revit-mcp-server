@@ -73,6 +73,28 @@ def _secret_pair_status(artifact=SECRET_ARTIFACT, secret_file=None):
     return "ok", "app\\_bridge_secret matches MCP_SECRET_FILE"
 
 
+# Staged by build-payload.cmd (policy_tool.py stage): the UNC path of the operator policy.
+POLICY_SOURCE_ARTIFACT = os.path.join(HERE, "policy_source")
+
+
+def _base_policy_status(here=HERE):
+    """(status, message): the base policy shipped beside ``here`` loads and validates.
+
+    status is "ok" with "base <12 hex>" (the policy hash), or "failed" with
+    "<exception class>: <message>". A payload whose base policy is invalid blocks every
+    gated route at run time (D-17), so the build refuses to publish it. Messages name key
+    paths only, never file content.
+    """
+    try:
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import policy
+        loaded = policy.load_base(os.path.join(here, policy.BASE_FILE))
+        return "ok", "base " + loaded.hash
+    except Exception as exc:
+        return "failed", "%s: %s" % (type(exc).__name__, exc)
+
+
 def _expected_tools():
     """Tool names the payload is supposed to expose, or None if unavailable.
 
@@ -92,6 +114,11 @@ async def main():
     status, message = _secret_pair_status()
     print("SECRET=%s (%s)" % (status, message))
     assert status != "failed", message
+
+    status, message = _base_policy_status()
+    print("POLICY=%s (%s)" % (status, message))
+    assert status != "failed", "base policy is invalid: " + message
+    print("POLICY_SOURCE=%s" % ("present" if os.path.isfile(POLICY_SOURCE_ARTIFACT) else "absent"))
 
     t0 = time.time()
     params = StdioServerParameters(command=sys.executable,

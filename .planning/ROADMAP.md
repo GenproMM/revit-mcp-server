@@ -321,7 +321,7 @@ Plans:
 **Goal:** Инженер получает понятное объяснение риска и подтверждает конкретную опасную операцию до её выполнения. Вся логика безопасности принадлежит revit-mcp-server (CPython + Revit extension), правила корректируются без изменения кода, Hermes Fork не требует доработок. Jev — необязательный семантический классификатор, не источник разрешения и не замена детерминированным правилам.
 **Release checkpoint:** R5 = v0.1 — при закрытии фазы предложить PILOT-FIRST релиз и закрытие milestone (`/gsd-complete-milestone`). См. `.planning/RELEASES.md`.
 **Depends on:** Phase 6; использует identity/addressing Phase 2, honest outcomes Phase 4 и live authentication/integrity Phase 5, не создавая параллельных механизмов
-**Requirements**: TBD — формализовать при планировании по 07-CONTEXT.md; новые идентификаторы требований пока не назначены
+**Requirements**: SAFE-01, SAFE-02, SAFE-03, SAFE-04, SAFE-05, SAFE-06, SAFE-07, SAFE-08, SAFE-09, SAFE-10, SAFE-11, SAFE-12, SAFE-13, SAFE-14, SAFE-15, SAFE-16, SAFE-17, SAFE-18, SAFE-19, SAFE-20, SAFE-21
 **Context**: `phases/07-repository-owned-mutation-safety-and-human-approval/07-CONTEXT.md`
 **Research inputs**: `phases/07-repository-owned-mutation-safety-and-human-approval/07-RESEARCH-NOTES.md` (исследование сессии, не завершённая проверка реализации)
 **Success Criteria** (what must be TRUE):
@@ -334,11 +334,49 @@ Plans:
   6. Оба execute-code пути сохраняют явный статус доверенного произвольного кода по D-15, без скрытого отключения и без обещания sandbox/полной confinement. Перед заявлением о защите всех операций зафиксированы границы обхода через arbitrary code, ОС-доступ и cross-process handler overlap (backlog 999.1).
   7. Офлайн негативные/конкурентные тесты и отдельно разрешённый live bench подтверждают контракт. Изменения Revit extension проверяются после полного restart, не Reload; ни принятие фазы, ни создание этих материалов не разрешает live-операции или внешнюю передачу BIM-данных.
 
-**Plans:** 0 plans — фаза добавлена, декомпозиция и проверка совместимости ещё не выполнены
+**Plans:** 14 plans
 
 Plans:
+**Wave 1**
 
-- [ ] TBD (run /gsd-plan-phase 7 to break down)
+- [ ] 07-01-PLAN.md — MCP SDK 1.9.0 -> 1.30.x behind a lock-review checkpoint; structured_output=False; in-memory Hermes-shaped elicitation harness (D-24, SAFE-19)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 07-02-PLAN.md — Tracer: delete_elements confirmed in a client window, sent once with a one-time HMAC permit the Revit-side verifier accepts once; base policy TOML; payload copies the new modules
+- [ ] 07-03-PLAN.md — pywin32 path shim in deploy/server.py, gate.py, warm.py; scratch payload gate with pyRevit's CPython; three-transport smoke
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 07-04-PLAN.md — Policy as validated data: operator overlay, atomic hot reload with last-valid retention, invalid base blocks, policy change voids a pending approval; MCP_POLICY_FILE staging (D-14..D-17, D-27)
+- [ ] 07-05-PLAN.md — Permit protocol TDD: HMAC parity, golden vector, every refusal verdict, exactly-once under concurrency, 403 refusal body
+- [ ] 07-07-PLAN.md — Test plumbing: request doubles carry a path and a real permit; permissive test authorizer mints; registry isolated
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 07-06-PLAN.md — Classification guard (59 tools, every route, literal decision table) and policy.decide for D-10 / D-22
+- [ ] 07-08-PLAN.md — Decision checkpoint (D-18 one-way), permit enforced in gate_or_response before any effect; rollout signals and status lines (D-19)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 07-09-PLAN.md — Confirmation channel semantics (capability, decline, cancel, error, timeout, serialized unique windows, no lock while waiting, one yes = one call, no resend) and audit labels denied / expired / rejected_permit
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 07-10-PLAN.md — Shared Revit lookup helper and the read-only /mutation_preflight/ open read with exact facts or explicit unknowns
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 07-11-PLAN.md — Company FOP check by GUID and name, Russian window with facts, D-10 decisions from facts, document injection, facts re-check after the yes
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 07-12-PLAN.md — Instructions and docstrings, CLAUDE.md invariants and pinned bypass limits, ROADMAP criterion 2 reworded (SAFE-21), R5 runbook and Russian user guide
+- [ ] 07-13-PLAN.md — User-run live bench script and its offline-tested classifier (D-20)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 07-14-PLAN.md — Offline gates on the final tree, user-run live bench in Hermes Desktop after a full Revit restart, verdict recorded
 
 ## Progress
 

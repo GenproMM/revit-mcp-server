@@ -439,3 +439,426 @@ def test_schema_requested_target_is_the_provenance_requested_for_every_kind():
     assert build({"status": "success", "outcome": block()})["requested_target"] == REQUESTED
     assert build(None, kind="no-reply", http_status=None, method="GET",
                  endpoint="/model_info/")["requested_target"] == REQUESTED
+
+
+def test_schema_request_side_fields_are_always_present():
+    for name in ("windows_user", "args", "user_request", "user_request_missing",
+                 "user_request_length", "user_request_source"):
+        assert name in audit.ALWAYS_PRESENT_FIELDS, name
+    for entry in schema_entries():
+        for name in ("windows_user", "args", "user_request", "user_request_missing",
+                     "user_request_length", "user_request_source"):
+            assert name in entry, name
+
+
+# ------------------------------------------------------------ args, code, request
+
+# A secret of the real shape (secrets.token_urlsafe(32): 43 characters).
+SECRET = "kQ3vZ9_xLm2-Tn8RwYb5Hc1JdFgPaUs7EoIe0Aq4XyB"
+OK = {"status": "success", "outcome": block()}
+
+
+def with_args(args, tool="tool_x", user_request=None):
+    return audit.CallState("c-args", tool, args, user_request)
+
+
+def args_entry(args, tool="tool_x", secret=None, **kwargs):
+    return build(OK, call=with_args(args, tool), secret=secret, **kwargs)
+
+
+def test_args_drop_ctx_and_none_values():
+    entry = args_entry({"element_id": 5, "value": "new", "ctx": object(), "target": None})
+
+    assert entry["args"] == {"element_id": 5, "value": "new"}
+    assert "args_truncated" not in entry
+
+
+def test_args_long_string_is_cut_and_its_length_listed():
+    entry = args_entry({"value": "x" * 600})
+
+    assert entry["args"]["value"] == "x" * 500
+    assert entry["args_truncated"] == [{"arg": "value", "length": 600}]
+
+
+def test_args_cyrillic_string_is_cut_by_code_points_not_bytes():
+    text = "\u0436" * 600
+
+    entry = args_entry({"value": text})
+
+    assert len(entry["args"]["value"]) == 500
+    assert len(entry["args"]["value"].encode("utf-8")) == 1000
+    assert entry["args_truncated"] == [{"arg": "value", "length": 600}]
+    line = audit.serialize_entry(entry, None)
+    assert "\u0436" * 500 in line and "\\u0436" not in line
+
+
+def test_args_long_list_keeps_the_first_200_in_order():
+    entry = args_entry({"element_ids": list(range(250))})
+
+    assert entry["args"]["element_ids"] == list(range(200))
+    assert entry["args_truncated"] == [{"arg": "element_ids", "count": 250}]
+
+
+def test_args_list_of_exactly_200_is_not_listed_as_truncated():
+    entry = args_entry({"element_ids": list(range(200))})
+
+    assert len(entry["args"]["element_ids"]) == 200 and "args_truncated" not in entry
+
+
+def test_args_nested_dict_is_shaped_recursively_with_dotted_paths():
+    entry = args_entry({"options": {"note": "n" * 700, "ids": list(range(300)), "keep": 1}})
+
+    assert entry["args"]["options"]["keep"] == 1
+    assert len(entry["args"]["options"]["note"]) == 500
+    assert len(entry["args"]["options"]["ids"]) == 200
+    assert {"arg": "options.note", "length": 700} in entry["args_truncated"]
+    assert {"arg": "options.ids", "count": 300} in entry["args_truncated"]
+
+
+def test_args_bytes_and_arbitrary_objects_become_their_type_name():
+    class Odd(object):
+        pass
+
+    entry = args_entry({"blob": b"\x00\x01", "thing": Odd(), "items": [b"x", 1]})
+
+    assert entry["args"] == {"blob": "bytes", "thing": "Odd", "items": ["bytes", 1]}
+
+
+def test_args_nesting_beyond_the_depth_limit_becomes_a_type_name():
+    deep = {"a": {"b": {"c": {"d": {"e": 1}}}}}
+
+    entry = args_entry({"deep": deep})
+
+    assert entry["args"]["deep"]["a"]["b"]["c"] == {"d": "dict"}
+    json.dumps(entry)
+
+
+def test_args_scalars_keep_their_json_type_and_a_non_finite_float_does_not_break_json():
+    entry = args_entry({"flag": True, "n": 3, "f": 1.5, "bad": float("nan")})
+
+    assert entry["args"]["flag"] is True and entry["args"]["n"] == 3 and entry["args"]["f"] == 1.5
+    assert entry["args"]["bad"] == "float"
+
+
+def test_args_requested_new_parameter_value_is_written_verbatim():
+    entry = args_entry({"element_id": 7, "parameter_name": "Comments", "value": "\u041d\u043e\u0432\u043e\u0435"},
+                       tool="set_parameter")
+
+    assert entry["args"]["value"] == "\u041d\u043e\u0432\u043e\u0435"
+    assert entry["args"]["parameter_name"] == "Comments"
+
+
+def test_args_never_hold_the_http_body_or_reply_data():
+    body = {"status": "success", "outcome": block(), "data": {"huge": "r" * 1000},
+            "_mcp": {"secret": SECRET}}
+
+    entry = build(body, call=with_args({"element_id": 5}), secret=SECRET)
+
+    text = json.dumps(entry)
+    assert "huge" not in text and "_mcp" not in text and "r" * 20 not in text
+
+
+CODE_TOOL_NAME = "execute_revit_code"
+
+
+def code_entry(code, secret=None, tool=CODE_TOOL_NAME):
+    return build(OK, call=with_args({"code": code, "description": "d"}, tool),
+                 endpoint="/execute_code/", secret=secret)
+
+
+def test_code_long_text_is_cut_to_8192_with_length_and_sha256():
+    import hashlib
+
+    code = "print(1)\n" * 1112  # 10008 characters
+
+    entry = code_entry(code)
+
+    assert len(entry["args"]["code"]) == 8192 and entry["args"]["code"] == code[:8192]
+    assert entry["code_length"] == len(code)
+    assert entry["code_sha256"] == hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def test_code_short_text_is_stored_whole_with_its_length_and_hash():
+    import hashlib
+
+    entry = code_entry("x = 1")
+
+    assert entry["args"]["code"] == "x = 1"
+    assert entry["code_length"] == 5
+    assert entry["code_sha256"] == hashlib.sha256(b"x = 1").hexdigest()
+
+
+def test_code_cut_is_not_reported_as_an_args_truncated_500_cut():
+    entry = code_entry("a" * 10000)
+
+    assert entry["code_length"] == 10000
+    assert all(item["arg"] != "code" for item in entry.get("args_truncated", []))
+    assert len(entry["args"]["description"]) == 1
+
+
+def test_code_length_counts_code_points_and_the_hash_covers_utf8_bytes():
+    import hashlib
+
+    code = "\u0436" * 600
+
+    entry = code_entry(code)
+
+    assert entry["code_length"] == 600
+    assert entry["code_sha256"] == hashlib.sha256(code.encode("utf-8")).hexdigest()
+    assert entry["args"]["code"] == code
+
+
+def test_code_hash_is_over_the_original_even_when_the_secret_is_redacted():
+    import hashlib
+
+    code = "token = '" + SECRET + "'"
+
+    entry = code_entry(code, secret=SECRET)
+
+    assert SECRET not in json.dumps(entry)
+    assert entry["args"]["code"] == "token = '" + audit.REDACTED + "'"
+    assert entry["code_sha256"] == hashlib.sha256(code.encode("utf-8")).hexdigest()
+    assert entry["code_length"] == len(code)
+
+
+def test_code_fields_exist_only_for_execute_revit_code():
+    other = code_entry("x = 1", tool="some_other_tool")
+
+    assert "code_length" not in other and "code_sha256" not in other
+    assert "code_length" in code_entry("x = 1")
+
+
+def request_entry(user_request, **kwargs):
+    return build(OK, call=with_args({}, user_request=user_request), **kwargs)
+
+
+def test_user_request_absent_is_recorded_as_missing():
+    entry = request_entry(None)
+
+    assert entry["user_request"] is None and entry["user_request_missing"] is True
+    assert entry["user_request_length"] is None and entry["user_request_source"] is None
+
+
+def test_user_request_blank_is_missing_too():
+    for blank in ("", "   ", "\n\t "):
+        entry = request_entry(blank)
+
+        assert entry["user_request_missing"] is True and entry["user_request"] is None, repr(blank)
+
+
+def test_user_request_long_text_is_cut_to_2000_with_its_true_length():
+    entry = request_entry("q" * 2500)
+
+    assert entry["user_request"] == "q" * 2000
+    assert entry["user_request_length"] == 2500
+    assert entry["user_request_missing"] is False and entry["user_request_source"] == "assistant"
+
+
+def test_user_request_is_verbatim_and_says_the_assistant_reported_it():
+    text = "\u0421\u0434\u0435\u043b\u0430\u0439 \u0441\u0442\u0435\u043d\u044b \u0442\u043e\u043b\u0449\u0435"
+
+    entry = request_entry(text)
+
+    assert entry["user_request"] == text and entry["user_request_length"] == len(text)
+    assert entry["user_request_source"] == "assistant"
+    assert text in audit.serialize_entry(entry, None)
+
+
+def test_user_request_with_a_newline_serializes_to_one_line():
+    entry = request_entry("first\nsecond\r\nthird")
+
+    line = audit.serialize_entry(entry, None)
+
+    assert "\n" not in line and "\r" not in line and "first\\nsecond\\r\\nthird" in line
+
+
+def test_user_request_is_never_claimed_as_seen_by_the_server():
+    entry = request_entry("anything")
+
+    assert entry["user_request_source"] == "assistant"
+    assert "verified" not in json.dumps(entry)
+
+
+def test_windows_user_is_domain_backslash_user(monkeypatch):
+    monkeypatch.setenv("USERDOMAIN", "CORP")
+    monkeypatch.setenv("USERNAME", "eng")
+    audit._reset()
+
+    assert audit.windows_user() == "CORP\\eng"
+
+
+def test_windows_user_falls_back_to_getpass(monkeypatch):
+    monkeypatch.delenv("USERDOMAIN", raising=False)
+    monkeypatch.delenv("USERNAME", raising=False)
+    monkeypatch.setattr(audit.getpass, "getuser", lambda: "fallback")
+    audit._reset()
+
+    assert audit.windows_user() == "fallback"
+
+
+def test_windows_user_is_unknown_when_nothing_answers(monkeypatch):
+    monkeypatch.delenv("USERDOMAIN", raising=False)
+    monkeypatch.delenv("USERNAME", raising=False)
+
+    def broken():
+        raise OSError("no user")
+
+    monkeypatch.setattr(audit.getpass, "getuser", broken)
+    audit._reset()
+
+    assert audit.windows_user() == "unknown"
+
+
+def test_windows_user_is_computed_once_per_process(monkeypatch):
+    monkeypatch.setenv("USERDOMAIN", "CORP")
+    monkeypatch.setenv("USERNAME", "eng")
+    audit._reset()
+    first = audit.windows_user()
+
+    monkeypatch.setenv("USERNAME", "other")
+
+    assert audit.windows_user() == first == "CORP\\eng"
+    audit._reset()
+    assert audit.windows_user() == "CORP\\other"
+
+
+def test_windows_user_is_written_and_nothing_else_about_the_person_or_machine():
+    entry = build(OK, windows_user="CORP\\eng")
+
+    assert entry["windows_user"] == "CORP\\eng"
+    text = json.dumps(entry)
+    for forbidden in ("COMPUTERNAME", "hostname", "client", "session_id", "ip_address"):
+        assert forbidden not in text
+
+
+def test_redact_text_replaces_the_raw_and_the_json_escaped_secret():
+    odd = 'ab"cd\\ef-0123456789-xyz'
+
+    assert audit.redact_text("a " + odd + " b", odd) == "a " + audit.REDACTED + " b"
+    assert audit.redact_text(json.dumps(odd)[1:-1], odd) == audit.REDACTED
+    assert audit.redact_text("plain", None) == "plain"
+    assert audit.redact_text("plain", "") == "plain"
+
+
+def test_redact_clip_redacts_before_it_cuts():
+    text = "z" * 480 + SECRET + "z" * 100
+
+    clipped, original = audit._clip(text, 500, SECRET)
+
+    assert original == len(text)
+    assert SECRET not in clipped and SECRET[:16] not in clipped
+    assert len(clipped) == 500
+
+
+def test_redact_walks_dicts_and_lists_and_leaves_other_types_alone():
+    value = {"a": [SECRET, {"b": "x" + SECRET}], "n": 5, "f": None}
+
+    out = audit.redact(value, SECRET)
+
+    assert out == {"a": [audit.REDACTED, {"b": "x" + audit.REDACTED}], "n": 5, "f": None}
+
+
+def test_redact_secret_inside_an_args_string_becomes_redacted():
+    entry = args_entry({"note": "see " + SECRET + " ok"}, secret=SECRET)
+
+    assert entry["args"]["note"] == "see " + audit.REDACTED + " ok"
+
+
+def test_redact_secret_named_argument_keys_lose_their_value():
+    entry = args_entry({"api_key": "k1", "password": 12345, "secret": {"a": 1}, "token": "t",
+                        "X_Token": ["a"], "element_id": 5}, secret=None)
+
+    for key in ("api_key", "password", "secret", "token", "X_Token"):
+        assert entry["args"][key] == audit.REDACTED, key
+    assert entry["args"]["element_id"] == 5
+
+
+def test_redact_secret_named_keys_inside_nested_argument_dicts():
+    entry = args_entry({"options": {"Password": "p", "fine": "v"}})
+
+    assert entry["args"]["options"] == {"Password": audit.REDACTED, "fine": "v"}
+
+
+def test_redact_keeps_the_process_session_token():
+    entry = build(OK, secret=SECRET)
+
+    assert entry["process"]["session_token"] == "tok-a"
+    assert entry["requested_target"] == REQUESTED
+
+
+def test_redact_secret_in_every_string_of_the_entry():
+    body = {"status": "partial", "document": {"document": "doc1.x", "title": "T " + SECRET,
+                                               "path": "C:/" + SECRET + ".rvt"},
+            "outcome": block(requested=2, succeeded=[5], failed=[
+                {"item": 6, "reason": "bad " + SECRET}], failures=["warn " + SECRET])}
+    call = with_args({"note": SECRET}, user_request="please " + SECRET)
+
+    entry = build(body, call=call, endpoint="/set_parameter/" + SECRET, secret=SECRET)
+
+    line = audit.serialize_entry(entry, SECRET)
+    assert SECRET not in line
+    assert entry["failed"][0]["reason"] == "bad " + audit.REDACTED
+    assert entry["revit_failures"] == ["warn " + audit.REDACTED]
+    assert entry["document"]["title"] == "T " + audit.REDACTED
+    assert entry["user_request"] == "please " + audit.REDACTED
+    assert entry["route_arg"] == audit.REDACTED
+
+
+def test_redact_secret_straddling_the_argument_cut_leaves_no_16_character_run():
+    text = "a" * 480 + SECRET + "b" * 120
+
+    entry = args_entry({"value": text}, secret=SECRET)
+
+    line = audit.serialize_entry(entry, SECRET)
+    for start in range(len(SECRET) - 15):
+        assert SECRET[start:start + 16] not in line, start
+    assert entry["args_truncated"] == [{"arg": "value", "length": len(text)}]
+
+
+def test_redact_secret_straddling_the_user_request_and_reason_cuts():
+    long_request = "u" * 1990 + SECRET
+    long_reason = "r" * 495 + SECRET
+    body = {"status": "failed", "outcome": block(succeeded=[], failed=[
+        {"item": 1, "reason": long_reason}])}
+
+    entry = build(body, call=with_args({}, user_request=long_request), http_status=422,
+                  secret=SECRET)
+
+    line = audit.serialize_entry(entry, SECRET)
+    for start in range(len(SECRET) - 15):
+        assert SECRET[start:start + 16] not in line, start
+
+
+def test_redact_secret_with_a_quote_and_a_backslash_in_neither_form():
+    odd = 'pre"mid\\post-0123456789-abcdef'
+    call = with_args({"note": "x " + odd + " y"}, user_request=odd)
+
+    entry = build(OK, call=call, secret=odd)
+
+    line = audit.serialize_entry(entry, odd)
+    assert odd not in line and json.dumps(odd)[1:-1] not in line
+
+
+def test_redact_without_a_secret_replaces_nothing():
+    entry = args_entry({"note": SECRET}, secret=None)
+
+    assert entry["args"]["note"] == SECRET
+    assert audit.REDACTED not in audit.serialize_entry(entry, None)
+
+
+def test_redact_entry_for_a_post_has_no_mcp_key_anywhere():
+    entry = build(OK, call=with_args({"element_id": 5}), secret=SECRET)
+
+    def keys(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                yield key
+                for inner in keys(item):
+                    yield inner
+        elif isinstance(value, list):
+            for item in value:
+                for inner in keys(item):
+                    yield inner
+
+    assert "_mcp" not in set(keys(entry))
+    assert set(entry) <= set(audit.SCHEMA_1_FIELDS)

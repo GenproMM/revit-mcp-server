@@ -51,20 +51,41 @@ known", never "none happened"). All lengths count Python str code points.
   cancelled                       true only for a send the client cancelled after it was sent
   server_pid, duration_ms         the writing server process and the call's wall time
 
-Written by later plans (06-03): windows_user, args, args_truncated, code_length, code_sha256,
-user_request, user_request_missing, user_request_length, user_request_source.
+  windows_user                    DOMAIN\\user of this server process (D-10); no computer name, MCP
+                                  client, session id or address is written
+  args                            the tool's arguments without ctx and None values (D-11); strings
+                                  cut at ARG_STRING_MAX, lists at ARG_LIST_MAX items, nesting at
+                                  ARG_DEPTH_MAX; a value under a key matching SECRET_ARG_KEY is
+                                  REDACTED; the HTTP body and read results are never written
+  args_truncated                  only when something was cut: {arg, length} for a string,
+                                  {arg, count} for a list (arg is a dotted path)
+  code_length, code_sha256        execute_revit_code only: the full code's length and the SHA-256
+                                  of its UTF-8 bytes; args.code holds the first CODE_MAX points
+  user_request                    the user's message as the ASSISTANT reported it (the server never
+                                  sees the user's prompt), redacted, cut at USER_REQUEST_MAX
+  user_request_length             the original length, or null when missing
+  user_request_missing            true when the argument was absent or blank (D-12)
+  user_request_source             "assistant" when a value was supplied, else null; unverified
+
+Lengths and caps count code points of the Python str, not UTF-8 bytes. Redaction happens before
+any cut (_clip), once more over the whole entry (redact) and a last time on the finished line
+(serialize_entry): the configured secret, raw and JSON-escaped, never reaches a file (D-13).
 """
 
 import atexit
 import contextvars
 import dataclasses
 import functools
+import getpass
+import hashlib
 import inspect
 import json
 import logging
 import logging.handlers
+import math
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -80,6 +101,15 @@ SEGMENT_KEEP = 10
 QUEUE_MAX = 10000
 ROUTE_ARG_MAX = 200
 REDACTED = "[REDACTED]"
+ARG_STRING_MAX = 500
+ARG_LIST_MAX = 200
+ARG_DEPTH_MAX = 4
+USER_REQUEST_MAX = 2000
+CODE_MAX = 8192
+CODE_TOOL = "execute_revit_code"
+CODE_ARG = "code"
+USER_REQUEST_SOURCE = "assistant"
+SECRET_ARG_KEY = re.compile(r"secret|token|password|api_key", re.IGNORECASE)
 
 # The POST routes that only read (D-03). A copy of revit_mcp/trust.py
 # OPEN_POST_READ_ROUTES: the payload ships no revit_mcp/ package, so this half
@@ -153,12 +183,13 @@ SCHEMA_1_FIELDS = (
     "user_request_source", "server_pid", "duration_ms",
 )
 
-# 06-03 adds windows_user, args and the user_request fields to this tuple.
 ALWAYS_PRESENT_FIELDS = (
     "ts", "schema", "call_id", "tool", "route", "route_arg", "method", "mutation", "kind",
     "http_status", "outcome", "transaction_status", "requested", "succeeded", "succeeded_count",
     "failed", "failed_count", "revit_failures", "process", "corroborated", "requested_target",
-    "document", "document_source", "document_role", "server_pid", "duration_ms",
+    "document", "document_source", "document_role", "windows_user", "args", "user_request",
+    "user_request_missing", "user_request_length", "user_request_source", "server_pid",
+    "duration_ms",
 )
 
 
@@ -264,9 +295,12 @@ def install_audited_tools(mcp) -> None:
 
 # ------------------------------------------------------------- entry building
 
-def route_parts(endpoint: str):
-    """("/first_segment/", tail or None): the route and what follows it, query string dropped."""
-    path = str(endpoint).split("?", 1)[0].strip("/")
+def route_parts(endpoint: str, secret: Optional[str] = None):
+    """("/first_segment/", tail or None): the route and what follows it, query string dropped.
+
+    The secret is replaced before the tail is cut, so a cut can never leave part of it.
+    """
+    path = redact_text(str(endpoint), secret).split("?", 1)[0].strip("/")
     head, _, tail = path.partition("/")
     route = "/" + head + "/" if head else "/"
     tail = tail.strip("/")[:ROUTE_ARG_MAX]
@@ -280,8 +314,50 @@ def is_mutation(method: str, route: str) -> bool:
     return route not in OPEN_POST_READ_ROUTES
 
 
-def _text(value, limit=REASON_MAX):
-    """A str copy of value cut to ``limit`` code points; None stays None. Never raises."""
+def redact_text(text, secret):
+    """``text`` with the secret and its JSON-escaped form replaced; unchanged without a secret."""
+    if isinstance(secret, str) and secret and isinstance(text, str):
+        text = text.replace(secret, REDACTED)
+        escaped = json.dumps(secret)[1:-1]
+        if escaped != secret:
+            text = text.replace(escaped, REDACTED)
+    return text
+
+
+def _cut(text, limit, secret):
+    """(clipped, original_length, was_cut): redact first, then cut to ``limit`` code points."""
+    original = len(text)
+    redacted = redact_text(text, secret)
+    return redacted[:limit], original, len(redacted) > limit
+
+
+def _clip(text, limit, secret):
+    """(clipped, original_length): the one place a string is cut, always after redaction."""
+    clipped, original, _cut_made = _cut(text, limit, secret)
+    return clipped, original
+
+
+def redact(value, secret):
+    """A copy of ``value`` with the secret replaced in every string (keys included).
+
+    Walks dicts, lists and tuples; other values pass through. No key scrub here: that
+    belongs to tool arguments only (shape_args), so identity fields such as
+    process.session_token are never touched.
+    """
+    if not (isinstance(secret, str) and secret):
+        return value
+    if isinstance(value, str):
+        return redact_text(value, secret)
+    if isinstance(value, dict):
+        return dict((redact_text(key, secret) if isinstance(key, str) else key,
+                     redact(item, secret)) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return [redact(item, secret) for item in value]
+    return value
+
+
+def _text(value, limit=REASON_MAX, secret=None):
+    """A str copy of value, redacted then cut to ``limit`` code points; None stays None. Never raises."""
     if value is None:
         return None
     if not isinstance(value, str):
@@ -289,17 +365,17 @@ def _text(value, limit=REASON_MAX):
             value = str(value)
         except Exception:
             return None
-    return value[:limit]
+    return _clip(value, limit, secret)[0]
 
 
-def _scalar(value):
+def _scalar(value, secret=None):
     """An id, count or flag as it is; any other value as a capped string."""
     if value is None or isinstance(value, (bool, int, float)):
         return value
-    return _text(value)
+    return _text(value, REASON_MAX, secret)
 
 
-def _outcome(kind, http_status, body, mutation):
+def _outcome(kind, http_status, body, mutation, secret=None):
     """(label, reason, reply_status) in the fixed precedence of D-08 and AUDIT-03.
 
     Provenance kind first, then HTTP 401/423, then a document refusal code, then the
@@ -317,12 +393,12 @@ def _outcome(kind, http_status, body, mutation):
     if not isinstance(body, dict):
         body = {}
     if http_status == 401:
-        return "rejected_auth", _text(body.get("auth")), None
+        return "rejected_auth", _text(body.get("auth"), REASON_MAX, secret), None
     if http_status == 423:
-        return "rejected_integrity", _text(body.get("integrity")), None
+        return "rejected_integrity", _text(body.get("integrity"), REASON_MAX, secret), None
     code = body.get("error_code")
     if isinstance(code, str) and code in DOCUMENT_REFUSAL_CODES:
-        return "rejected_document", code, None
+        return "rejected_document", _text(code, REASON_MAX, secret), None
     status = body.get("status")
     if isinstance(status, str) and status in _OUTCOME_STATUSES:
         return status, None, None
@@ -330,10 +406,11 @@ def _outcome(kind, http_status, body, mutation):
         return "error", None, None
     if http_status == 200 and not mutation:
         return "success", None, None
-    return "unrecognized", None, (_text(status) if isinstance(status, str) else None)
+    return "unrecognized", None, (
+        _text(status, REASON_MAX, secret) if isinstance(status, str) else None)
 
 
-def _outcome_fields(body):
+def _outcome_fields(body, secret=None):
     """The Phase 4 outcome block's fields, copied whatever the HTTP status.
 
     A 500 after Commit() still carries transaction_status Committed and its succeeded
@@ -350,7 +427,7 @@ def _outcome_fields(body):
     status = block.get("transaction_status") if block is not None else None
     if status is None:
         status = body.get("transaction_status")
-    fields["transaction_status"] = _text(status)
+    fields["transaction_status"] = _text(status, REASON_MAX, secret)
     if block is None:
         return fields
     requested = block.get("requested")
@@ -358,25 +435,27 @@ def _outcome_fields(body):
         requested, bool) else None
     succeeded = block.get("succeeded")
     succeeded = succeeded if isinstance(succeeded, list) else []
-    fields["succeeded"] = [_scalar(item) for item in succeeded[:SUCCEEDED_MAX]]
+    fields["succeeded"] = [_scalar(item, secret) for item in succeeded[:SUCCEEDED_MAX]]
     fields["succeeded_count"] = len(succeeded)
     failed = block.get("failed")
     failed = failed if isinstance(failed, list) else []
     reduced = []
     for entry in failed[:FAILED_MAX]:
         if isinstance(entry, dict):
-            reduced.append({"item": _scalar(entry.get("item")), "reason": _text(entry.get("reason"))})
+            reduced.append({"item": _scalar(entry.get("item"), secret),
+                            "reason": _text(entry.get("reason"), REASON_MAX, secret)})
         else:
-            reduced.append({"item": _scalar(entry), "reason": None})
+            reduced.append({"item": _scalar(entry, secret), "reason": None})
     fields["failed"] = reduced
     fields["failed_count"] = len(failed)
     failures = block.get("revit_failures")
     failures = failures if isinstance(failures, list) else []
-    fields["revit_failures"] = [_text(item) for item in failures[:REVIT_FAILURES_MAX]]
+    fields["revit_failures"] = [_text(item, REASON_MAX, secret)
+                                for item in failures[:REVIT_FAILURES_MAX]]
     return fields
 
 
-def _triplet(descriptor):
+def _triplet(descriptor, secret=None):
     """{token, title, path} of a document descriptor, or None when it names nothing.
 
     Revit stores the token under the key "document" (identity._descriptor); the entry
@@ -388,22 +467,22 @@ def _triplet(descriptor):
     if not isinstance(token, str):
         token = descriptor.get("token")
     title, path = descriptor.get("title"), descriptor.get("path")
-    triplet = {"token": _text(token) if isinstance(token, str) else None,
-               "title": _text(title) if isinstance(title, str) else None,
-               "path": _text(path) if isinstance(path, str) else None}
+    triplet = {"token": _text(token, REASON_MAX, secret) if isinstance(token, str) else None,
+               "title": _text(title, REASON_MAX, secret) if isinstance(title, str) else None,
+               "path": _text(path, REASON_MAX, secret) if isinstance(path, str) else None}
     if triplet["token"] is None and triplet["title"] is None and triplet["path"] is None:
         return None
     return triplet
 
 
-def _changed_entry(descriptor):
-    entry = _triplet(descriptor) or {"token": None, "title": None, "path": None}
+def _changed_entry(descriptor, secret=None):
+    entry = _triplet(descriptor, secret) or {"token": None, "title": None, "path": None}
     for key in ("role", "changed", "saved", "is_family_document"):
-        entry[key] = _scalar(descriptor.get(key))
+        entry[key] = _scalar(descriptor.get(key), secret)
     return entry
 
 
-def document_of(route, body, args, active_title_hint):
+def document_of(route, body, args, active_title_hint, secret=None):
     """(document, document_source, document_role, extras) by the D-09 priority.
 
     The reply's own document descriptor, then its documents_changed list (the project
@@ -422,30 +501,30 @@ def document_of(route, body, args, active_title_hint):
         isinstance(changed, list) and not execute_code) else None
     extras = {}
     if entries is not None:
-        extras["documents_changed"] = [_changed_entry(item)
+        extras["documents_changed"] = [_changed_entry(item, secret)
                                        for item in entries[:DOCUMENTS_CHANGED_MAX]]
-    observed = _triplet(body.get("observed_active_document"))
+    observed = _triplet(body.get("observed_active_document"), secret)
     if observed is not None:
         extras["observed_active_document"] = observed
     if execute_code and isinstance(body.get("document_scope"), str):
-        extras["document_scope"] = _text(body["document_scope"], NOTICE_MAX)
+        extras["document_scope"] = _text(body["document_scope"], NOTICE_MAX, secret)
 
-    document, source, role = _triplet(body.get("document")), "reply_document", "used"
+    document, source, role = _triplet(body.get("document"), secret), "reply_document", "used"
     if document is None:
         chosen = None
         if entries:
             chosen = next((item for item in entries if item.get("role") == "project"), None)
             if chosen is None:
                 chosen = next((item for item in entries if _triplet(item) is not None), None)
-        document, source, role = _triplet(chosen), "documents_changed", "used"
+        document, source, role = _triplet(chosen, secret), "documents_changed", "used"
     if document is None:
         selector = args.get("document")
         if isinstance(selector, str) and selector:
-            document = {"token": _text(selector), "title": None, "path": None}
+            document = {"token": _text(selector, REASON_MAX, secret), "title": None, "path": None}
         source, role = "request_argument", "addressed"
     if document is None:
         if isinstance(active_title_hint, str) and active_title_hint:
-            document = {"token": None, "title": _text(active_title_hint), "path": None}
+            document = {"token": None, "title": _text(active_title_hint, REASON_MAX, secret), "path": None}
         source, role = "handshake_active_title", "addressed"
     if document is None:
         source, role = "none", None
@@ -462,22 +541,125 @@ def _outcome_block_missing(mutation, kind, http_status, route, body):
     return not (isinstance(body, dict) and isinstance(body.get("outcome"), dict))
 
 
+def _shape_value(value, path, depth, secret, truncated):
+    """One argument value reduced to JSON-safe, capped, redacted form; cuts go to ``truncated``."""
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else _type_name(value)
+    if isinstance(value, str):
+        clipped, original, was_cut = _cut(value, ARG_STRING_MAX, secret)
+        if was_cut:
+            truncated.append({"arg": path, "length": original})
+        return clipped
+    if isinstance(value, dict):
+        if depth > ARG_DEPTH_MAX:
+            return _type_name(value)
+        shaped = {}
+        for key, item in value.items():
+            name = redact_text(key if isinstance(key, str) else str(key), secret)
+            if SECRET_ARG_KEY.search(name):
+                shaped[name] = REDACTED
+            else:
+                shaped[name] = _shape_value(item, path + "." + name, depth + 1, secret, truncated)
+        return shaped
+    if isinstance(value, (list, tuple)):
+        if depth > ARG_DEPTH_MAX:
+            return _type_name(value)
+        if len(value) > ARG_LIST_MAX:
+            truncated.append({"arg": path, "count": len(value)})
+        return [_shape_value(item, "{}[{}]".format(path, index), depth + 1, secret, truncated)
+                for index, item in enumerate(value[:ARG_LIST_MAX])]
+    return _type_name(value)
+
+
+def shape_args(tool, args, secret):
+    """(shaped, args_truncated, code_fields) for one tool call's arguments (D-04, D-11).
+
+    ctx and None values are dropped; a value under a key matching SECRET_ARG_KEY is
+    REDACTED whatever it is; strings are redacted and then cut at ARG_STRING_MAX code
+    points, lists keep their first ARG_LIST_MAX items, nesting stops at ARG_DEPTH_MAX
+    (deeper values become their type name) and any non-JSON value becomes its type name.
+    For execute_revit_code the code is cut at CODE_MAX instead, and ``code_fields``
+    carries its full length and the SHA-256 of its original UTF-8 bytes (hashed before
+    redaction: the digest identifies what ran). Never raises on odd input.
+    """
+    shaped, truncated, code_fields = {}, [], {}
+    for key, value in (args if isinstance(args, dict) else {}).items():
+        name = redact_text(key if isinstance(key, str) else str(key), secret)
+        if name == "ctx" or value is None:
+            continue
+        if SECRET_ARG_KEY.search(name):
+            shaped[name] = REDACTED
+        elif tool == CODE_TOOL and name == CODE_ARG and isinstance(value, str):
+            shaped[name], length, _cut_made = _cut(value, CODE_MAX, secret)
+            code_fields = {
+                "code_length": length,
+                "code_sha256": hashlib.sha256(value.encode("utf-8", "surrogatepass")).hexdigest(),
+            }
+        else:
+            shaped[name] = _shape_value(value, name, 1, secret, truncated)
+    return shaped, truncated, code_fields
+
+
+def shape_user_request(text, secret):
+    """The four user_request fields; a blank or absent value is recorded as missing (D-12).
+
+    The text is what the assistant reported: the server never sees the user's prompt,
+    so a supplied value is labelled with the source "assistant" and nothing more.
+    """
+    if text is not None and not isinstance(text, str):
+        try:
+            text = str(text)
+        except Exception:
+            text = None
+    if text is None or not text.strip():
+        return {"user_request": None, "user_request_missing": True,
+                "user_request_length": None, "user_request_source": None}
+    clipped, original = _clip(text, USER_REQUEST_MAX, secret)
+    return {"user_request": clipped, "user_request_missing": False,
+            "user_request_length": original, "user_request_source": USER_REQUEST_SOURCE}
+
+
+_WINDOWS_USER: Optional[str] = None
+
+
+def windows_user() -> str:
+    """DOMAIN\\user of this process (D-10), computed once; never raises.
+
+    USERDOMAIN and USERNAME when both are set, else getpass.getuser(), else "unknown".
+    Nothing else about the person or the machine is looked up.
+    """
+    global _WINDOWS_USER
+    if _WINDOWS_USER is None:
+        try:
+            domain, user = os.environ.get("USERDOMAIN"), os.environ.get("USERNAME")
+            value = (domain + "\\" + user) if (domain and user) else getpass.getuser()
+        except Exception:
+            value = None
+        _WINDOWS_USER = value if (isinstance(value, str) and value) else "unknown"
+    return _WINDOWS_USER
+
+
 def build_entry(call, method, endpoint, provenance, body, *, duration_ms, now, server_pid,
-                active_title_hint=None, cancelled=False):
+                active_title_hint=None, cancelled=False, windows_user=None, secret=None):
     """One audit entry as a dict, or None for a call that never left this process (D-02).
 
-    Pure: no I/O, no clock, no environment. ``provenance`` is the bridge's meta dict,
-    ``body`` the parsed reply object (or None). The outcome is the reply's own
-    statement under a fixed precedence (see _outcome), never guessed from rendered
-    text. Only named fields of the body are copied: no message or error text, no 423
-    file list, no read results.
+    Pure: no I/O, no clock, no environment (windows_user and secret arrive as
+    arguments). ``provenance`` is the bridge's meta dict, ``body`` the parsed reply
+    object (or None). The outcome is the reply's own statement under a fixed
+    precedence (see _outcome), never guessed from rendered text. Only named fields of
+    the body are copied: no message or error text, no 423 file list, no read results.
+    Every string is redacted before it is cut and the finished entry is redacted once
+    more (D-13); process and requested_target are the writer's own fields and are
+    never scrubbed by key.
     """
     kind = provenance.get("kind")
     if kind == "not-sent":
         return None
     received = kind in (None, "received")
     reply = body if received and isinstance(body, dict) else None
-    route, route_arg = route_parts(endpoint)
+    route, route_arg = route_parts(endpoint, secret)
     mutation = is_mutation(method, route)
     http_status = provenance.get("http_status")
     process = provenance.get("process")
@@ -493,9 +675,9 @@ def build_entry(call, method, endpoint, provenance, body, *, duration_ms, now, s
                             "pid": requested_target.get("pid")}
     else:
         requested_target = None
-    label, reason, reply_status = _outcome(kind, http_status, reply, mutation)
+    label, reason, reply_status = _outcome(kind, http_status, reply, mutation, secret)
     document, document_source, document_role, extras = document_of(
-        route, reply, call.args, active_title_hint)
+        route, reply, call.args, active_title_hint, secret)
     entry = {
         "ts": now.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "schema": SCHEMA_VERSION,
@@ -515,7 +697,7 @@ def build_entry(call, method, endpoint, provenance, body, *, duration_ms, now, s
         entry["reply_status"] = reply_status
     if _outcome_block_missing(mutation, kind, http_status, route, reply):
         entry["outcome_block_missing"] = True
-    entry.update(_outcome_fields(reply))
+    entry.update(_outcome_fields(reply, secret))
     entry.update({
         "process": process,
         "corroborated": provenance.get("corroborated"),
@@ -527,9 +709,16 @@ def build_entry(call, method, endpoint, provenance, body, *, duration_ms, now, s
     entry.update(extras)
     if cancelled is True:
         entry["cancelled"] = True
+    shaped_args, args_truncated, code_fields = shape_args(call.tool, call.args, secret)
+    entry["windows_user"] = windows_user
+    entry["args"] = shaped_args
+    if args_truncated:
+        entry["args_truncated"] = args_truncated
+    entry.update(code_fields)
+    entry.update(shape_user_request(call.user_request, secret))
     entry["server_pid"] = server_pid
     entry["duration_ms"] = duration_ms
-    return entry
+    return redact(entry, secret)
 
 
 def _type_name(value):
@@ -673,7 +862,8 @@ def record_call(call, method, endpoint, provenance, body, *, duration_ms, secret
     try:
         entry = build_entry(call, method, endpoint, provenance, body, duration_ms=duration_ms,
                             now=datetime.now(timezone.utc), server_pid=os.getpid(),
-                            active_title_hint=active_title_hint, cancelled=cancelled)
+                            active_title_hint=active_title_hint, cancelled=cancelled,
+                            windows_user=windows_user(), secret=secret)
         if entry is None:
             return None
         # The message is the finished line: QueueHandler would stringify a dict.
@@ -717,8 +907,8 @@ def _shutdown() -> None:
 
 
 def _reset() -> None:
-    """Forget the writer and the warn-once flag. For tests only."""
-    global _WRITER, _warned
+    """Forget the writer, the warn-once flag and the cached Windows user. For tests only."""
+    global _WRITER, _warned, _WINDOWS_USER
     _shutdown()
     with _WRITER_LOCK:
         logger = logging.getLogger(LOGGER_NAME)
@@ -726,3 +916,4 @@ def _reset() -> None:
             logger.removeHandler(existing)
         _WRITER = None
     _warned = False
+    _WINDOWS_USER = None

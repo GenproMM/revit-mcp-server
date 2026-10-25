@@ -629,8 +629,17 @@ def _single_file(parts):
 def _two_half_entries_in_one_line(parts):
     first = line_of(parts["entries"]["child-0-1"])
     second = line_of(parts["entries"]["child-0-2"])
-    torn = first[:len(first) // 2] + second[len(second) // 2:]
+    torn = first[:len(first) // 2] + second  # a half entry run into the next whole one
+    with pytest.raises(ValueError):  # the case must really be torn, not a lucky valid hybrid
+        json.loads(torn)
     parts["secret_lines"].append(torn)
+
+
+def _aligned_hybrid_line(parts):
+    # two halves that happen to join into valid JSON: still caught, by the counts
+    first = line_of(parts["entries"]["child-0-1"])
+    second = line_of(parts["entries"]["child-0-2"])
+    parts["secret_lines"].append(first[:len(first) // 2] + second[len(second) // 2:])
 
 
 def _dual_secret(parts):
@@ -661,6 +670,7 @@ def _duplicate_call_id(parts):
 DUAL_STOP_CASES = [
     ("only-one-server-pid", _single_file, "only one server-process PID"),
     ("torn-line-of-two-half-entries", _two_half_entries_in_one_line, "not a JSON object"),
+    ("an-aligned-hybrid-line-is-caught-by-the-counts", _aligned_hybrid_line, "found"),
     ("a-process-wrote-fewer-entries", _dual_drop("child-1-2"), "wrote"),
     ("a-parent-entry-is-missing", _dual_drop("parent-0-1"), "wrote"),
     ("entry-names-the-other-revit", _dual_other_revit("child-0-1", REVIT_B), "different Revit"),

@@ -12,6 +12,7 @@ is a live result.
 """
 
 import ast
+import asyncio
 import copy
 import hashlib
 import importlib.util
@@ -21,8 +22,13 @@ import subprocess
 import sys
 import uuid
 from argparse import Namespace
+from types import SimpleNamespace
 
 import pytest
+
+import bridge
+from audit_support import (
+    PID_A, PID_B, PORT_A, PORT_B, PREFIX, SEL_A, SEL_B, make_machine, release_machine)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPT_PATH = os.path.join(REPO_ROOT, "tests", "test_phase6_live_audit.py")
@@ -949,3 +955,681 @@ def test_main_with_no_command_or_an_unknown_one_is_a_usage_error(capsys):
     assert proc.main(["nonsense"]) == 2
     assert proc.main(["classify"]) == 2
     assert "PHASE6_AUDIT_OK" not in capsys.readouterr().out
+
+
+# =============================================================================
+# Task 2: the runner (rehearse, run-single, run-dual, child) driven through the real
+# main.py tools, the real bridge and the real audit writer, against the Machine
+# fake of tests/unit/audit_support.py. No Revit, no network, no subprocess for the
+# child except its refusal. A second server process is simulated by a fake child
+# that leaves a canned record and a canned audit file, because one process can have
+# only one audit writer.
+
+
+def _document_body():
+    return {"document": DOC["token"], "title": DOC["title"], "path": DOC["path"]}
+
+
+def _outcome(tx, requested, succeeded, failed, failures=()):
+    return {"transaction_status": tx, "requested": requested, "succeeded": list(succeeded),
+            "failed": list(failed), "revit_failures": list(failures)}
+
+
+def docs_reply(count):
+    docs = [{"document": "doc1.aaaaaaaaaaaa.{}".format(i), "title": "Scratch {}".format(i),
+             "path": "C:/scratch/{}.rvt".format(i), "active": i == 0} for i in range(count)]
+    return {"status": "success", "documents": docs, "count": count}
+
+
+def props_reply(element_id, writable=True, storage="String", present=True):
+    parameters = []
+    if present:
+        parameters.append({"name": PARAM, "value": "", "storage_type": storage,
+                           "read_only": not writable, "is_instance": True})
+    return {"status": "success", "element_id": element_id, "category": "Walls",
+            "parameters": parameters, "parameter_count": len(parameters)}
+
+
+ROLLED_BACK_BODY = {"status": "rolled_back", "document_scope": "no document scope",
+                    "outcome": _outcome("RolledBack", None, [], [], ["posted failure"])}
+COMMITTED_BODY = {"status": "success", "document_scope": "no document scope",
+                  "outcome": _outcome("Committed", None, [], [])}
+PARTIAL_BODY = {"status": "partial", "tagged_count": 1, "tag_ids": [3003],
+                "skipped": [{"element_id": BAD, "reason": "Element not found"}],
+                "document": _document_body(),
+                "outcome": _outcome("Committed", 2, [TAG], [{"item": BAD, "reason": "Element not found"}])}
+SET_BODY = {"status": "success", "element_id": WALL, "document": _document_body(),
+            "outcome": _outcome("Committed", 1, [PARAM], [])}
+
+
+@pytest.fixture
+def one_revit(monkeypatch):
+    """One fake Revit (port A) with one document, a writable wall parameter and canned write replies."""
+    fake = make_machine(monkeypatch)
+    fake.listeners = {PORT_A: [PID_A]}
+    monkeypatch.setattr(bridge, "_secret_cache", SECRET)
+    monkeypatch.setenv("REVIT_PORT", "48884")
+    fake.reply(PORT_A, "/documents/", 200, docs_reply(1))
+    fake.reply(PORT_A, "/element_properties/{}".format(WALL), 200, props_reply(WALL))
+    fake.reply(PORT_A, "/element_properties/{}".format(TAG), 200,
+               {"status": "success", "element_id": TAG, "category": "Doors", "parameters": []})
+    fake.reply(PORT_A, "/execute_code/", 409, ROLLED_BACK_BODY)
+    fake.reply(PORT_A, "/tag_elements/", 200, PARTIAL_BODY)
+    fake.reply(PORT_A, "/set_parameter/", 200, SET_BODY)
+    yield fake
+    release_machine()
+
+
+@pytest.fixture
+def two_revits(monkeypatch):
+    """Two fake Revit instances (ports A and B), one document each, the parameter writable on each wall."""
+    fake = make_machine(monkeypatch)
+    monkeypatch.setattr(bridge, "_secret_cache", SECRET)
+    monkeypatch.setenv("REVIT_PORT", "48884")
+    for port, wall in ((PORT_A, WALL_A), (PORT_B, WALL_B)):
+        fake.reply(port, "/documents/", 200, docs_reply(1))
+        fake.reply(port, "/element_properties/{}".format(wall), 200, props_reply(wall))
+        fake.reply(port, "/set_parameter/", 200, SET_BODY)
+    yield fake
+    release_machine()
+
+
+def rollback_file(tmp_path):
+    path = tmp_path / "rollback.py"
+    if not path.exists():
+        path.write_bytes(CODE.encode("utf-8"))
+    return str(path)
+
+
+def single_argv(tmp_path, **overrides):
+    values = {"--wall-id": str(WALL), "--parameter": PARAM, "--view-name": VIEW, "--tag-id": str(TAG),
+              "--rollback-code": rollback_file(tmp_path), "--audit-dir": str(tmp_path / "audit"),
+              "--out": str(tmp_path / "single.json")}
+    values.update(overrides)
+    argv = ["run-single"]
+    for name, value in values.items():
+        argv += [name, value]
+    return argv
+
+
+def dual_argv(tmp_path, **overrides):
+    values = {"--wall-a": str(WALL_A), "--wall-b": str(WALL_B), "--parameter": PARAM,
+              "--audit-dir": str(tmp_path / "audit"), "--out": str(tmp_path / "dual.json"),
+              "--count": str(K)}
+    values.update(overrides)
+    argv = ["run-dual"]
+    for name, value in values.items():
+        argv += [name, value]
+    return argv
+
+
+def rehearse_argv(tmp_path, **overrides):
+    values = {"--rollback-code": rollback_file(tmp_path), "--audit-dir": str(tmp_path / "audit")}
+    values.update(overrides)
+    argv = ["rehearse"]
+    for name, value in values.items():
+        argv += [name, value]
+    return argv
+
+
+def load_record(path):
+    with open(path, "rb") as handle:
+        return json.loads(handle.read().decode("utf-8"))
+
+
+def posts_of(fake):
+    return [path for (_port, method, path) in fake.seen if method == "POST"]
+
+
+class ExplodingBridge(object):
+    """Any use at all fails the test: a refusal must come before the bridge is touched."""
+
+    def __getattr__(self, name):
+        raise AssertionError("the bridge was touched ({}) before a refusal".format(name))
+
+
+def _explode(*_args, **_kwargs):
+    raise AssertionError("touched before a refusal")
+
+
+# --------------------------------------------------------- the script's own seams
+
+
+def test_the_script_commands_are_all_listed_in_help(tmp_path):
+    done = subprocess.run([sys.executable, SCRIPT_PATH, "--help"], capture_output=True, text=True,
+                          timeout=60, cwd=str(tmp_path))
+    assert done.returncode == 0, done.stderr
+    for name in ("template", "rehearse", "run-single", "run-dual", "child", "classify"):
+        assert name in done.stdout, name
+
+
+def test_the_acceptance_refusal_exits_2_names_the_repository_and_writes_nothing():
+    target = os.path.join(REPO_ROOT, "tests", "record.json")
+    done = subprocess.run(
+        [sys.executable, SCRIPT_PATH, "run-single", "--wall-id", "1", "--parameter", "Comments",
+         "--view-name", "L1", "--tag-id", "2", "--rollback-code", SCRIPT_PATH, "--audit-dir", ".",
+         "--out", os.path.join("tests", "record.json")],
+        capture_output=True, text=True, timeout=60, cwd=REPO_ROOT)
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert "repository" in done.stdout
+    assert not os.path.exists(target)
+
+
+def test_the_parent_issues_its_calls_with_asyncio_gather():
+    with open(SCRIPT_PATH, "rb") as handle:
+        assert "asyncio.gather(" in handle.read().decode("utf-8")
+
+
+def test_read_audit_dir_returns_raw_lines_of_audit_files_only(tmp_path):
+    first, second = "audit-20261025-101500-11.jsonl", "audit-20261025-101500-11.0002.jsonl"
+    (tmp_path / first).write_bytes(b'{"a":1}\r\n{"b":2}\r\n')
+    (tmp_path / second).write_bytes(b'{"c":3}\n{"torn"')
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "audit-dir.jsonl").mkdir()
+    files = proc._read_audit_dir(str(tmp_path))
+    assert set(files) == {first, second}
+    assert files[first] == ['{"a":1}\r', '{"b":2}\r']
+    assert files[second] == ['{"c":3}', '{"torn"']
+    assert proc._read_audit_dir(str(tmp_path / "missing")) == {}
+
+
+def test_save_writes_once_and_never_overwrites(tmp_path):
+    path = tmp_path / "r.json"
+    assert proc._save(str(path), {"a": "Проект"}) is True
+    assert proc._save(str(path), {"a": 2}) is False
+    assert load_record(str(path)) == {"a": "Проект"}
+    assert b"\r\n" not in path.read_bytes()
+
+
+def test_reply_text_joins_content_blocks_and_accepts_plain_text():
+    blocks = [SimpleNamespace(text="one"), SimpleNamespace(text="two"), SimpleNamespace(data=b"x")]
+    assert proc._reply_text(blocks) == "one\ntwo"
+    assert proc._reply_text((blocks, {"structured": True})) == "one\ntwo"
+    assert proc._reply_text("plain") == "plain"
+
+
+def test_tool_step_counts_the_post_before_the_call_even_when_the_call_raises(monkeypatch):
+    record = proc.evidence_template()
+    seen = []
+
+    async def failing_call(arguments):
+        seen.append(record["posts_sent"])
+        raise RuntimeError("synthetic transport failure")
+
+    monkeypatch.setattr(proc, "_tool_callable", lambda tool: failing_call)
+    problem = asyncio.run(proc._tool_step(
+        record, "w1", "execute_revit_code", {"code": "x", "user_request": "ur"}))
+    assert seen == [1] and record["posts_sent"] == 1
+    assert problem.startswith("RuntimeError")
+    assert record["steps"]["w1"]["exception"] == problem
+    assert record["steps"]["w1"]["user_request"] == "ur"
+    assert "w1" not in record["replies"]
+
+
+def test_tool_step_stores_the_reply_text_of_a_successful_call(monkeypatch):
+    record = proc.evidence_template()
+
+    async def call(arguments):
+        return reply_for("11111111-2222-4333-8444-555555555555")
+
+    monkeypatch.setattr(proc, "_tool_callable", lambda tool: call)
+    assert asyncio.run(proc._tool_step(record, "w3", "set_parameter", {"user_request": "u"})) is None
+    assert record["replies"]["w3"].endswith("11111111-2222-4333-8444-555555555555")
+    assert record["posts_sent"] == 1
+
+
+def test_tool_step_refuses_a_tool_outside_the_allow_list_before_counting(monkeypatch):
+    record = proc.evidence_template()
+    monkeypatch.setattr(proc, "_tool_callable", _explode)
+    for tool in ("save_document", "open_model", "delete_elements", "", None):
+        with pytest.raises(ValueError):
+            asyncio.run(proc._tool_step(record, "w1", tool, {}))
+    assert record["posts_sent"] == 0
+
+
+def test_read_routes_outside_the_allow_list_are_refused():
+    for endpoint in ("/status/", "/documents/", "/element_properties/1001"):
+        proc._require_allowed_read(endpoint)
+    for endpoint in ("/save_document/", "/execute_code/", "/open_model/", "/set_parameter/", "/status",
+                     "", "/element_properties/x", None, 5):
+        with pytest.raises(ValueError):
+            proc._require_allowed_read(endpoint)
+
+
+# ------------------------------------------------------------------- refusals first
+
+
+@pytest.mark.parametrize("command,argv_for", [("run-single", single_argv), ("run-dual", dual_argv),
+                                              ("rehearse", rehearse_argv)])
+def test_an_audit_dir_with_files_is_refused_before_the_bridge_is_touched(
+        monkeypatch, tmp_path, capsys, command, argv_for):
+    (tmp_path / "audit").mkdir()
+    (tmp_path / "audit" / "left-over.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(proc, "_bridge", ExplodingBridge)
+    monkeypatch.setattr(proc, "_main_module", _explode)
+    monkeypatch.setattr(proc, "_start_child", _explode)
+    assert proc.main(argv_for(tmp_path)) == 2
+    out = capsys.readouterr().out
+    assert "not empty" in out and "PHASE6_AUDIT_OK" not in out
+
+
+@pytest.mark.parametrize("command,argv_for", [("run-single", single_argv), ("run-dual", dual_argv)])
+def test_an_existing_out_record_is_refused_untouched_before_the_bridge_is_touched(
+        monkeypatch, tmp_path, capsys, command, argv_for):
+    out = tmp_path / ("single.json" if command == "run-single" else "dual.json")
+    out.write_bytes(b'{"keep": "me"}')
+    monkeypatch.setattr(proc, "_bridge", _explode)
+    monkeypatch.setattr(proc, "_main_module", _explode)
+    monkeypatch.setattr(proc, "_start_child", _explode)
+    assert proc.main(argv_for(tmp_path)) == 2
+    assert out.read_bytes() == b'{"keep": "me"}'
+    assert not (tmp_path / "audit").exists()
+
+
+def test_a_missing_option_is_a_usage_error_that_sends_nothing(monkeypatch, capsys):
+    monkeypatch.setattr(proc, "_bridge", _explode)
+    monkeypatch.setattr(proc, "_main_module", _explode)
+    for argv in (["run-single", "--wall-id", "5"], ["run-dual"], ["rehearse"], ["child"]):
+        assert proc.main(argv) == 2
+    assert "PHASE6_AUDIT_OK" not in capsys.readouterr().out
+
+
+def test_the_audit_dir_and_port_are_set_before_the_bridge_is_imported(monkeypatch, one_revit, tmp_path):
+    seen = {}
+    real = proc._bridge
+
+    def capturing():
+        seen["dir"] = os.environ.get("REVIT_MCP_AUDIT_DIR")
+        seen["port"] = os.environ.get("REVIT_PORT")
+        return real()
+
+    monkeypatch.setattr(proc, "_bridge", capturing)
+    proc.main(single_argv(tmp_path))
+    assert seen["dir"] == os.path.abspath(str(tmp_path / "audit"))
+    assert seen["port"] == "48884"
+
+
+# --------------------------------------------------- run-single: preflight and run
+
+
+SINGLE_PREFLIGHT_FAULTS = [
+    ("two-documents", lambda fake, mp: fake.reply(PORT_A, "/documents/", 200, docs_reply(2)), {}, "documents"),
+    ("no-document", lambda fake, mp: fake.reply(PORT_A, "/documents/", 200, docs_reply(0)), {}, "documents"),
+    ("parameter-read-only",
+     lambda fake, mp: fake.reply(PORT_A, "/element_properties/{}".format(WALL), 200,
+                                 props_reply(WALL, writable=False)), {}, "parameter"),
+    ("parameter-absent",
+     lambda fake, mp: fake.reply(PORT_A, "/element_properties/{}".format(WALL), 200,
+                                 props_reply(WALL, present=False)), {}, "parameter"),
+    ("parameter-not-text",
+     lambda fake, mp: fake.reply(PORT_A, "/element_properties/{}".format(WALL), 200,
+                                 props_reply(WALL, storage="Integer")), {}, "parameter"),
+    ("tag-element-missing",
+     lambda fake, mp: fake.reply(PORT_A, "/element_properties/{}".format(TAG), 404,
+                                 {"error": "Element not found."}), {}, "tag"),
+    ("two-usable-targets", lambda fake, mp: fake.listeners.__setitem__(PORT_B, [PID_B]), {}, "targets"),
+    ("port-collision", lambda fake, mp: fake.listeners.__setitem__(PORT_A, [PID_A, 999]), {}, "targets"),
+    ("inventory-unavailable",
+     lambda fake, mp: mp.setattr(bridge, "listener_snapshot", lambda ports, **kw: None), {}, "inventory"),
+    ("wrong-port", lambda fake, mp: None, {"--port": "48999"}, "port"),
+]
+
+
+@pytest.mark.parametrize("label,fault,overrides,field", SINGLE_PREFLIGHT_FAULTS,
+                         ids=[c[0] for c in SINGLE_PREFLIGHT_FAULTS])
+def test_run_single_preflight_failure_sends_no_post_and_records_zero(
+        monkeypatch, one_revit, tmp_path, capsys, label, fault, overrides, field):
+    fault(one_revit, monkeypatch)
+    argv = single_argv(tmp_path, **overrides)
+    assert proc.main(argv) == 1
+    text = capsys.readouterr().out
+    assert posts_of(one_revit) == []
+    assert "PHASE6_AUDIT_STOP" in text and "PHASE6_AUDIT_OK" not in text
+    assert "POSTS_SENT=0" in text
+    assert "consumed" not in text and "nothing was written" in text.lower()
+    assert SECRET not in text
+    record = load_record(str(tmp_path / "single.json"))
+    assert record["posts_sent"] == 0 and record["stage"] == "single"
+    assert field in record["stop_reason"]
+    assert all(record["steps"][key] is None for key in ("w1", "w2", "w3"))
+
+
+def test_a_preflight_stop_allows_a_rerun_to_a_fresh_out_and_leaves_the_first_record_alone(
+        monkeypatch, one_revit, tmp_path, capsys):
+    one_revit.reply(PORT_A, "/documents/", 200, docs_reply(2))
+    assert proc.main(single_argv(tmp_path)) == 1
+    first = (tmp_path / "single.json").read_bytes()
+    capsys.readouterr()
+    one_revit.reply(PORT_A, "/documents/", 200, docs_reply(1))
+    argv = single_argv(tmp_path, **{"--out": str(tmp_path / "second.json"),
+                                    "--audit-dir": str(tmp_path / "audit-2")})
+    assert proc.main(argv) == 0
+    assert "PHASE6_AUDIT_OK" in capsys.readouterr().out
+    assert (tmp_path / "single.json").read_bytes() == first
+
+
+def test_run_single_end_to_end_through_the_audited_tools_is_ok(one_revit, tmp_path, capsys):
+    assert proc.main(single_argv(tmp_path)) == 0
+    text = capsys.readouterr().out
+    assert "PHASE6_AUDIT_OK" in text and "POSTS_SENT=3" in text and "SECRET_OCCURRENCES=0" in text
+    assert "consumed" in text and SECRET not in text
+    assert posts_of(one_revit) == [PREFIX + "/execute_code/", PREFIX + "/tag_elements/",
+                                   PREFIX + "/set_parameter/"]
+    for (_port, method, path) in one_revit.seen:
+        if method == "GET" and not path.endswith("/status/"):
+            assert path.startswith((PREFIX + "/documents/", PREFIX + "/element_properties/")), path
+    record = load_record(str(tmp_path / "single.json"))
+    assert record["stage"] == "single" and record["posts_sent"] == 3
+    assert record["revit_pids"] == [PID_A]
+    assert record["server_pids"]["parent"] == os.getpid()
+    assert record["inputs"]["rollback_code"] == CODE
+    requests = [step["user_request"] for step in (record["steps"][k] for k in ("w1", "w2", "w3"))]
+    assert all(requests) and len(set(requests)) == 3
+    assert set(record["steps"]["w2"]["arguments"]["element_ids"]) == {TAG, BAD}
+    assert len(record["audit_files"]) == 1
+    assert next(iter(record["audit_files"])).endswith("-{}.jsonl".format(os.getpid()))
+    assert SECRET.encode("utf-8") not in (tmp_path / "single.json").read_bytes()
+    assert proc.classify_single(record, SECRET) == {"verdict": "ok", "reasons": []}
+    capsys.readouterr()
+    assert proc.main(["classify", str(tmp_path / "single.json")]) == 0
+    assert "PHASE6_AUDIT_OK" in capsys.readouterr().out
+
+
+def test_run_single_calls_each_write_once_in_order_even_when_the_second_raises(
+        monkeypatch, one_revit, tmp_path, capsys):
+    calls = []
+
+    def callable_for(tool):
+        async def call(arguments):
+            calls.append(tool)
+            if tool == "tag_elements":
+                raise RuntimeError("synthetic transport failure")
+            return reply_for(str(uuid.uuid4()))
+        return call
+
+    monkeypatch.setattr(proc, "_tool_callable", callable_for)
+    assert proc.main(single_argv(tmp_path)) == 1
+    text = capsys.readouterr().out
+    assert calls == ["execute_revit_code", "tag_elements", "set_parameter"]
+    assert "PHASE6_AUDIT_STOP" in text and "POSTS_SENT=3" in text and "consumed" in text
+    record = load_record(str(tmp_path / "single.json"))
+    assert record["posts_sent"] == 3
+    assert "synthetic transport failure" in record["steps"]["w2"]["exception"]
+    assert "w2" not in record["replies"] and "w1" in record["replies"] and "w3" in record["replies"]
+
+
+def test_run_single_still_writes_its_record_when_the_bridge_cannot_be_imported(
+        monkeypatch, tmp_path, capsys):
+    def broken():
+        raise ImportError("synthetic import failure")
+
+    monkeypatch.setattr(proc, "_bridge", broken)
+    assert proc.main(single_argv(tmp_path)) == 1
+    text = capsys.readouterr().out
+    assert "POSTS_SENT=0" in text and "PHASE6_AUDIT_STOP" in text
+    assert "synthetic import failure" in load_record(str(tmp_path / "single.json"))["stop_reason"]
+
+
+# ------------------------------------------------------------------- rehearse
+
+
+def test_rehearse_reports_a_rollback_after_exactly_one_post(one_revit, tmp_path, capsys):
+    assert proc.main(rehearse_argv(tmp_path)) == 0
+    text = capsys.readouterr().out
+    assert "REHEARSAL_ROLLED_BACK" in text and "POSTS_SENT=1" in text
+    assert "PHASE6_AUDIT" not in text and SECRET not in text
+    assert posts_of(one_revit) == [PREFIX + "/execute_code/"]
+    body = json.loads([r for r in one_revit.requests if r.method == "POST"][0].content)
+    assert body["description"] == "phase6 rehearsal" and body["code"] == CODE
+    files = proc._read_audit_dir(str(tmp_path / "audit"))
+    entries = [e for _n, e in proc.parse_audit_files(files)[0] if e.get("tool") == "execute_revit_code"]
+    assert len(entries) == 1 and entries[0]["user_request"] == "phase6 rehearsal"
+
+
+def test_rehearse_reports_a_commit_and_is_not_a_pass(one_revit, tmp_path, capsys):
+    one_revit.reply(PORT_A, "/execute_code/", 200, COMMITTED_BODY)
+    assert proc.main(rehearse_argv(tmp_path)) == 1
+    text = capsys.readouterr().out
+    assert "REHEARSAL_COMMITTED" in text and "POSTS_SENT=1" in text
+
+
+def test_rehearse_reports_anything_else_as_other(one_revit, tmp_path, capsys):
+    one_revit.reply(PORT_A, "/execute_code/", 500, {"error": "boom"})
+    assert proc.main(rehearse_argv(tmp_path)) == 1
+    text = capsys.readouterr().out
+    assert "REHEARSAL_OTHER" in text and "POSTS_SENT=1" in text
+
+
+def test_rehearse_stops_before_any_post_when_the_preflight_fails(one_revit, tmp_path, capsys):
+    one_revit.reply(PORT_A, "/documents/", 200, docs_reply(2))
+    assert proc.main(rehearse_argv(tmp_path)) == 1
+    text = capsys.readouterr().out
+    assert "REHEARSAL_OTHER" in text and "POSTS_SENT=0" in text
+    assert posts_of(one_revit) == []
+
+
+# ------------------------------------------------------------------- run-dual
+
+
+class FakeChild(object):
+    def __init__(self, returncode=0, timeout=False):
+        self.returncode = returncode
+        self._timeout = timeout
+        self.killed = False
+
+    def communicate(self, timeout=None):
+        if self._timeout and not self.killed:
+            raise subprocess.TimeoutExpired("child", timeout)
+        return b"", b""
+
+    def kill(self):
+        self.killed = True
+
+
+def install_fake_child(monkeypatch, fake, write_record=True, write_audit=True, returncode=0,
+                       timeout=False, started=None):
+    """A stand-in for the second server process: leaves its record and its audit file on disk."""
+    def start(argv, env):
+        options = dict(zip(argv[3::2], argv[4::2]))
+        if started is not None:
+            started.update(argv=list(argv), env=dict(env), options=options,
+                           posts_at_start=len(posts_of(fake)))
+        count = int(options["--count"])
+        audit_dir = options["--audit-dir"]
+        os.makedirs(audit_dir, exist_ok=True)
+        calls, replies, lines = [], {}, []
+        for index, (sel, wall) in enumerate((("--target-a", "--wall-a"), ("--target-b", "--wall-b"))):
+            revit_pid = bridge.parse_target(options[sel])["pid"]
+            for i in range(1, count + 1):
+                key = "child-{}-{}".format(index, i)
+                call_id = str(uuid.uuid4())
+                value = "phase6-dual-{}-{}".format(CHILD_PID, i)
+                ur = "phase6 dual child {}".format(key)
+                element = int(options[wall])
+                lines.append(line_of(entry(
+                    call_id, "set_parameter", "/set_parameter/", "success", 200, succeeded=[PARAM],
+                    server_pid=CHILD_PID, process_pid=revit_pid, user_request=ur,
+                    args={"element_id": element, "parameter_name": PARAM, "value": value})))
+                calls.append({"key": key, "tool": "set_parameter", "pid": revit_pid,
+                              "element_id": element, "value": value, "user_request": ur,
+                              "exception": None, "arguments": {}})
+                replies[key] = reply_for(call_id)
+        if write_audit:
+            with open(os.path.join(audit_dir, file_name(CHILD_PID)), "wb") as handle:
+                handle.write(("\n".join(lines) + "\n").encode("utf-8"))
+        if write_record:
+            record = proc.evidence_template()
+            record.update({"stage": "dual-child", "posts_sent": len(calls), "replies": replies,
+                           "server_pids": {"parent": None, "child": CHILD_PID}})
+            record["steps"]["child"] = calls
+            with open(options["--out"], "wb") as handle:
+                handle.write(json.dumps(record).encode("utf-8"))
+        return FakeChild(returncode=returncode, timeout=timeout)
+
+    monkeypatch.setattr(proc, "_start_child", start)
+
+
+def test_run_dual_end_to_end_with_a_second_server_process_is_ok(monkeypatch, two_revits, tmp_path, capsys):
+    started = {}
+    install_fake_child(monkeypatch, two_revits, started=started)
+    assert proc.main(dual_argv(tmp_path)) == 0
+    text = capsys.readouterr().out
+    assert "PHASE6_AUDIT_OK" in text and "POSTS_SENT={}".format(4 * K) in text
+    assert "SECRET_OCCURRENCES=0" in text and SECRET not in text
+    # the child was started, with its token in argv and environment, before the parent wrote anything
+    assert started["posts_at_start"] == 0
+    token = started["options"]["--child-token"]
+    assert token and started["env"][proc.CHILD_TOKEN_ENV] == token
+    assert started["options"]["--count"] == str(K) and started["options"]["--parameter"] == PARAM
+    assert started["options"]["--wall-a"] == str(WALL_A) and started["options"]["--wall-b"] == str(WALL_B)
+    assert bridge.parse_target(started["options"]["--target-a"])["pid"] == PID_A
+    assert bridge.parse_target(started["options"]["--target-b"])["pid"] == PID_B
+    assert started["options"]["--audit-dir"] == os.path.abspath(str(tmp_path / "audit"))
+    assert started["options"]["--out"] != str(tmp_path / "dual.json")
+    # the parent's own calls: K per Revit, each on its own wall, with values naming its pid
+    bodies = [(r.url.port, json.loads(r.content)) for r in two_revits.requests if r.method == "POST"]
+    assert len(bodies) == 2 * K
+    for port, wall in ((PORT_A, WALL_A), (PORT_B, WALL_B)):
+        mine = [b for p, b in bodies if p == port]
+        assert [b["element_id"] for b in mine] == [wall] * K
+        assert sorted(b["value"] for b in mine) == ["phase6-dual-{}-{}".format(os.getpid(), i)
+                                                    for i in range(1, K + 1)]
+    record = load_record(str(tmp_path / "dual.json"))
+    assert record["stage"] == "dual" and record["posts_sent"] == 4 * K
+    assert record["revit_pids"] == [PID_A, PID_B]
+    assert record["server_pids"] == {"parent": os.getpid(), "child": CHILD_PID}
+    assert len(record["steps"]["parent"]) == 2 * K and len(record["steps"]["child"]) == 2 * K
+    assert len(record["audit_files"]) == 2
+    assert SECRET.encode("utf-8") not in (tmp_path / "dual.json").read_bytes()
+    assert proc.classify_dual(record, SECRET) == {"verdict": "ok", "reasons": []}
+
+
+def test_run_dual_gives_the_lowest_port_the_first_wall(monkeypatch, two_revits, tmp_path):
+    install_fake_child(monkeypatch, two_revits)
+    assert proc.main(dual_argv(tmp_path)) == 0
+    record = load_record(str(tmp_path / "dual.json"))
+    targets = record["preflight"]["targets"]
+    assert [t["wall_id"] for t in targets] == [WALL_A, WALL_B]
+    assert [t["pid"] for t in targets] == [PID_A, PID_B]
+
+
+DUAL_PREFLIGHT_FAULTS = [
+    ("one-revit-only", lambda fake: fake.listeners.pop(PORT_B), "targets"),
+    ("no-revit", lambda fake: fake.listeners.clear(), "targets"),
+    ("port-collision", lambda fake: fake.listeners.__setitem__(PORT_A, [PID_A, 999]), "targets"),
+    ("second-has-two-documents", lambda fake: fake.reply(PORT_B, "/documents/", 200, docs_reply(2)),
+     "documents"),
+    ("first-has-no-document", lambda fake: fake.reply(PORT_A, "/documents/", 200, docs_reply(0)),
+     "documents"),
+    ("wall-b-read-only",
+     lambda fake: fake.reply(PORT_B, "/element_properties/{}".format(WALL_B), 200,
+                             props_reply(WALL_B, writable=False)), "parameter"),
+    ("wall-a-missing",
+     lambda fake: fake.reply(PORT_A, "/element_properties/{}".format(WALL_A), 404,
+                             {"error": "Element not found."}), "parameter"),
+]
+
+
+@pytest.mark.parametrize("label,fault,field", DUAL_PREFLIGHT_FAULTS, ids=[c[0] for c in DUAL_PREFLIGHT_FAULTS])
+def test_run_dual_preflight_failure_starts_no_child_sends_no_post_and_records_zero(
+        monkeypatch, two_revits, tmp_path, capsys, label, fault, field):
+    fault(two_revits)
+    monkeypatch.setattr(proc, "_start_child", _explode)
+    assert proc.main(dual_argv(tmp_path)) == 1
+    text = capsys.readouterr().out
+    assert posts_of(two_revits) == []
+    assert "PHASE6_AUDIT_STOP" in text and "POSTS_SENT=0" in text
+    assert "nothing was written" in text.lower()
+    record = load_record(str(tmp_path / "dual.json"))
+    assert record["posts_sent"] == 0 and field in record["stop_reason"]
+    assert not (tmp_path / "dual-child.json").exists()
+
+
+def test_run_dual_without_the_child_record_is_a_stop_with_an_unknown_count(
+        monkeypatch, two_revits, tmp_path, capsys):
+    install_fake_child(monkeypatch, two_revits, write_record=False)
+    assert proc.main(dual_argv(tmp_path)) == 1
+    text = capsys.readouterr().out
+    assert "PHASE6_AUDIT_STOP" in text and "POSTS_SENT=unknown" in text
+    record = load_record(str(tmp_path / "dual.json"))
+    assert record["posts_sent"] is None and "child" in record["stop_reason"]
+
+
+def test_run_dual_with_a_failed_child_exit_is_a_stop(monkeypatch, two_revits, tmp_path, capsys):
+    install_fake_child(monkeypatch, two_revits, returncode=3)
+    assert proc.main(dual_argv(tmp_path)) == 1
+    record = load_record(str(tmp_path / "dual.json"))
+    assert "exited" in record["stop_reason"] and record["child_exit"] == 3
+
+
+def test_run_dual_kills_a_child_that_never_finishes_and_reports_an_unknown_count(
+        monkeypatch, two_revits, tmp_path, capsys):
+    install_fake_child(monkeypatch, two_revits, timeout=True, write_record=False)
+    assert proc.main(dual_argv(tmp_path)) == 1
+    record = load_record(str(tmp_path / "dual.json"))
+    assert "timed out" in record["stop_reason"] and record["posts_sent"] is None
+
+
+def test_run_dual_stops_when_the_child_leaves_no_audit_file(monkeypatch, two_revits, tmp_path, capsys):
+    install_fake_child(monkeypatch, two_revits, write_audit=False)
+    assert proc.main(dual_argv(tmp_path)) == 1
+    text = capsys.readouterr().out
+    assert "PHASE6_AUDIT_STOP" in text and "only one server-process PID" in text
+
+
+# ---------------------------------------------------------------------- child
+
+
+def child_argv(tmp_path, token="tok-1", **overrides):
+    values = {"--child-token": token, "--audit-dir": str(tmp_path / "audit-child"),
+              "--out": str(tmp_path / "child.json"), "--port": "48884", "--parameter": PARAM,
+              "--count": str(K), "--target-a": SEL_A, "--target-b": SEL_B,
+              "--wall-a": str(WALL_A), "--wall-b": str(WALL_B)}
+    values.update(overrides)
+    argv = ["child"]
+    for name, value in values.items():
+        argv += [name, value]
+    return argv
+
+
+def test_child_issues_its_calls_flushes_and_writes_its_record(monkeypatch, two_revits, tmp_path, capsys):
+    monkeypatch.setenv(proc.CHILD_TOKEN_ENV, "tok-1")
+    assert proc.main(child_argv(tmp_path)) == 0
+    record = load_record(str(tmp_path / "child.json"))
+    assert record["stage"] == "dual-child" and record["posts_sent"] == 2 * K
+    assert record["server_pids"]["child"] == os.getpid()
+    calls = record["steps"]["child"]
+    assert len(calls) == 2 * K
+    assert sorted(c["pid"] for c in calls) == [PID_A] * K + [PID_B] * K
+    assert all(proc.audit_id_of(record["replies"][c["key"]]) for c in calls)
+    assert all(c["value"].startswith("phase6-dual-{}-".format(os.getpid())) for c in calls)
+    files = proc._read_audit_dir(str(tmp_path / "audit-child"))
+    entries = [e for _n, e in proc.parse_audit_files(files)[0] if e.get("tool") == "set_parameter"]
+    assert len(entries) == 2 * K
+    assert SECRET.encode("utf-8") not in (tmp_path / "child.json").read_bytes()
+    assert SECRET not in capsys.readouterr().out
+
+
+def test_child_refuses_without_the_token_before_touching_anything(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv(proc.CHILD_TOKEN_ENV, raising=False)
+    monkeypatch.setattr(proc, "_bridge", _explode)
+    monkeypatch.setattr(proc, "_main_module", _explode)
+    assert proc.main(child_argv(tmp_path)) == 2
+    assert "run-dual" in capsys.readouterr().out
+    assert not (tmp_path / "child.json").exists() and not (tmp_path / "audit-child").exists()
+
+
+def test_child_refuses_a_token_that_differs_from_the_environment(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv(proc.CHILD_TOKEN_ENV, "other")
+    monkeypatch.setattr(proc, "_bridge", _explode)
+    assert proc.main(child_argv(tmp_path)) == 2
+
+
+def test_child_run_as_a_real_subprocess_without_the_token_exits_2(tmp_path):
+    env = dict(os.environ)
+    env.pop(proc.CHILD_TOKEN_ENV, None)
+    argv = [sys.executable, SCRIPT_PATH] + child_argv(tmp_path)
+    done = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=120, cwd=str(tmp_path))
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert "run-dual" in done.stdout
+    assert not (tmp_path / "child.json").exists() and not (tmp_path / "audit-child").exists()

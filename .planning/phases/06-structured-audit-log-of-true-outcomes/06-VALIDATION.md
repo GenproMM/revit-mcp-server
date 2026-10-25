@@ -3,9 +3,9 @@ phase: "06"
 slug: "structured-audit-log-of-true-outcomes"
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 # audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: "2026-10-25"
 ---
 
@@ -43,22 +43,22 @@ Filled in by the planner/executor once task IDs exist. Requirement → command m
 
 | Requirement | Behavior | Test Type | Automated Command | File Exists | Status |
 |-------------|----------|-----------|-------------------|-------------|--------|
-| AUDIT-01 | Every sent call yields one entry; handshake/probes/not-sent yield none | integration | `uv run pytest tests/unit/test_audit_bridge_hook.py -x` | ❌ W0 | ⬜ pending |
-| AUDIT-01 | `mutation` flag; open-read list mirrors `trust`; every gated route classified | unit | `uv run pytest tests/unit/test_audit_entry.py -x -k mutation` | ❌ W0 | ⬜ pending |
-| AUDIT-02 | Schema 1 fields present | unit | `uv run pytest tests/unit/test_audit_entry.py -x` | ❌ W0 | ⬜ pending |
-| AUDIT-03 | Outcome mapping table (pure builder) | unit | `uv run pytest tests/unit/test_audit_entry.py -x -k outcome` | ❌ W0 | ⬜ pending |
-| AUDIT-03 | Same outcomes through real bridge + fake Revit | integration | `uv run pytest tests/unit/test_audit_bridge_hook.py -x -k outcome` | ❌ W0 | ⬜ pending |
-| AUDIT-03 | Live rollback + partial classifier | unit | `uv run pytest tests/unit/test_phase6_live_audit.py -x` | ❌ W0 | ⬜ pending |
-| AUDIT-04 | Shared `call_id` across bridge calls of one tool call | integration | `uv run pytest tests/unit/test_audit_correlation.py -x` | ❌ W0 | ⬜ pending |
-| AUDIT-04 (D-12) | `user_request` on every tool, other params unchanged | unit | `uv run pytest tests/unit/test_audit_registration.py -x` | ❌ W0 | ⬜ pending |
-| AUDIT-05 | No stdout from audit writer; stdio stream stays clean | static + subprocess | `uv run pytest tests/unit/test_audit_stdio.py -x` | ❌ W0 | ⬜ pending |
-| AUDIT-05 | `import bridge` free of FastMCP; cold start | existing + script | `uv run pytest tests/unit/test_bridge_serialization.py -k imports` ; `python tests/test_init_latency.py` | ✅ | ⬜ pending |
-| AUDIT-06 | Concurrent calls to two incarnations never interleave | integration | `uv run pytest tests/unit/test_audit_writer.py -x -k concurrent` | ❌ W0 | ⬜ pending |
-| AUDIT-07 | Size cap from first write, rotation, prune, held reader | unit | `uv run pytest tests/unit/test_audit_writer.py -x -k "rotate or prune or reader or first_write"` | ❌ W0 | ⬜ pending |
-| AUDIT-08 | Secret absent from file bytes across success/401/exception/truncation | integration | `uv run pytest tests/unit/test_audit_secret.py -x` | ❌ W0 | ⬜ pending |
-| AUDIT-08 | No `_mcp`/body/reply data; key scrub spares `session_token` | unit | `uv run pytest tests/unit/test_audit_entry.py -x -k redact` | ❌ W0 | ⬜ pending |
-| D-18 | Writer failure never changes a tool result | unit | `uv run pytest tests/unit/test_audit_writer.py -x -k never_breaks` | ❌ W0 | ⬜ pending |
-| Payload | `audit.py` shipped by `build-payload.cmd` | unit | `uv run pytest tests/unit/test_payload_ships_root_modules.py -x` | ✅ (extend) | ⬜ pending |
+| AUDIT-01 | Every sent call yields one entry; handshake/probes/not-sent yield none | integration | `uv run pytest tests/unit/test_audit_bridge_hook.py -x` | ✅ | ✅ green |
+| AUDIT-01 | `mutation` flag; open-read list mirrors `trust`; every gated route classified | unit | `uv run pytest tests/unit/test_audit_entry.py -x -k mutation` | ✅ | ✅ green |
+| AUDIT-02 | Schema 1 fields present | unit | `uv run pytest tests/unit/test_audit_entry.py -x` | ✅ | ✅ green |
+| AUDIT-03 | Outcome mapping table (pure builder) | unit | `uv run pytest tests/unit/test_audit_entry.py -x -k outcome` | ✅ | ✅ green |
+| AUDIT-03 | Same outcomes through real bridge + fake Revit | integration | `uv run pytest tests/unit/test_audit_bridge_hook.py -x -k outcome` | ✅ | ✅ green |
+| AUDIT-03 | Live rollback + partial classifier | unit | `uv run pytest tests/unit/test_phase6_live_audit.py -x` | ✅ | ✅ green |
+| AUDIT-04 | Shared `call_id` across bridge calls of one tool call | integration | `uv run pytest tests/unit/test_audit_correlation.py -x` | ✅ | ✅ green |
+| AUDIT-04 (D-12) | `user_request` on every tool, other params unchanged | unit | `uv run pytest tests/unit/test_audit_registration.py -x` | ✅ | ✅ green |
+| AUDIT-05 | No stdout from audit writer; stdio stream stays clean | static + subprocess | `uv run pytest tests/unit/test_audit_stdio.py -x` | ✅ | ✅ green |
+| AUDIT-05 | `import bridge` free of FastMCP; cold start | existing + script | `uv run pytest tests/unit/test_bridge_serialization.py -k imports` ; `python tests/test_init_latency.py` | ✅ | ✅ green |
+| AUDIT-06 | Concurrent calls to two incarnations never interleave | integration | `uv run pytest tests/unit/test_audit_writer.py -x -k concurrent` | ✅ | ✅ green |
+| AUDIT-07 | Size cap from first write, rotation, prune, held reader | unit | `uv run pytest tests/unit/test_audit_writer.py -x -k "rotate or prune or reader or first_write"` | ✅ | ✅ green |
+| AUDIT-08 | Secret absent from file bytes across success/401/exception/truncation | integration | `uv run pytest tests/unit/test_audit_secret.py -x` | ✅ | ✅ green |
+| AUDIT-08 | No `_mcp`/body/reply data; key scrub spares `session_token` | unit | `uv run pytest tests/unit/test_audit_entry.py -x -k redact` | ✅ | ✅ green |
+| D-18 | Writer failure never changes a tool result | unit | `uv run pytest tests/unit/test_audit_writer.py -x -k never_breaks` | ✅ | ✅ green |
+| Payload | `audit.py` shipped by `build-payload.cmd` | unit | `uv run pytest tests/unit/test_payload_ships_root_modules.py -x` | ✅ | ✅ green |
 | AUDIT-03 (live) | Real rollback (409 `rolled_back`) and real partial batch recorded truthfully | live, one-shot | `uv run python tests/test_phase6_live_audit.py run-single ...` | n/a | ✅ green (`PHASE6_AUDIT_OK`, 2026-10-25) |
 | AUDIT-06 (live) | Two Revit instances, two server processes, separate uncorrupted audit files | live, one-shot | `uv run python tests/test_phase6_live_audit.py run-dual ...` | n/a | ✅ green (`PHASE6_AUDIT_OK`, 2026-10-25) |
 
@@ -68,11 +68,11 @@ Filled in by the planner/executor once task IDs exist. Requirement → command m
 
 ## Wave 0 Requirements
 
-- [ ] `tests/unit/audit_support.py` — `Machine`-style fake, in-process fake-Revit HTTP server, audit-file reader/validator
-- [ ] autouse fixture in `tests/unit/conftest.py` isolating the audit sink/dir and resetting the writer singleton
-- [ ] `tests/unit/test_audit_entry.py`, `test_audit_bridge_hook.py`, `test_audit_correlation.py`, `test_audit_registration.py`, `test_audit_writer.py`, `test_audit_secret.py`, `test_audit_stdio.py`
-- [ ] extend `tests/unit/test_payload_ships_root_modules.py` (transitive imports) and `deploy/build-payload.cmd` (copy line)
-- [ ] `tests/test_phase6_live_audit.py` (standalone one-shot; pure classifier importable by `tests/unit/test_phase6_live_audit.py`)
+- [x] `tests/unit/audit_support.py` — `Machine`-style fake, in-process fake-Revit HTTP server, audit-file reader/validator
+- [x] autouse fixture in `tests/unit/conftest.py` isolating the audit sink/dir and resetting the writer singleton
+- [x] `tests/unit/test_audit_entry.py`, `test_audit_bridge_hook.py`, `test_audit_correlation.py`, `test_audit_registration.py`, `test_audit_writer.py`, `test_audit_secret.py`, `test_audit_stdio.py`
+- [x] extend `tests/unit/test_payload_ships_root_modules.py` (transitive imports) and `deploy/build-payload.cmd` (copy line)
+- [x] `tests/test_phase6_live_audit.py` (standalone one-shot; pure classifier importable by `tests/unit/test_phase6_live_audit.py`)
 - Framework install: none
 
 ---
@@ -118,11 +118,25 @@ multi-call tool, because no shipped tool makes more than one bridge call.
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 90s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 90s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** validated 2026-10-25
+
+---
+
+## Validation Audit 2026-10-25
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+Every requirement's automated command was re-run and selects at least one passing test (full suite: 6297 passed, 3 skipped;
+`python tests/test_init_latency.py` gave `INIT_LATENCY_S=0.956`). The two live one-shot rows (AUDIT-03, AUDIT-06) stay manual-only
+and are recorded green above.

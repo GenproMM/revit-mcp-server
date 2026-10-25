@@ -83,6 +83,14 @@ class Rule:
 
 
 @dataclasses.dataclass(frozen=True)
+class Decision:
+    """The pure effective decision for one policy rule and its supplied facts."""
+
+    decision: str
+    reasons: Tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
 class Policy:
     """An immutable, validated policy."""
 
@@ -104,6 +112,79 @@ class Policy:
     @property
     def permit_ttl_s(self) -> int:
         return self.settings["permit_ttl_s"]
+
+
+def _deduplicated(words) -> Tuple[str, ...]:
+    """Words in their input order, without repeats."""
+    result = []
+    for word in words:
+        if word not in result:
+            result.append(word)
+    return tuple(result)
+
+
+def _parameter_write_decision(rule: Rule, facts: Any) -> Decision:
+    """D-10: permit only a single empty instance parameter write on a safe element."""
+    if not isinstance(facts, Mapping) or facts.get("available") is not True:
+        return Decision("confirm", _deduplicated(rule.reasons + ("facts_unavailable",)))
+
+    element = facts.get("element")
+    parameters = facts.get("parameters")
+    if not isinstance(element, Mapping) or not element.get("exists") \
+            or not isinstance(parameters, list) or not parameters:
+        return Decision("confirm", _deduplicated(rule.reasons + ("facts_unavailable",)))
+
+    triggered = []
+    if element.get("is_type") is True:
+        triggered.append("type_parameter")
+    if element.get("group_member") is True:
+        triggered.append("group_member")
+
+    for parameter in parameters:
+        if not isinstance(parameter, Mapping):
+            triggered.append("facts_unavailable")
+            continue
+        resolved = parameter.get("resolved")
+        if resolved == "type":
+            triggered.append("type_parameter")
+            count = element.get("type_instance_count")
+            if count is None or not isinstance(count, int) or count > 1:
+                triggered.append("multiple_elements")
+        elif resolved != "instance":
+            triggered.append("facts_unavailable")
+        if parameter.get("has_value") is True:
+            triggered.append("overwrites_value")
+        elif parameter.get("has_value") is not False:
+            triggered.append("facts_unavailable")
+
+    effective = [reason for reason in _deduplicated(triggered) if reason in rule.confirm_when]
+    if effective:
+        return Decision("confirm", _deduplicated(rule.reasons + tuple(effective)))
+    return Decision("allow", rule.reasons)
+
+
+def _family_edit_decision(rule: Rule, data: Any, fop: Any) -> Decision:
+    """D-22: company shared parameters must all match GUID and name in the FOP facts."""
+    shared = data.get("add_shared_parameters") if isinstance(data, Mapping) else None
+    if not shared:
+        return Decision("confirm", rule.reasons)
+    if not isinstance(fop, Mapping) or fop.get("state") != "ok":
+        return Decision("deny", _deduplicated(rule.reasons + ("shared_parameter_source",)))
+    verdicts = fop.get("verdicts")
+    if not isinstance(verdicts, Mapping) or any(verdicts.get(name) != "match" for name in shared):
+        return Decision("deny", _deduplicated(rule.reasons + ("shared_parameter_source",)))
+    return Decision("confirm", rule.reasons)
+
+
+def decide(rule: Rule, data: Any, facts: Any = None, fop: Any = None) -> Decision:
+    """Apply one rule to untrusted request data and optional preflight facts without side effects."""
+    if rule.decision != "check":
+        return Decision(rule.decision, rule.reasons)
+    if rule.check == "parameter_write":
+        return _parameter_write_decision(rule, facts)
+    if rule.check == "family_edit":
+        return _family_edit_decision(rule, data, fop)
+    return Decision("deny", _deduplicated(rule.reasons + ("unknown_check",)))
 
 
 def parse_policy_bytes(data: bytes) -> dict:

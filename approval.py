@@ -236,20 +236,14 @@ async def authorize(request: AuthorizationRequest):
     if not request.secret:
         return _refuse("denied", ["no_secret"], pol)
 
-    decision, reasons = rule.decision, list(rule.reasons)
-    if decision == "check":
-        if rule.check == "parameter_write":
-            # D-10: no facts yet means confirm.
-            decision, reasons = "confirm", reasons + ["facts_unavailable"]
-        elif rule.check == "family_edit":
-            if isinstance(request.data, dict) and request.data.get("add_shared_parameters"):
-                # D-22: the company shared-parameter file cannot be checked yet; unavailable means deny.
-                return _refuse("denied", ["shared_parameter_source"], pol)
-            decision = "confirm"
-        else:
-            return _refuse("denied", ["unknown_check"], pol)
+    effective_decision = policy.decide(rule, request.data, facts=None, fop=None)
+    decision, reasons = effective_decision.decision, list(effective_decision.reasons)
+    if decision == "deny":
+        return _refuse("denied", reasons, pol)
     if decision == "allow":
         return _grant(request, pol, "allow", reasons, "none")
+    if decision != "confirm":
+        return _refuse("denied", ["unknown_decision"], pol)
 
     effective = dataclasses.replace(rule, decision="confirm", reasons=tuple(reasons))
     code = operation_code()

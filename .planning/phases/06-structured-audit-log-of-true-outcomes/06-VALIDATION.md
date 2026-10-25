@@ -59,6 +59,8 @@ Filled in by the planner/executor once task IDs exist. Requirement → command m
 | AUDIT-08 | No `_mcp`/body/reply data; key scrub spares `session_token` | unit | `uv run pytest tests/unit/test_audit_entry.py -x -k redact` | ❌ W0 | ⬜ pending |
 | D-18 | Writer failure never changes a tool result | unit | `uv run pytest tests/unit/test_audit_writer.py -x -k never_breaks` | ❌ W0 | ⬜ pending |
 | Payload | `audit.py` shipped by `build-payload.cmd` | unit | `uv run pytest tests/unit/test_payload_ships_root_modules.py -x` | ✅ (extend) | ⬜ pending |
+| AUDIT-03 (live) | Real rollback (409 `rolled_back`) and real partial batch recorded truthfully | live, one-shot | `uv run python tests/test_phase6_live_audit.py run-single ...` | n/a | ✅ green (`PHASE6_AUDIT_OK`, 2026-10-25) |
+| AUDIT-06 (live) | Two Revit instances, two server processes, separate uncorrupted audit files | live, one-shot | `uv run python tests/test_phase6_live_audit.py run-dual ...` | n/a | ✅ green (`PHASE6_AUDIT_OK`, 2026-10-25) |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -81,6 +83,36 @@ Filled in by the planner/executor once task IDs exist. Requirement → command m
 |----------|-------------|------------|-------------------|
 | Real rollback and real partial batch recorded truthfully | AUDIT-03 | Needs a real Revit commit veto; trigger must be rehearsed in a scratch document first | `uv run python tests/test_phase6_live_audit.py run ...` (human-run, one-shot) |
 | Two Revit instances mutated simultaneously keep separate, uncorrupted entries | AUDIT-06 | Needs two Revit processes on the two-instance bench | `tests/test_phase6_live_audit.py` two-instance step set |
+
+### Live gate results (plan 06-07, run 2026-10-25, Revit 2024)
+
+The gate was run by the assistant on the user's explicit instruction ("запусти Revit и выполни проверку самостоятельно"),
+which replaced the plan's "human-run" rule for this run. Scratch copies of two non-workshared test models were used, opened
+through `open_model`, never saved, and the user's own project model was never opened. Both instances were stopped afterwards.
+
+| Stage | Verdict | POSTS_SENT | SECRET_OCCURRENCES | Listener check | Record (operator machine) |
+|-------|---------|------------|--------------------|----------------|---------------------------|
+| Rehearsal of the rollback trigger (1 rehearsal) | `REHEARSAL_ROLLED_BACK` | 1 | n/a | one row on 48884 | audit dir `<scratchpad>/live/audit-rehearsal-1` |
+| run-single (criterion 2, live look at 1 and 7) | `PHASE6_AUDIT_OK` | 3 | 0 | one row on 48884 | `<scratchpad>/live/single.json`, audit dir `<scratchpad>/live/audit-single` |
+| run-dual (criterion 5) | `PHASE6_AUDIT_OK` | 20 | 0 | one row each on 48884 and 48885, two different PIDs | `<scratchpad>/live/dual.json`, audit dir `<scratchpad>/live/audit-dual` |
+
+`<scratchpad>` is `C:/Users/Admin/AppData/Local/Temp/claude/c--Users-Admin-source-repos-revit-mcp-server/0d6381c7-6fb4-48bd-a175-b2785c1f20cc/scratchpad`.
+No run stopped at preflight (POSTS_SENT=0), so no stage needed a rerun, and neither one-shot stage was repeated. `classify` on each
+saved record re-judged both as `PHASE6_AUDIT_OK`.
+
+What the audit files showed: the single-Revit file holds one `execute_revit_code` entry recorded as `rolled_back` (HTTP 409,
+transaction `RolledBack`), one `tag_elements` entry recorded as `partial` (the missing element in `failed`), and one successful
+`set_parameter` entry, all naming the same Revit process. The two-Revit run left two separate files (one per server process), each
+holding 10 successful `set_parameter` entries that name both Revit processes, with no corruption.
+
+Rollback trigger that worked live (research assumption A3 now confirmed): posting `DB.BuiltInFailures.GeneralFailures.ValueOutOfRange`
+(Error severity) through `doc.PostFailure` from `execute_revit_code` produces a real `rolled_back` 409 and changes nothing in the model.
+
+Deviation from the plan's steps: instance 1 kept its (unsaved) scratch copy open between Part A and Part B instead of being closed and
+reopened, because the extra close-and-reopen added a save prompt risk and nothing else. It was the only document in that instance.
+
+Limitation carried from 06-04: ROADMAP criterion 3 (one call_id across several bridge calls) is proven offline with a synthetic
+multi-call tool, because no shipped tool makes more than one bridge call.
 
 ---
 

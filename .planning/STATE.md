@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v0.1
 current_phase: 06
 current_phase_name: Structured audit log of true outcomes
-current_plan: 6
+current_plan: 7
 status: executing
-stopped_at: Completed 06-05-PLAN.md
-last_updated: "2026-10-25T10:38:44.915Z"
+stopped_at: Completed 06-06-PLAN.md
+last_updated: "2026-10-25T11:06:14.369Z"
 last_activity: 2026-10-25
 last_activity_desc: Phase 06 execution started
-state_head: 52fa3ca0ca12c49c8dbe77d881a7009cd6696c50
+state_head: 5fef679c1a720f1e9ed8b95445957a8d8073f857
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 70
-  completed_plans: 68
+  completed_plans: 69
 milestone_name: Доверенный мост
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 ## Current Position
 
 Phase: 06 (Structured audit log of true outcomes) — EXECUTING
-Current Plan: 6
+Current Plan: 7
 Total Plans in Phase: 7
 Status: Ready to execute
 Last activity: 2026-10-25 — Phase 06 execution started
@@ -124,6 +124,7 @@ Progress: [███████░░░] 71% (5 of 7 phases complete, 63/63 pl
 | Phase 06 P03 | 9min | 2 tasks | 3 files |
 | Phase 06 P04 | 6 min | 2 tasks | 6 files |
 | Phase 06 P05 | 40 min | 3 tasks | 7 files |
+| Phase 06 P06-06 | 20 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -176,6 +177,9 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 06]: 06-03: redact before cut (_cut/_clip) is the single path; args_truncated only for real cuts; code_sha256 over the original UTF-8 bytes
 - [Phase 06]: 06-04: call_id rides in the _mcp envelope beside the secret only (no secret, no envelope); revit_post decides one CallState and passes it to _dispatch so envelope and entry share an id — Revit gate reads only the secret and strips the whole envelope, so revit_mcp/ needs no change; verified with the real gate_or_response
 - [Phase 06]: 06-05: prune counts an undeletable file toward the directory total and does not report a file another server removed as its own deletion; retention failures are silent, only an entry drop warns once per process
+- [Phase 06]: 06-06: live-gate writes call the registered audit wrapper with ctx=None, not main.mcp.call_tool, because call_tool outside an MCP request makes execute_revit_code raise before sending — A one-shot gate cannot be spent on a runner bug; the wrapper is the production audit path
+- [Phase 06]: 06-06: w3 (set_parameter) is judged as succeeded == [parameter] plus args.element_id == wall id, since the route reports the parameter name in outcome.succeeded — Matches revit_mcp/parameters.py build_outcome
+- [Phase 06]: 06-06: classifier reasons name audit files by role and never print PIDs or the secret — 06-07 copies reasons into VALIDATION.md under T-06-36
 
 ### Roadmap Evolution
 
@@ -208,7 +212,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-25T10:38:44.652Z
-Stopped at: Completed 06-05-PLAN.md
+Last session: 2026-10-25T11:06:14.100Z
+Stopped at: Completed 06-06-PLAN.md
 Resume file: None
 Next boundary: prepare bounded 02-02 recheck and require full Revit close/reopen before any live route; no G6 or broad rollout

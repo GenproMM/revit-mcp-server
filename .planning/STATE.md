@@ -2,19 +2,19 @@
 gsd_state_version: "1.0"
 milestone: v0.1
 current_phase: 06
-current_phase_name: structured-audit-log-of-true-outcomes
-current_plan: Not started
+current_phase_name: Structured audit log of true outcomes
+current_plan: 2
 status: executing
-stopped_at: Phase 6 context gathered
-last_updated: "2026-10-25T09:33:00.505Z"
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-10-25T09:49:55.511Z"
 last_activity: 2026-10-25
-last_activity_desc: Phase 5 complete, transitioned to Phase 06
-state_head: e81b68f4f4d7e3e124b8b3e61578f1d3a846eb7a
+last_activity_desc: Phase 06 execution started
+state_head: 566aac428835eb55d3a82438d5f0119ba74afd7d
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 70
-  completed_plans: 63
+  completed_plans: 64
 milestone_name: Доверенный мост
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 
 ## Current Position
 
-Phase: 06 (structured-audit-log-of-true-outcomes) — READY TO EXECUTE
-Current Plan: Not started
+Phase: 06 (Structured audit log of true outcomes) — EXECUTING
+Current Plan: 2
 Total Plans in Phase: 7
 Status: Ready to execute
-Last activity: 2026-10-25 — Phase 5 complete, transitioned to Phase 06
+Last activity: 2026-10-25 — Phase 06 execution started
 
 Progress: [███████░░░] 71% (5 of 7 phases complete, 63/63 planned plans)
 
@@ -119,6 +119,7 @@ Progress: [███████░░░] 71% (5 of 7 phases complete, 63/63 pl
 | Phase 05 P07 | 13 min | 3 tasks | 11 files |
 | Phase 05 P14 | 35min | 3 tasks | 1 files |
 | Phase 05 P15 | n/a | 3 tasks | 1 files |
+| Phase 06 P01 | 8 min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -165,6 +166,7 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 05]: 05-16: bridge.revit_post builds the _mcp envelope before _dispatch (forged body is NOT sent, not outcome-unknown); secret loaded lazily and memoized with an unset sentinel; startup initializes security once, failure isolated in registry.FAILED['security'] with gate closed
 - [Phase 05]: 05-07: health degrades for verified_mismatch, exposed bind and missing extension secret; unverifiable integrity never degrades — INTG-07 and 03 D-16: reported, never blocking
 - [Phase 05]: 05-13: live match stage PASS (PHASE5_GATE_OK, POSTS_SENT=7, S1-match-3.json) on a user-approved one-time rerun after runner fixes 9aa9876; temporary manifest kept for 05-14, no tracked revit_mcp/startup.py/extension.json edits until 05-15
+- [Phase 06]: 06-01: audit outcome label comes from the reply's top-level status (never outcome.status, never format_response); a not-sent call writes no entry and shows no Audit line; wrapper installed from main.py so unwrapped-signature tests stay valid — Research Pitfalls 1 and 10, Open Question 2
 
 ### Roadmap Evolution
 
@@ -197,7 +199,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-25T08:35:29.328Z
-Stopped at: Phase 6 context gathered
-Resume file: .planning/phases/06-structured-audit-log-of-true-outcomes/06-CONTEXT.md
+Last session: 2026-10-25T09:49:55.257Z
+Stopped at: Completed 06-01-PLAN.md
+Resume file: None
 Next boundary: prepare bounded 02-02 recheck and require full Revit close/reopen before any live route; no G6 or broad rollout

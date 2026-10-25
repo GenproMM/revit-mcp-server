@@ -285,12 +285,12 @@ Plans:
 
 **Note (planning, 2026-10-25):** per 06-CONTEXT D-02 every sent Revit call is logged (reads included, with a `mutation` flag), not only mutations; `revit_mcp/` is not changed in this phase (D-06).
 
-**Plans:** 7 plans
+**Plans:** 1/7 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — Tracer: one audited tool call through the bridge writes one honest JSONL line and the reply shows its call_id; audit.py ships in the payload
+- [x] 06-01-PLAN.md — Tracer: one audited tool call through the bridge writes one honest JSONL line and the reply shows its call_id; audit.py ships in the payload
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -353,7 +353,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Secret gate and payload integrity (unit-verified) | 9/9 | Complete    | 2026-10-23 |
 | 4. Honest outcomes on every mutating route | 11/11 | Complete    | 2026-10-23 |
 | 5. Live secret gate and integrity enforcement | 16/16 | Complete    | 2026-10-25 |
-| 6. Structured audit log of true outcomes | 0/TBD | Not started | - |
+| 6. Structured audit log of true outcomes | 1/7 | In Progress|  |
 | 7. Repository-owned mutation safety and human approval | 0/TBD | Not planned | - |
 
 ## Backlog

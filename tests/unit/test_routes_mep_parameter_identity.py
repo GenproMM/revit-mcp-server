@@ -29,7 +29,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gate_support import TEST_SECRET, configure_gate, enveloped_body, request_of
+from gate_support import TEST_ROUTE, TEST_SECRET, configure_gate, enveloped_body, request_of
 from revit_mcp import identity, trust
 from revit_mcp.textutils import classify_outcome
 from tools.utils import format_response
@@ -549,9 +549,22 @@ def handler_of(world, module_name, route, method="POST"):
     return load(world, module_name)[(route, method)]
 
 
+def route_of(world, fn):
+    """The route a handler was registered under: pyRevit's request.path is that API-relative route.
+
+    A handler the suite did not register falls back to TEST_ROUTE, which the request and its
+    permit then share, so the pair is always consistent.
+    """
+    for captured in world.routes.values():
+        for (route, _method), candidate in captured.items():
+            if candidate is fn:
+                return route
+    return TEST_ROUTE
+
+
 def call(world, fn, body=None, **extra):
     """Invoke a handler the way pyRevit does: injected arguments by name."""
-    available = {"uiapp": world.uiapp, "doc": world.injected, "request": request_of(body)}
+    available = {"uiapp": world.uiapp, "doc": world.injected, "request": request_of(body, route=route_of(world, fn))}
     available.update(extra)
     parameters = inspect.signature(fn).parameters
     return fn(**dict((name, available[name]) for name in parameters if name in available))
@@ -1717,14 +1730,14 @@ def _refused(world, key, request, status):
 
 @pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
 def test_without_the_shared_secret_a_mutation_is_401_before_any_side_effect(world, key):
-    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=None))
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=None, route=key[1]), path=key[1])
     reply = _refused(world, key, request, 401)
     assert reply.data["auth"] == "missing"
 
 
 @pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
 def test_with_a_wrong_secret_a_mutation_is_401_before_any_side_effect(world, key):
-    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=WRONG_SECRET))
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=WRONG_SECRET, route=key[1]), path=key[1])
     reply = _refused(world, key, request, 401)
     assert reply.data["auth"] == "mismatch"
 
@@ -1733,6 +1746,6 @@ def test_with_a_wrong_secret_a_mutation_is_401_before_any_side_effect(world, key
 def test_with_an_integrity_mismatch_a_mutation_is_423_before_any_side_effect(
         world, monkeypatch, key):
     configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
-    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key]))
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], route=key[1]), path=key[1])
     reply = _refused(world, key, request, 423)
     assert reply.data["files"] == ["revit_mcp/detail.py"]

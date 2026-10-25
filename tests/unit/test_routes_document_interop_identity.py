@@ -30,7 +30,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gate_support import TEST_SECRET, configure_gate, enveloped_body, request_of
+from gate_support import TEST_ROUTE, TEST_SECRET, configure_gate, enveloped_body, request_of
 from revit_mcp import identity, trust
 from revit_mcp.textutils import classify_outcome
 
@@ -583,6 +583,19 @@ def handler_of(world, module_name, route, method="POST"):
     return load(world, module_name)[(route, method)]
 
 
+def route_of(world, fn):
+    """The route a handler was registered under: pyRevit's request.path is that API-relative route.
+
+    A handler the suite did not register falls back to TEST_ROUTE, which the request and its
+    permit then share, so the pair is always consistent.
+    """
+    for captured in world.routes.values():
+        for (route, _method), candidate in captured.items():
+            if candidate is fn:
+                return route
+    return TEST_ROUTE
+
+
 def call(world, fn, body=None, request=None):
     """Invoke a handler the way pyRevit does: injected arguments by name.
 
@@ -590,7 +603,7 @@ def call(world, fn, body=None, request=None):
     one the body travels with the Phase 5 envelope (gate_support.request_of).
     """
     if request is None:
-        request = request_of(body)
+        request = request_of(body, route=route_of(world, fn))
     available = {"uiapp": world.uiapp, "doc": world.injected, "uidoc": world.uidoc,
                  "request": request}
     parameters = inspect.signature(fn).parameters
@@ -2290,7 +2303,7 @@ def _refused(world, key, request, status):
 def test_without_the_shared_secret_a_mutation_is_401_before_any_side_effect(world, key):
     _one_open_document(world)
     body = fill(world, MUTATIONS[key])
-    request = types.SimpleNamespace(data=enveloped_body(body, secret=None))
+    request = types.SimpleNamespace(data=enveloped_body(body, secret=None, route=key[1]), path=key[1])
     reply = _refused(world, key, request, 401)
     assert reply.data["auth"] == "missing"
 
@@ -2299,7 +2312,7 @@ def test_without_the_shared_secret_a_mutation_is_401_before_any_side_effect(worl
 def test_with_a_wrong_secret_a_mutation_is_401_before_any_side_effect(world, key):
     _one_open_document(world)
     body = fill(world, MUTATIONS[key])
-    request = types.SimpleNamespace(data=enveloped_body(body, secret=WRONG_SECRET))
+    request = types.SimpleNamespace(data=enveloped_body(body, secret=WRONG_SECRET, route=key[1]), path=key[1])
     reply = _refused(world, key, request, 401)
     assert reply.data["auth"] == "mismatch"
 
@@ -2310,7 +2323,7 @@ def test_with_an_integrity_mismatch_a_mutation_is_423_before_any_side_effect(
     _one_open_document(world)
     configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
     body = fill(world, MUTATIONS[key])
-    request = types.SimpleNamespace(data=enveloped_body(body))
+    request = types.SimpleNamespace(data=enveloped_body(body, route=key[1]), path=key[1])
     reply = _refused(world, key, request, 423)
     assert reply.data["files"] == ["revit_mcp/detail.py"]
 

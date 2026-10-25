@@ -28,7 +28,7 @@ import httpx
 import pytest
 
 import bridge
-from gate_support import TEST_SECRET, configure_gate, enveloped_body, request_of
+from gate_support import TEST_ROUTE, TEST_SECRET, configure_gate, enveloped_body, request_of
 from revit_mcp import identity, trust
 from revit_mcp.textutils import classify_outcome
 from tools.utils import format_response
@@ -475,6 +475,19 @@ def handler_of(world, module_name, route, method="POST"):
     return load(world, module_name)[(route, method)]
 
 
+def route_of(world, fn):
+    """The route a handler was registered under: pyRevit's request.path is that API-relative route.
+
+    A handler the suite did not register falls back to TEST_ROUTE, which the request and its
+    permit then share, so the pair is always consistent.
+    """
+    for captured in world.routes.values():
+        for (route, _method), candidate in captured.items():
+            if candidate is fn:
+                return route
+    return TEST_ROUTE
+
+
 def call(world, fn, body=None, request=None):
     """Invoke a handler the way pyRevit does: injected arguments by name.
 
@@ -482,7 +495,7 @@ def call(world, fn, body=None, request=None):
     one the body travels with the Phase 5 envelope (gate_support.request_of).
     """
     if request is None:
-        request = request_of(body)
+        request = request_of(body, route=route_of(world, fn))
     available = {"uiapp": world.uiapp, "doc": world.injected, "request": request}
     parameters = inspect.signature(fn).parameters
     return fn(**dict((name, available[name]) for name in parameters))
@@ -1031,6 +1044,14 @@ CREATE_LEVEL = ("building", "/create_level/")
 LEVEL_BODY = MUTATIONS[CREATE_LEVEL]
 
 
+def _wire(secret):
+    """LEVEL_BODY as the bridge sends it after Phase 7: envelope first, with a real permit for /create_level/.
+
+    A None secret adds no envelope at all.
+    """
+    return enveloped_body(LEVEL_BODY, secret, as_type="text", route=CREATE_LEVEL[1])
+
+
 def _through_the_bridge(world, body):
     """POST ``body`` to the real /create_level/ handler through the unchanged bridge._send.
 
@@ -1040,7 +1061,7 @@ def _through_the_bridge(world, body):
     seen = []
 
     def revit(http_request):
-        request = types.SimpleNamespace(data=http_request.content)
+        request = types.SimpleNamespace(data=http_request.content, path=CREATE_LEVEL[1])
         seen.append(request)
         reply = call(world, fn, request=request)
         return httpx.Response(reply.status, json=reply.data)
@@ -1064,7 +1085,7 @@ def test_create_level_through_the_real_bridge_send_path_reaches_the_handler_with
     monkeypatch.setattr("revit_mcp.textutils.json", _IronPython3Json())
     world.open("Only", "C:/Models/Only.rvt", active=True)
     world.tokens()
-    result, seen = _through_the_bridge(world, bridge.with_envelope(LEVEL_BODY, TEST_SECRET))
+    result, seen = _through_the_bridge(world, _wire(TEST_SECRET))
     assert isinstance(result, dict), result
     assert result["outcome"]["transaction_status"] == "Committed"
     assert world.kinds("transaction")[0][1] == "Only"
@@ -1079,11 +1100,11 @@ def test_create_level_through_the_real_bridge_send_path_reaches_the_handler_with
 
 def _refusal_case(name, monkeypatch):
     if name == "no-envelope":
-        return bridge.with_envelope(LEVEL_BODY, None)
+        return _wire(None)
     if name == "wrong-secret":
-        return bridge.with_envelope(LEVEL_BODY, "wrong-secret-0123456789-abcdefXYZ-nope")
+        return _wire("wrong-secret-0123456789-abcdefXYZ-nope")
     configure_gate(monkeypatch, secret=None)
-    return bridge.with_envelope(LEVEL_BODY, TEST_SECRET)
+    return _wire(TEST_SECRET)
 
 
 @pytest.mark.parametrize("name,word", [
@@ -1115,7 +1136,7 @@ def test_create_level_with_a_verified_mismatch_is_a_423_naming_the_files(world, 
     world.tokens()
     del world.events[:]
     configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
-    result, _ = _through_the_bridge(world, bridge.with_envelope(LEVEL_BODY, TEST_SECRET))
+    result, _ = _through_the_bridge(world, _wire(TEST_SECRET))
     assert isinstance(result, str), result
     assert result.startswith("Error: 423 - ")
     assert "revit_mcp/detail.py" in result
@@ -1130,7 +1151,7 @@ def test_create_level_with_a_wrong_secret_and_a_mismatch_is_still_a_401(world, m
     world.tokens()
     del world.events[:]
     configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
-    wrong = bridge.with_envelope(LEVEL_BODY, "wrong-secret-0123456789-abcdefXYZ-nope")
+    wrong = _wire("wrong-secret-0123456789-abcdefXYZ-nope")
     result, _ = _through_the_bridge(world, wrong)
     assert isinstance(result, str), result
     assert result.startswith("Error: 401 - ")
@@ -1166,7 +1187,7 @@ def _assert_gate_refusal(world, reply, status):
 @pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
 def test_without_the_shared_secret_a_mutation_is_401_before_any_side_effect(world, key):
     _one_open_document(world)
-    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=None))
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=None, route=key[1]), path=key[1])
     reply = call(world, handler_of(world, *key), request=request)
     _assert_gate_refusal(world, reply, 401)
     assert reply.data["auth"] == "missing"
@@ -1175,7 +1196,7 @@ def test_without_the_shared_secret_a_mutation_is_401_before_any_side_effect(worl
 @pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)
 def test_with_a_wrong_secret_a_mutation_is_401_before_any_side_effect(world, key):
     _one_open_document(world)
-    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=WRONG_SECRET))
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], secret=WRONG_SECRET, route=key[1]), path=key[1])
     reply = call(world, handler_of(world, *key), request=request)
     _assert_gate_refusal(world, reply, 401)
     assert reply.data["auth"] == "mismatch"
@@ -1186,7 +1207,7 @@ def test_with_an_integrity_mismatch_a_mutation_is_423_before_any_side_effect(
         world, monkeypatch, key):
     _one_open_document(world)
     configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
-    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key]))
+    request = types.SimpleNamespace(data=enveloped_body(MUTATIONS[key], route=key[1]), path=key[1])
     reply = call(world, handler_of(world, *key), request=request)
     _assert_gate_refusal(world, reply, 423)
     assert reply.data["files"] == ["revit_mcp/detail.py"]
@@ -1222,7 +1243,7 @@ def _assert_open(world, reply, request, sent_envelope):
 def test_an_open_read_needs_no_secret_and_never_sees_the_envelope(world, key, variant):
     _name, secret = variant
     module_name, route, method = key
-    request = types.SimpleNamespace(data=enveloped_body(POST_READS[key], secret=secret))
+    request = types.SimpleNamespace(data=enveloped_body(POST_READS[key], secret=secret, route=route), path=route)
     reply = call(world, handler_of(world, module_name, route, method), request=request)
     _assert_open(world, reply, request, sent_envelope=secret is not None)
 
@@ -1232,7 +1253,7 @@ def test_open_reads_work_when_the_gate_state_is_uninitialized(world, monkeypatch
     from revit_mcp import security
     monkeypatch.setattr(security, "_STATE", None)
     module_name, route, method = key
-    request = types.SimpleNamespace(data=enveloped_body(POST_READS[key]))
+    request = types.SimpleNamespace(data=enveloped_body(POST_READS[key], route=route), path=route)
     reply = call(world, handler_of(world, module_name, route, method), request=request)
     _assert_open(world, reply, request, sent_envelope=True)
 

@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Tracer: the shared-secret gate end to end, across both halves.
 
-The real, unchanged bridge._send posts a body built by bridge.with_envelope
-through httpx.MockTransport into a simulated Revit handler made of the new
+The real, unchanged bridge._send posts an envelope-first body (the secret and a
+one-time permit, built via tests/unit/gate_support.py) through httpx.MockTransport
+into a simulated Revit handler made of the new
 revit_mcp.trust functions (what a Phase 5 per-handler guard will do), and the
 refusal travels back through tools.utils.format_response. The Revit side reads
 the body through parse_request_data under the IronPython 3 json stand-in, so it
@@ -15,6 +16,7 @@ import httpx
 import pytest
 
 import bridge
+from gate_support import enveloped_body
 from revit_mcp import trust
 from tools.utils import format_response
 
@@ -66,6 +68,14 @@ async def _post(data, expected, seen):
 DATA = {"element_ids": [1, 2], "document": "A.rvt"}
 
 
+def _wire(secret):
+    """DATA as the bridge sends it after Phase 7: envelope first, with a real permit for /delete_elements/.
+
+    A None secret adds no envelope at all (the "missing" case).
+    """
+    return enveloped_body(DATA, secret, as_type="text", route="/delete_elements/")
+
+
 @pytest.fixture(autouse=True)
 def _ironpython3_json(monkeypatch):
     monkeypatch.setattr("revit_mcp.textutils.json", _IronPython3Json())
@@ -74,7 +84,7 @@ def _ironpython3_json(monkeypatch):
 @pytest.mark.anyio
 async def test_e2e_correct_secret_reaches_handler_without_the_envelope():
     seen = []
-    result = await _post(bridge.with_envelope(DATA, SECRET), SECRET, seen)
+    result = await _post(_wire(SECRET), SECRET, seen)
     assert isinstance(result, dict)
     assert result["received"] == {"element_ids": [1, 2], "document": "A.rvt"}
     assert "_mcp" not in result["received"]
@@ -83,7 +93,7 @@ async def test_e2e_correct_secret_reaches_handler_without_the_envelope():
 @pytest.mark.anyio
 async def test_e2e_wrong_secret_is_a_visible_401():
     seen = []
-    result = await _post(bridge.with_envelope(DATA, WRONG), SECRET, seen)
+    result = await _post(_wire(WRONG), SECRET, seen)
     assert isinstance(result, str)
     assert result.startswith("Error: 401 - ")
     assert '"auth"' in result
@@ -96,9 +106,9 @@ async def test_e2e_wrong_secret_is_a_visible_401():
 @pytest.mark.anyio
 async def test_e2e_missing_secret_is_a_visible_401():
     seen = []
-    envelope = bridge.with_envelope(DATA, None)
-    assert "_mcp" not in envelope
-    result = await _post(envelope, SECRET, seen)
+    body = _wire(None)
+    assert "_mcp" not in json.loads(body)
+    result = await _post(body, SECRET, seen)
     assert isinstance(result, str)
     assert result.startswith("Error: 401 - ")
     assert "missing" in result
@@ -108,7 +118,7 @@ async def test_e2e_missing_secret_is_a_visible_401():
 @pytest.mark.anyio
 async def test_e2e_unconfigured_server_is_a_visible_401():
     seen = []
-    result = await _post(bridge.with_envelope(DATA, SECRET), None, seen)
+    result = await _post(_wire(SECRET), None, seen)
     assert isinstance(result, str)
     assert result.startswith("Error: 401 - ")
     assert "server_not_configured" in result
@@ -118,9 +128,13 @@ async def test_e2e_unconfigured_server_is_a_visible_401():
 @pytest.mark.anyio
 async def test_e2e_secret_travels_as_text_plain_bytes_under_the_reserved_key():
     seen = []
-    await _post(bridge.with_envelope(DATA, SECRET), SECRET, seen)
+    await _post(_wire(SECRET), SECRET, seen)
     assert len(seen) == 1
     request = seen[0]
     assert request.headers["content-type"] == "text/plain; charset=utf-8"
     assert isinstance(request.content, bytes)
-    assert json.loads(request.content)["_mcp"] == {"secret": SECRET}
+    envelope = json.loads(request.content)["_mcp"]
+    assert envelope["secret"] == SECRET
+    # Phase 7 (D-18): the one-time permit rides beside the secret, bound to the route posted.
+    assert set(envelope) == {"secret", "permit"}
+    assert envelope["permit"]["r"] == "/delete_elements/"

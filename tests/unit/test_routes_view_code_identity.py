@@ -43,7 +43,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from gate_support import TEST_SECRET, configure_gate, enveloped_body, request_of
+from gate_support import TEST_ROUTE, TEST_SECRET, configure_gate, enveloped_body, request_of
 from revit_mcp import identity, trust
 from revit_mcp.textutils import classify_outcome
 
@@ -566,10 +566,24 @@ def handler_of(world, module_name, route, method="POST"):
     return load(world, module_name)[(route, method)]
 
 
+def route_of(world, fn):
+    """The route a handler was registered under: pyRevit's request.path is that API-relative route.
+
+    A handler the suite did not register falls back to TEST_ROUTE, which the request and its
+    permit then share, so the pair is always consistent.
+    """
+    for captured in world.routes.values():
+        for (route, _method), candidate in captured.items():
+            if candidate is fn:
+                return route
+    return TEST_ROUTE
+
+
 def call(world, fn, body=None, **extra):
     """Invoke a handler the way pyRevit does: injected arguments by name."""
     available = {"uiapp": world.uiapp, "doc": world.injected,
-                 "uidoc": world.uiapp.ActiveUIDocument, "request": request_of(body)}
+                 "uidoc": world.uiapp.ActiveUIDocument,
+                 "request": request_of(body, route=route_of(world, fn))}
     available.update(extra)
     parameters = inspect.signature(fn).parameters
     return fn(**dict((name, available[name]) for name in parameters if name in available))
@@ -1843,7 +1857,7 @@ def test_execute_code_early_errors_carry_no_outcome(world):
     assert empty.status == 400 and "outcome" not in empty.data
     # A body that is not JSON carries no envelope: the gate answers 401 before the route's own
     # parse ever runs (Phase 5, D-01), and that refusal has no outcome either.
-    bad = run_code(world, request=types.SimpleNamespace(data=b"{not json"))
+    bad = run_code(world, request=types.SimpleNamespace(data=b"{not json", path=EXEC[1]))
     assert bad.status == 401 and "outcome" not in bad.data
 
 
@@ -1878,7 +1892,7 @@ def test_execute_code_unparseable_body_is_a_non_raising_500_with_the_notice(worl
 def test_execute_code_non_json_body_is_a_gate_401_with_zero_side_effects(world):
     world.open("Only", ONLY_PATH, active=True)
     del world.events[:]
-    reply = run_code(world, request=types.SimpleNamespace(data=b"{not json"))
+    reply = run_code(world, request=types.SimpleNamespace(data=b"{not json", path=EXEC[1]))
     assert reply.status == 401 and reply.data["auth"] == "missing"
     assert world.events == []
     assert "document_scope" not in reply.data and "process_identity" not in reply.data
@@ -2079,14 +2093,14 @@ def _refused(world, key, request, status):
 
 @pytest.mark.parametrize("key", GATE_KEYS, ids=GATE_IDS)
 def test_without_the_shared_secret_the_route_is_401_before_any_side_effect(world, key):
-    request = types.SimpleNamespace(data=enveloped_body(_gate_body(key), secret=None))
+    request = types.SimpleNamespace(data=enveloped_body(_gate_body(key), secret=None, route=key[1]), path=key[1])
     reply = _refused(world, key, request, 401)
     assert reply.data["auth"] == "missing"
 
 
 @pytest.mark.parametrize("key", GATE_KEYS, ids=GATE_IDS)
 def test_with_a_wrong_secret_the_route_is_401_before_any_side_effect(world, key):
-    request = types.SimpleNamespace(data=enveloped_body(_gate_body(key), secret=WRONG_SECRET))
+    request = types.SimpleNamespace(data=enveloped_body(_gate_body(key), secret=WRONG_SECRET, route=key[1]), path=key[1])
     reply = _refused(world, key, request, 401)
     assert reply.data["auth"] == "mismatch"
 
@@ -2095,7 +2109,7 @@ def test_with_a_wrong_secret_the_route_is_401_before_any_side_effect(world, key)
 def test_with_an_integrity_mismatch_the_route_is_423_before_any_side_effect(
         world, monkeypatch, key):
     configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
-    request = types.SimpleNamespace(data=enveloped_body(_gate_body(key)))
+    request = types.SimpleNamespace(data=enveloped_body(_gate_body(key), route=key[1]), path=key[1])
     reply = _refused(world, key, request, 423)
     assert reply.data["files"] == ["revit_mcp/detail.py"]
 
@@ -2107,7 +2121,7 @@ def test_a_refused_execute_code_never_compiles_or_runs_the_submitted_code(world)
     sys.modules["_gate_probe"] = probe
     try:
         body = {"code": "import sys; sys.modules['_gate_probe'].ran = True"}
-        request = types.SimpleNamespace(data=enveloped_body(body, secret=None))
+        request = types.SimpleNamespace(data=enveloped_body(body, secret=None, route=EXEC[1]), path=EXEC[1])
         reply = run_code(world, request=request)
         assert reply.status == 401
         assert probe.ran is False, "the submitted code ran for a caller without a secret"
@@ -2122,12 +2136,13 @@ MODEL_WORKSETS = ("worksharing", "/model_worksets/")
 def test_model_worksets_needs_no_secret_and_never_sees_the_envelope(world, monkeypatch, variant):
     body = {"file_path": "C:/Models/Missing.rvt"}
     fn = handler_of(world, *MODEL_WORKSETS, method="POST")
-    bare = call(world, fn, request=types.SimpleNamespace(data=json.dumps(body).encode("utf-8")))
+    bare = call(world, fn, request=types.SimpleNamespace(
+        data=json.dumps(body).encode("utf-8"), path=MODEL_WORKSETS[1]))
     assert bare.status == 404
     if variant == "mismatch":
         configure_gate(monkeypatch, integrity=_mismatch_naming("revit_mcp/detail.py"))
     secret = {"none": None, "wrong": WRONG_SECRET}.get(variant, TEST_SECRET)
-    request = types.SimpleNamespace(data=enveloped_body(body, secret=secret))
+    request = types.SimpleNamespace(data=enveloped_body(body, secret=secret, route=MODEL_WORKSETS[1]), path=MODEL_WORKSETS[1])
     reply = call(world, fn, request=request)
     assert reply.status == bare.status
     assert reply.data == bare.data

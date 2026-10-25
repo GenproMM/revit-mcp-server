@@ -16,12 +16,15 @@ processes: a real rollback and a real partial batch recorded truthfully (ROADMAP
 second server process without corrupting or mixing entries (criterion 5). The same record
 also gives a live look at criteria 1 and 7. This script is that look.
 
-Every write goes through the path an engineer's assistant uses: ``main.mcp.call_tool`` (the
-audited wrapper, the real tool, the production bridge and the audit writer), with
-REVIT_MCP_AUDIT_DIR pointing at an operator-chosen scratch directory before the first
-write. The reads of the preflight go through ``bridge.revit_get``. Nothing is judged by
-eye: ``classify_single`` and ``classify_dual`` turn the record and the audit files into
-PHASE6_AUDIT_OK or PHASE6_AUDIT_STOP with named reasons.
+Every write goes through the path an engineer's assistant uses: the audited wrapper FastMCP
+registered for the tool in ``main.mcp`` (the call state, the real tool function, the production
+bridge and the audit writer all run), with REVIT_MCP_AUDIT_DIR pointing at an operator-chosen
+scratch directory before the first write. The wrapper is called with ctx=None:
+``main.mcp.call_tool(...)`` outside a real MCP request hands the tool a Context that refuses
+use, and execute_revit_code reports progress through it, so that call would raise before
+anything was sent. The reads of the preflight go through ``bridge.revit_get``. Nothing is
+judged by eye: ``classify_single`` and ``classify_dual`` turn the record and the audit files
+into PHASE6_AUDIT_OK or PHASE6_AUDIT_STOP with named reasons.
 
 The steps, each sent exactly once
 ---------------------------------
@@ -51,14 +54,17 @@ Commands
 
 ``template`` prints the empty record. ``classify`` re-judges a saved record and sends nothing;
 it reads the configured shared secret through the bridge only to count its occurrences. In
-run-dual the first Revit (lowest port) gets --wall-a and the second --wall-b.
+run-dual the first Revit (lowest port) gets --wall-a and the second --wall-b; the child
+server process leaves its own record beside --out as <out stem>-child.json, and the runner
+merges it into the main record (which names the child's file by PID in audit_files).
 
 ``rehearse`` sends exactly one execute_revit_code call with the operator's code and the
 user_request "phase6 rehearsal", then reads the audit entry of that call and prints
 REHEARSAL_ROLLED_BACK (HTTP 409, rolled_back), REHEARSAL_COMMITTED (the code committed) or
-REHEARSAL_OTHER, plus POSTS_SENT=1. It does not judge the audit. It is the repeatable
-rehearsal that research assumption A3 requires before the one-shot run: use a fresh
---audit-dir each time.
+REHEARSAL_OTHER, plus POSTS_SENT=1 and the entry's outcome, HTTP status and transaction
+status. It exits 0 only for REHEARSAL_ROLLED_BACK and does not judge the rest of the audit.
+It is the repeatable rehearsal that research assumption A3 requires before the one-shot run:
+use a fresh --audit-dir each time.
 
 Output tokens and exit codes
 ----------------------------
@@ -135,11 +141,17 @@ Operator procedure (plan 06-07 follows this; the engineer controls the bench)
 Records and audit directories are machine local: keep them outside the repository.
 """
 import argparse
+import asyncio
+import datetime
+import fnmatch
 import hashlib
+import hmac
 import json
 import os
 import re
+import subprocess
 import sys
+import uuid
 from collections import Counter
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -773,6 +785,16 @@ USAGE = (
     "[--count K] [--port N]"
 )
 
+CHILD_TOKEN_ENV = "PHASE6_AUDIT_CHILD_TOKEN"
+CHILD_TIMEOUT = 900.0  # seconds the runner waits for its child server process
+
+REHEARSAL_REQUEST = "phase6 rehearsal"
+USER_REQUEST = {
+    "w1": "phase6 live gate w1: deliberate rollback through execute_revit_code",
+    "w2": "phase6 live gate w2: deliberate partial tag batch",
+    "w3": "phase6 live gate w3: successful set_parameter",
+}
+
 
 class _UsageError(Exception):
     pass
@@ -789,7 +811,43 @@ def _build_parser():
     commands.add_parser("template")
     classify = commands.add_parser("classify")
     classify.add_argument("record")
+    rehearse = commands.add_parser("rehearse")
+    rehearse.add_argument("--rollback-code", required=True)
+    rehearse.add_argument("--audit-dir", required=True)
+    rehearse.add_argument("--port", type=int, default=DEFAULT_PORT)
+    single = commands.add_parser("run-single")
+    single.add_argument("--wall-id", type=int, required=True)
+    single.add_argument("--parameter", required=True)
+    single.add_argument("--view-name", required=True)
+    single.add_argument("--tag-id", type=int, required=True)
+    single.add_argument("--rollback-code", required=True)
+    single.add_argument("--audit-dir", required=True)
+    single.add_argument("--out", required=True)
+    single.add_argument("--port", type=int, default=DEFAULT_PORT)
+    dual = commands.add_parser("run-dual")
+    dual.add_argument("--wall-a", type=int, required=True)
+    dual.add_argument("--wall-b", type=int, required=True)
+    dual.add_argument("--parameter", required=True)
+    dual.add_argument("--audit-dir", required=True)
+    dual.add_argument("--out", required=True)
+    dual.add_argument("--count", type=int, default=DEFAULT_COUNT)
+    dual.add_argument("--port", type=int, default=DEFAULT_PORT)
+    child = commands.add_parser("child")
+    child.add_argument("--child-token", required=True)
+    child.add_argument("--audit-dir", required=True)
+    child.add_argument("--out", required=True)
+    child.add_argument("--port", type=int, required=True)
+    child.add_argument("--parameter", required=True)
+    child.add_argument("--count", type=int, required=True)
+    child.add_argument("--target-a", required=True)
+    child.add_argument("--target-b", required=True)
+    child.add_argument("--wall-a", type=int, required=True)
+    child.add_argument("--wall-b", type=int, required=True)
     return parser
+
+
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _secret_value():
@@ -829,13 +887,350 @@ def _posts_sent_of(record):
     return value if _is_int(value) else None
 
 
+# ------------------------------------------------------- bridge and tool access
+
+
+def _require_allowed_read(endpoint):
+    """Raise ValueError unless ``endpoint`` is one of the three routes a read may name."""
+    if not isinstance(endpoint, str) or not endpoint:
+        raise ValueError("endpoint must be a non-empty string, got {!r}".format(endpoint))
+    key = endpoint
+    prefix = "/element_properties/"
+    if endpoint.startswith(prefix) and len(endpoint) > len(prefix):
+        if not endpoint[len(prefix):].isdigit():
+            raise ValueError("element id in {!r} is not a number".format(endpoint))
+        key = prefix
+    if key not in ALLOWED_READS:
+        raise ValueError("endpoint {!r} is not on the allow-list".format(endpoint))
+
+
+def _require_allowed_tool(tool):
+    if tool not in ALLOWED_TOOLS:
+        raise ValueError("tool {!r} is not on the allow-list".format(tool))
+
+
+def _set_environment(args):
+    """The audit directory and the port, set before the first bridge import (never after one)."""
+    os.environ["REVIT_MCP_AUDIT_DIR"] = os.path.abspath(args.audit_dir)
+    os.environ["REVIT_PORT"] = str(args.port)
+
+
+def _bridge():
+    """The production bridge module; imported lazily, after the environment is set."""
+    if REPO_ROOT not in sys.path:
+        sys.path.insert(0, REPO_ROOT)
+    import bridge
+
+    return bridge
+
+
+def _main_module():
+    """The production server module; importing it registers every tool through the audit wrapper."""
+    if REPO_ROOT not in sys.path:
+        sys.path.insert(0, REPO_ROOT)
+    import main as main_module
+
+    return main_module
+
+
+def _tool_callable(tool):
+    """An async ``call(arguments)`` for one registered tool, resolved before anything is counted.
+
+    ``main.mcp.call_tool(...)`` outside a real MCP request hands the tool a Context that
+    refuses use, and execute_revit_code reports progress through it, so that route would raise
+    before a single byte reached Revit. The function FastMCP registered for the tool is the
+    audit wrapper itself (call state, user_request, the real tool, the production bridge and
+    the audit writer all run); it is called with ctx=None, as the tools accept.
+    """
+    _require_allowed_tool(tool)
+    registered = _main_module().mcp._tool_manager.get_tool(tool)
+    if registered is None:
+        raise LookupError("tool {} is not registered".format(tool))
+
+    async def call(arguments):
+        return await registered.fn(ctx=None, **arguments)
+
+    return call
+
+
+def _reply_text(result):
+    """The text a tool reply carries, whether it is a string or a list of content blocks."""
+    if isinstance(result, tuple) and result and isinstance(result[0], (list, tuple)):
+        result = result[0]
+    if isinstance(result, (list, tuple)):
+        texts = [getattr(item, "text", None) for item in result]
+        return "\n".join(text for text in texts if isinstance(text, str))
+    return result if isinstance(result, str) else str(result)
+
+
+def _ex_text(ex):
+    """``Type: message``, cut short, with the configured secret replaced if it ever appears."""
+    text = "{}: {}".format(type(ex).__name__, ex)[:300]
+    try:
+        secret = _secret_value()
+        if isinstance(secret, str) and secret:
+            text = text.replace(secret, "[REDACTED]")
+    except Exception:
+        pass
+    return text
+
+
+async def _tool_step(record, key, tool, arguments, slot=None, extra=None):
+    """Send one write exactly once through the audited tool; the exception text, or None.
+
+    The POST is counted immediately before the call, so a call that raised or timed out still
+    counts: its outcome in the model is unknown. The step is never retried here.
+    """
+    _require_allowed_tool(tool)
+    call = _tool_callable(tool)
+    step = {"tool": tool, "arguments": dict(arguments), "user_request": arguments.get("user_request"),
+            "exception": None}
+    if extra:
+        step.update(extra)
+    if slot is None:
+        record["steps"][key] = step
+    else:
+        step["key"] = key
+        slot.append(step)
+    record["posts_sent"] += 1  # counted before the call
+    try:
+        result = await call(arguments)
+    except Exception as ex:
+        step["exception"] = _ex_text(ex)
+        return step["exception"]
+    record["replies"][key] = _reply_text(result)
+    return None
+
+
+def _flush():
+    import audit
+
+    return audit.flush(10.0)
+
+
+def _read_audit_dir(path):
+    """{file name: [raw lines]} of the audit files in a directory; lines keep any CR they carry."""
+    files = {}
+    try:
+        names = sorted(os.listdir(path))
+    except OSError:
+        return files
+    for name in names:
+        full = os.path.join(path, name)
+        if not fnmatch.fnmatchcase(name, "audit-*.jsonl") or not os.path.isfile(full):
+            continue
+        try:
+            with open(full, "rb") as handle:
+                data = handle.read()
+        except OSError:
+            continue
+        lines = data.decode("utf-8", "replace").split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+        files[name] = lines
+    return files
+
+
+def _save(path, record):
+    """Write the record once; never overwrites. False (and the record on stdout) if it cannot."""
+    try:
+        with open(path, "x", encoding="utf-8", newline="\n") as handle:
+            json.dump(record, handle, ensure_ascii=False, indent=2)
+        return True
+    except OSError as ex:
+        print("WARNING: the record could not be written to {} ({}: {}); it follows.".format(
+            path, type(ex).__name__, ex))
+        print(json.dumps(record, ensure_ascii=False, indent=2))
+        return False
+
+
+# ------------------------------------------------------------------ preflight
+
+
+async def _read(bridge, endpoint, selector):
+    """One allowed GET: (reply, None) or (None, exception text)."""
+    try:
+        _require_allowed_read(endpoint)
+        return await bridge.revit_get(endpoint, target=selector), None
+    except Exception as ex:
+        return None, "{}: {}".format(type(ex).__name__, ex)
+
+
+def _describe_reply(reply):
+    text = repr(reply)
+    return text if len(text) <= 120 else text[:117] + "..."
+
+
+def _parameter_entry(reply, name):
+    """The parameter dict named ``name`` in an element_properties reply, or None."""
+    parameters = reply.get("parameters") if isinstance(reply, dict) else None
+    for parameter in (parameters if isinstance(parameters, list) else []):
+        if isinstance(parameter, dict) and parameter.get("name") == name:
+            return parameter
+    return None
+
+
+def _writable_text(entry):
+    return bool(entry is not None and entry.get("read_only") is False
+                and str(entry.get("storage_type")) == "String")
+
+
+async def _usable_targets(bridge):
+    """(usable entries, None) from discovery, or (None, the reason the targets cannot be trusted)."""
+    try:
+        found = await bridge.discover_targets()
+    except Exception as ex:
+        return None, "preflight.targets: discovery failed ({})".format(type(ex).__name__)
+    if not isinstance(found, dict) or found.get("status") != "ok":
+        message = found.get("message") if isinstance(found, dict) else None
+        return None, "preflight.targets: {}".format(message or "discovery gave no usable answer")
+    collisions = [u for u in _list(found.get("unusable"))
+                  if isinstance(u, dict) and u.get("reason") == "listener-collision"]
+    if collisions:
+        return None, "preflight.targets: more than one process listens on port {}".format(
+            ", ".join(str(u.get("port")) for u in collisions))
+    return [u for u in _list(found.get("usable")) if isinstance(u, dict)], None
+
+
+async def _documents_of(bridge, selector):
+    """(count, None) when GET /documents/ lists exactly one document, else (count or None, reason)."""
+    reply, problem = await _read(bridge, "/documents/", selector)
+    documents = reply.get("documents") if isinstance(reply, dict) else None
+    if not isinstance(documents, list):
+        return None, "preflight.documents: GET /documents/ gave no listing ({})".format(
+            problem or _describe_reply(reply))
+    if len(documents) != 1:
+        return len(documents), "preflight.documents: expected exactly one open document, got {}".format(
+            len(documents))
+    return 1, None
+
+
+async def _preflight_target(bridge, args, record):
+    """The checks run-single and rehearse share: one Revit, answering, the only listener, one document."""
+    pre = record["preflight"]
+    configured = getattr(bridge, "REVIT_PORT", None)
+    if configured is not None and configured != args.port:
+        return ("preflight.port: the bridge targets port {} but --port is {}; start the script with "
+                "REVIT_PORT unset or equal to --port".format(configured, args.port))
+    usable, reason = await _usable_targets(bridge)
+    if reason:
+        return reason
+    if len(usable) != 1:
+        return "preflight.targets: expected exactly one usable Revit target, found {}".format(len(usable))
+    target = usable[0]
+    if target.get("port") != args.port:
+        return "preflight.port: the only usable Revit listens on port {} but --port is {}".format(
+            target.get("port"), args.port)
+    selector, pid = target.get("selector"), target.get("pid")
+    pre["selector"] = selector
+    record["revit_pids"] = [pid]
+    reply, problem = await _read(bridge, "/status/", selector)
+    identity = reply.get("process_identity") if isinstance(reply, dict) else None
+    pre["status_ok"] = bool(isinstance(reply, dict) and not reply.get("error")
+                            and isinstance(identity, dict) and identity.get("pid") == pid)
+    if not pre["status_ok"]:
+        return "preflight.status_ok: GET /status/ did not answer with the process identity ({})".format(
+            problem or _describe_reply(reply))
+    try:
+        snapshot = bridge.listener_snapshot([args.port])
+    except Exception:
+        snapshot = None
+    owners = snapshot.get(args.port) if isinstance(snapshot, dict) else None
+    if not (isinstance(owners, list) and all(_is_int(p) and p > 0 for p in owners)):
+        return "preflight.listeners: the OS listener inventory is unavailable for port {}".format(args.port)
+    pre["listeners"] = list(owners)
+    if owners != [pid]:
+        return "preflight.listeners: expected exactly one owner of port {}, got {}".format(
+            args.port, len(owners))
+    pre["documents"], reason = await _documents_of(bridge, selector)
+    return reason
+
+
+async def _preflight_single(bridge, args, record):
+    """Read-only checks before any write. Returns the stop reason, or None when all pass."""
+    reason = await _preflight_target(bridge, args, record)
+    if reason:
+        return reason
+    pre = record["preflight"]
+    selector = pre["selector"]
+    reply, problem = await _read(bridge, "/element_properties/{}".format(args.wall_id), selector)
+    entry = _parameter_entry(reply, args.parameter)
+    pre["parameter_writable"] = _writable_text(entry)
+    if not pre["parameter_writable"]:
+        return ("preflight.parameter_writable: wall {} has no writable text parameter named {!r} "
+                "({})".format(args.wall_id, args.parameter, problem or _describe_reply(entry or reply)))
+    reply, problem = await _read(bridge, "/element_properties/{}".format(args.tag_id), selector)
+    pre["tag_element_found"] = bool(isinstance(reply, dict) and not reply.get("error")
+                                    and reply.get("element_id") == args.tag_id)
+    if not pre["tag_element_found"]:
+        return "preflight.tag_element_found: element {} was not read ({})".format(
+            args.tag_id, problem or _describe_reply(reply))
+    return None
+
+
+async def _preflight_dual(bridge, args, record):
+    """Two usable Revit instances, one document each, the parameter writable on each wall."""
+    pre = record["preflight"]
+    usable, reason = await _usable_targets(bridge)
+    if reason:
+        return reason
+    if len(usable) != 2:
+        return "preflight.targets: expected exactly two usable Revit targets, found {}".format(len(usable))
+    usable = sorted(usable, key=lambda t: t.get("port") if _is_int(t.get("port")) else 0)
+    if usable[0].get("port") == usable[1].get("port") or usable[0].get("pid") == usable[1].get("pid"):
+        return "preflight.targets: the two targets are not two distinct Revit processes"
+    targets = []
+    pre["targets"] = targets
+    record["revit_pids"] = [t.get("pid") for t in usable]
+    for target, wall in zip(usable, (args.wall_a, args.wall_b)):
+        info = {"port": target.get("port"), "pid": target.get("pid"), "selector": target.get("selector"),
+                "wall_id": wall, "documents": None, "parameter_writable": None}
+        targets.append(info)
+        info["documents"], reason = await _documents_of(bridge, info["selector"])
+        if reason:
+            return "{} (Revit on port {})".format(reason, info["port"])
+        reply, problem = await _read(bridge, "/element_properties/{}".format(wall), info["selector"])
+        info["parameter_writable"] = _writable_text(_parameter_entry(reply, args.parameter))
+        if not info["parameter_writable"]:
+            return ("preflight.parameter_writable: wall {} on port {} has no writable text parameter "
+                    "named {!r} ({})".format(wall, info["port"], args.parameter,
+                                             problem or _describe_reply(reply)))
+    pre["status_ok"] = True  # discovery answered the identity handshake of both
+    pre["parameter_writable"] = True
+    return None
+
+
+# --------------------------------------------------------------------- finish
+
+
+def _finish(args, record, reason):
+    """Flush the audit writer, read every audit file into the record and save it once."""
+    try:
+        flushed = _flush()
+    except Exception:
+        flushed = False
+    if not flushed and not reason:
+        reason = "the audit writer did not finish writing before the files were read"
+    record["audit_files"] = _read_audit_dir(os.path.abspath(args.audit_dir))
+    record["stop_reason"] = reason
+    record["recorded_at"] = _now()
+    return _save(args.out, record)
+
+
 def _print_report(record, secret, extra_reasons=()):
-    result = _verdict_of(record, secret)
-    reasons = list(extra_reasons) + result["reasons"]
-    ok = result["verdict"] == VERDICT_OK and not extra_reasons
+    """Print the verdict token, POSTS_SENT, the secret count and the reasons; return the exit code."""
+    stop = record.get("stop_reason") if isinstance(record, dict) else None
+    posts = _posts_sent_of(record)
+    if stop and posts == 0:
+        # A preflight stop: nothing was written, so the classifier's list of missing steps is noise.
+        result = {"verdict": VERDICT_STOP, "reasons": []}
+    else:
+        result = _verdict_of(record, secret)
+    reasons = list(extra_reasons) + (["stop: {}".format(stop)] if stop else []) + result["reasons"]
+    ok = result["verdict"] == VERDICT_OK and not extra_reasons and not stop
     found = record_secret_occurrences(record, secret) if (
         isinstance(record, dict) and isinstance(secret, str) and secret) else None
-    for line in report(VERDICT_OK if ok else VERDICT_STOP, reasons, _posts_sent_of(record), found):
+    for line in report(VERDICT_OK if ok else VERDICT_STOP, reasons, posts, found):
         print(line)
     return 0 if ok else 1
 
@@ -843,6 +1238,366 @@ def _print_report(record, secret, extra_reasons=()):
 def _cmd_classify(path):
     record, problem = _load_record(path)
     return _print_report(record, _secret_value(), [problem] if problem else [])
+
+
+def _read_code(path):
+    with open(path, "rb") as handle:
+        return handle.read().decode("utf-8-sig")
+
+
+# ----------------------------------------------------------------- run-single
+
+
+async def _execute_single(args, record):
+    bridge = _bridge()
+    reason = await _preflight_single(bridge, args, record)
+    if reason:
+        return reason
+    _main_module()
+    selector = record["preflight"]["selector"]
+    value = "phase6-live-{}".format(uuid.uuid4().hex[:8])
+    plan = (
+        ("w1", "execute_revit_code",
+         {"code": record["inputs"]["rollback_code"], "description": "phase6 live gate: deliberate rollback",
+          "target": selector, "user_request": USER_REQUEST["w1"]}),
+        ("w2", "tag_elements",
+         {"element_ids": [args.tag_id, BAD_ID], "view_name": args.view_name, "target": selector,
+          "user_request": USER_REQUEST["w2"]}),
+        ("w3", "set_parameter",
+         {"element_id": args.wall_id, "parameter_name": args.parameter, "value": value,
+          "target": selector, "user_request": USER_REQUEST["w3"]}),
+    )
+    problems = []
+    for key, tool, arguments in plan:
+        problem = await _tool_step(record, key, tool, arguments)
+        if problem:
+            problems.append("{}: {}".format(key, problem))
+    return "; ".join(problems) or None
+
+
+async def _run_single(args, code):
+    record = evidence_template()
+    record["stage"] = STAGE_SINGLE
+    record["inputs"].update({
+        "wall_id": args.wall_id, "parameter": args.parameter, "view_name": args.view_name,
+        "tag_id": args.tag_id, "rollback_code": code, "port": args.port,
+        "audit_dir": os.path.abspath(args.audit_dir),
+    })
+    record["server_pids"]["parent"] = os.getpid()
+    reason = None
+    written = False
+    try:
+        reason = await _execute_single(args, record)
+    except Exception as ex:
+        reason = "unexpected {}".format(_ex_text(ex))
+    except BaseException as ex:
+        reason = "interrupted ({})".format(type(ex).__name__)
+        raise
+    finally:
+        written = _finish(args, record, reason)
+    exit_code = _print_report(record, _secret_value())
+    if written:
+        print("record: {}".format(args.out))
+    return exit_code
+
+
+def _cmd_run_single(args):
+    problem = refusal(args)
+    if problem:
+        print("refused: {}".format(problem))
+        return 2
+    try:
+        code = _read_code(args.rollback_code)
+    except (OSError, ValueError) as ex:
+        print("refused: --rollback-code cannot be read as UTF-8 text ({})".format(type(ex).__name__))
+        return 2
+    _set_environment(args)
+    return asyncio.run(_run_single(args, code))
+
+
+# ------------------------------------------------------------------ rehearse
+
+
+def _rehearsal_verdict(record, files):
+    """("ROLLED_BACK" | "COMMITTED" | "OTHER", the audit entry of the call or None)."""
+    audit_id = audit_id_of(record["replies"].get("w1"))
+    entries = parse_audit_files(files)[0]
+    found = [e for _n, e in entries if audit_id and e.get("call_id") == audit_id]
+    if len(found) != 1:
+        return "OTHER", None
+    entry = found[0]
+    if entry.get("outcome") == "rolled_back" and entry.get("http_status") == 409:
+        return "ROLLED_BACK", entry
+    if entry.get("outcome") == "success" and entry.get("transaction_status") == "Committed":
+        return "COMMITTED", entry
+    return "OTHER", entry
+
+
+async def _execute_rehearse(args, record, code):
+    bridge = _bridge()
+    reason = await _preflight_target(bridge, args, record)
+    if reason:
+        return reason
+    _main_module()
+    arguments = {"code": code, "description": REHEARSAL_REQUEST,
+                 "target": record["preflight"]["selector"], "user_request": REHEARSAL_REQUEST}
+    problem = await _tool_step(record, "w1", "execute_revit_code", arguments)
+    return "w1: {}".format(problem) if problem else None
+
+
+async def _run_rehearse(args, code):
+    record = evidence_template()
+    record["stage"] = "rehearse"
+    reason = None
+    try:
+        reason = await _execute_rehearse(args, record, code)
+    except Exception as ex:
+        reason = "unexpected {}".format(_ex_text(ex))
+    try:
+        _flush()
+    except Exception:
+        pass
+    files = _read_audit_dir(os.path.abspath(args.audit_dir))
+    verdict, entry = _rehearsal_verdict(record, files) if "w1" in record["replies"] else ("OTHER", None)
+    print("REHEARSAL_{}".format(verdict))
+    print("POSTS_SENT={}".format(record["posts_sent"]))
+    if entry is not None:
+        print("entry: outcome={} http_status={} transaction_status={}".format(
+            entry.get("outcome"), entry.get("http_status"), entry.get("transaction_status")))
+    if reason:
+        print("stop: {}".format(reason))
+    if record["posts_sent"] == 0:
+        print(MSG_NO_WRITE)
+    return 0 if verdict == "ROLLED_BACK" else 1
+
+
+def _cmd_rehearse(args):
+    problem = refusal(args)
+    if problem:
+        print("refused: {}".format(problem))
+        return 2
+    try:
+        code = _read_code(args.rollback_code)
+    except (OSError, ValueError) as ex:
+        print("refused: --rollback-code cannot be read as UTF-8 text ({})".format(type(ex).__name__))
+        return 2
+    _set_environment(args)
+    return asyncio.run(_run_rehearse(args, code))
+
+
+# ------------------------------------------------------------------ run-dual
+
+
+async def _issue_calls(record, who, targets, count, parameter, server_pid):
+    """``count`` set_parameter calls per target, all handed to the tool at once (asyncio.gather)."""
+    slot = record["steps"][who]
+    jobs = []
+    for index, target in enumerate(targets):
+        for i in range(1, count + 1):
+            key = "{}-{}-{}".format(who, index, i)
+            value = "phase6-dual-{}-{}".format(server_pid, i)
+            arguments = {
+                "element_id": target["wall_id"], "parameter_name": parameter, "value": value,
+                "target": target["selector"],
+                "user_request": "phase6 dual gate: {} call {}".format(who, key),
+            }
+            jobs.append(_tool_step(record, key, "set_parameter", arguments, slot=slot,
+                                   extra={"pid": target["pid"], "element_id": target["wall_id"],
+                                          "value": value}))
+    await asyncio.gather(*jobs)
+
+
+def _child_argv(args, token, child_path, targets):
+    return [sys.executable, os.path.abspath(__file__), "child",
+            "--child-token", token, "--audit-dir", os.path.abspath(args.audit_dir),
+            "--out", child_path, "--port", str(args.port), "--parameter", args.parameter,
+            "--count", str(args.count), "--target-a", targets[0]["selector"],
+            "--target-b", targets[1]["selector"], "--wall-a", str(targets[0]["wall_id"]),
+            "--wall-b", str(targets[1]["wall_id"])]
+
+
+def _start_child(argv, env):
+    return subprocess.Popen(argv, env=env, cwd=REPO_ROOT, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+def _wait_child(child):
+    """(exit code, None) or (None, 'timed out'); a child that never finishes is killed."""
+    try:
+        child.communicate(timeout=CHILD_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        try:
+            child.communicate(timeout=30)
+        except Exception:
+            pass
+        return None, "timed out"
+    return child.returncode, None
+
+
+def _merge_child(record, child_path, code, problem):
+    """Fold the child's record into the parent's; the list of stop reasons (empty when all is well)."""
+    reasons = []
+    record["child_exit"] = code
+    try:
+        with open(child_path, "rb") as handle:
+            child = json.loads(handle.read().decode("utf-8-sig"))
+    except (OSError, ValueError):
+        child = None
+    steps = child.get("steps") if isinstance(child, dict) else None
+    pids = child.get("server_pids") if isinstance(child, dict) else None
+    usable = (isinstance(steps, dict) and isinstance(steps.get("child"), list)
+              and isinstance(child.get("replies"), dict) and _is_int(child.get("posts_sent"))
+              and isinstance(pids, dict) and _is_int(pids.get("child")))
+    if usable:
+        record["steps"]["child"] = steps["child"]
+        record["replies"].update(child["replies"])
+        record["server_pids"]["child"] = pids["child"]
+        record["posts_sent"] += child["posts_sent"]
+        if child.get("stop_reason"):
+            reasons.append("child: {}".format(child["stop_reason"]))
+    else:
+        record["posts_sent"] = None
+        reasons.append("child: no usable child record, so its POSTS_SENT is unknown; treat the "
+                       "one-shot gate as consumed")
+    if problem:
+        reasons.append("child: the child process timed out and was killed")
+    elif code != 0:
+        reasons.append("child: the child process exited with code {}".format(code))
+    return reasons
+
+
+async def _execute_dual(args, record, token, child_path):
+    bridge = _bridge()
+    reason = await _preflight_dual(bridge, args, record)
+    if reason:
+        return reason
+    _main_module()
+    targets = record["preflight"]["targets"]
+    env = dict(os.environ)
+    env[CHILD_TOKEN_ENV] = token
+    try:
+        child = _start_child(_child_argv(args, token, child_path, targets), env)
+    except OSError as ex:
+        return "child: could not be started ({}); nothing was written".format(type(ex).__name__)
+    reasons = []
+    try:
+        await _issue_calls(record, "parent", targets, args.count, args.parameter, os.getpid())
+    except Exception as ex:
+        reasons.append("parent: unexpected {}".format(_ex_text(ex)))
+    code, problem = await asyncio.to_thread(_wait_child, child)
+    reasons.extend(_merge_child(record, child_path, code, problem))
+    failed = ["{}: {}".format(c.get("key"), c.get("exception"))
+              for c in _list(record["steps"]["parent"]) if isinstance(c, dict) and c.get("exception")]
+    reasons.extend(failed)
+    return "; ".join(reasons) or None
+
+
+async def _run_dual(args):
+    record = evidence_template()
+    record["stage"] = STAGE_DUAL
+    record["inputs"].update({
+        "parameter": args.parameter, "port": args.port, "wall_a": args.wall_a, "wall_b": args.wall_b,
+        "count": args.count, "audit_dir": os.path.abspath(args.audit_dir),
+    })
+    record["server_pids"]["parent"] = os.getpid()
+    token = uuid.uuid4().hex
+    reason = None
+    written = False
+    try:
+        reason = await _execute_dual(args, record, token, _child_record_path(args.out))
+    except Exception as ex:
+        reason = "unexpected {}".format(_ex_text(ex))
+    except BaseException as ex:
+        reason = "interrupted ({})".format(type(ex).__name__)
+        raise
+    finally:
+        written = _finish(args, record, reason)
+    code = _print_report(record, _secret_value())
+    if written:
+        print("record: {}".format(args.out))
+    return code
+
+
+def _cmd_run_dual(args):
+    problem = refusal(args)
+    if problem:
+        print("refused: {}".format(problem))
+        return 2
+    _set_environment(args)
+    return asyncio.run(_run_dual(args))
+
+
+# ----------------------------------------------------------------------- child
+
+
+def _child_refusal(args):
+    """Why the child may not run, or None; it shares the runner's audit directory, so it may be non-empty."""
+    for name in ("wall_a", "wall_b"):
+        value = getattr(args, name)
+        if not (_is_int(value) and value > 0 and value != BAD_ID):
+            return "--{} must be a positive element id".format(name.replace("_", "-"))
+    if not _nonblank(args.parameter):
+        return "--parameter must not be blank"
+    if not (_is_int(args.count) and 1 <= args.count <= MAX_COUNT):
+        return "--count must be a whole number from 1 to {}".format(MAX_COUNT)
+    if not (_is_int(args.port) and 1 <= args.port <= 65535):
+        return "--port must be between 1 and 65535"
+    if os.path.exists(args.out):
+        return "{} already exists; a record is never overwritten".format(args.out)
+    if not os.path.isdir(os.path.dirname(os.path.abspath(args.out))):
+        return "the directory of --out does not exist ({})".format(args.out)
+    return None
+
+
+async def _run_child(args, targets):
+    record = evidence_template()
+    record["stage"] = "dual-child"
+    record["server_pids"]["child"] = os.getpid()
+    reason = None
+    try:
+        _bridge()
+        _main_module()
+        await _issue_calls(record, "child", targets, args.count, args.parameter, os.getpid())
+    except Exception as ex:
+        reason = "unexpected {}".format(_ex_text(ex))
+    try:
+        _flush()
+    except Exception:
+        pass
+    problems = ["{}: {}".format(c.get("key"), c.get("exception"))
+                for c in _list(record["steps"]["child"]) if isinstance(c, dict) and c.get("exception")]
+    if problems and not reason:
+        reason = "; ".join(problems)
+    record["stop_reason"] = reason
+    record["recorded_at"] = _now()
+    _save(args.out, record)
+    return 1 if reason and not record["steps"]["child"] else 0
+
+
+def _cmd_child(args):
+    expected = os.environ.get(CHILD_TOKEN_ENV)
+    if not (expected and _nonblank(args.child_token) and hmac.compare_digest(
+            expected.encode("utf-8"), args.child_token.encode("utf-8"))):
+        print("refused: child is internal and runs only when started by run-dual")
+        return 2
+    problem = _child_refusal(args)
+    if problem:
+        print("refused: {}".format(problem))
+        return 2
+    _set_environment(args)
+    bridge = _bridge()
+    targets = []
+    for selector, wall in ((args.target_a, args.wall_a), (args.target_b, args.wall_b)):
+        try:
+            targets.append({"selector": selector, "wall_id": wall, "pid": bridge.parse_target(selector)["pid"]})
+        except ValueError:
+            print("refused: a target selector is not valid")
+            return 2
+    return asyncio.run(_run_child(args, targets))
+
+
+# ---------------------------------------------------------------------- main
 
 
 def main(argv=None):
@@ -858,6 +1613,14 @@ def main(argv=None):
         return 0
     if namespace.command == "classify":
         return _cmd_classify(namespace.record)
+    if namespace.command == "rehearse":
+        return _cmd_rehearse(namespace)
+    if namespace.command == "run-single":
+        return _cmd_run_single(namespace)
+    if namespace.command == "run-dual":
+        return _cmd_run_dual(namespace)
+    if namespace.command == "child":
+        return _cmd_child(namespace)
     print(USAGE)
     return 2
 

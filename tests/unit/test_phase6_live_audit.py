@@ -26,6 +26,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import audit
 import bridge
 from audit_support import (
     PID_A, PID_B, PORT_A, PORT_B, PREFIX, SEL_A, SEL_B, make_machine, release_machine)
@@ -1300,6 +1301,7 @@ def test_a_preflight_stop_allows_a_rerun_to_a_fresh_out_and_leaves_the_first_rec
     assert proc.main(single_argv(tmp_path)) == 1
     first = (tmp_path / "single.json").read_bytes()
     capsys.readouterr()
+    audit._reset()  # a real rerun is a fresh process; one process keeps its first audit writer
     one_revit.reply(PORT_A, "/documents/", 200, docs_reply(1))
     argv = single_argv(tmp_path, **{"--out": str(tmp_path / "second.json"),
                                     "--audit-dir": str(tmp_path / "audit-2")})
@@ -1363,6 +1365,7 @@ def test_run_single_still_writes_its_record_when_the_bridge_cannot_be_imported(
     def broken():
         raise ImportError("synthetic import failure")
 
+    monkeypatch.setenv("REVIT_PORT", "48884")  # the command sets it; the fixture restores it
     monkeypatch.setattr(proc, "_bridge", broken)
     assert proc.main(single_argv(tmp_path)) == 1
     text = capsys.readouterr().out

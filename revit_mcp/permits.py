@@ -63,8 +63,42 @@ REPLAYED = "replayed"
 REGISTRY_FULL = "registry_full"
 NOT_CONFIGURED = "not_configured"
 
+FAILURE_STATUS = 403
+
 _PERMIT_FIELDS = ("v", "r", "a", "s", "e", "n", "p", "m")
 _TEXT_FIELDS = ("r", "a", "s", "n", "p", "m")
+
+_HINT_RETRY = (
+    "Ask again through the assistant: a new confirmation window issues a new one-time "
+    "permit (Попросите выполнить операцию снова: новое окно подтверждения выдаст новое "
+    "разрешение)."
+)
+_HINT_MISSING = (
+    "Обновите RevitMCP и перезапустите сессию ассистента (Run Update RevitMCP and restart "
+    "the assistant session): this extension accepts a mutation only with a one-time "
+    "permit, and the MCP server that sent this request did not attach one."
+)
+_HINT_NOT_CONFIGURED = (
+    "The Revit extension has no shared secret or no process identity, so it cannot check "
+    "permits. Reinstall the extension and fully restart Revit."
+)
+
+# Every refusal verdict has a fixed hint; none of them carries the body, the secret or an
+# exception text (T-07-23). OK is deliberately absent: it is not a refusal.
+_HINTS = {
+    MISSING: _HINT_MISSING,
+    NOT_CONFIGURED: _HINT_NOT_CONFIGURED,
+    MALFORMED: _HINT_RETRY,
+    UNSUPPORTED: _HINT_RETRY,
+    BAD_SIGNATURE: _HINT_RETRY,
+    ROUTE_MISMATCH: _HINT_RETRY,
+    SESSION_MISMATCH: _HINT_RETRY,
+    ARGS_MISMATCH: _HINT_RETRY,
+    EXPIRED: _HINT_RETRY,
+    TTL_TOO_LONG: _HINT_RETRY,
+    REPLAYED: _HINT_RETRY,
+    REGISTRY_FULL: _HINT_RETRY,
+}
 
 _LOCK = threading.Lock()
 _CONSUMED = {}  # nonce -> expiry (epoch seconds)
@@ -126,6 +160,28 @@ def split_wire(raw):
         return None
     except Exception:
         return None
+
+
+def failure(verdict):
+    """(body, status) of the HTTP 403 answer for a refused permit; fixed text, never raises.
+
+    ``verdict`` is a word returned by check_and_consume(); anything that is not a known
+    refusal word (including OK) is reported as malformed, so this function can never
+    produce a refusal that reads like a pass. The body is {error, permit, hint}: the
+    verdict word and fixed sentences only, no request body, secret or exception text.
+    """
+    word = verdict if isinstance(verdict, _TEXT_TYPE) and verdict in _HINTS else MALFORMED
+    body = {
+        "error": "Mutation rejected: one-time permit " + word + ". Nothing was changed.",
+        "permit": word,
+        "hint": _HINTS[word],
+    }
+    return body, FAILURE_STATUS
+
+
+def status_info():
+    """The permit protocol this extension verifies, for /status/ (read by the MCP side)."""
+    return {"protocol": PERMIT_PROTOCOL}
 
 
 def _is_int(value):

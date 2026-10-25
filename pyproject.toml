@@ -5,7 +5,7 @@ description = "MCP server for Revit"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp[cli]>=1.9.0",
+    "mcp[cli]>=1.30,<2",
     # Imported directly by the server, not just transitively through mcp[cli]:
     #   httpx at bridge.py module top, anyio at main.py module top; uvicorn
     #   inside run_combined_async.

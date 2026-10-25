@@ -297,7 +297,10 @@ def install_audited_tools(mcp) -> None:
 
     Install it before register_tools. The wrapper sets the call state the bridge
     reads, and adds one optional keyword-only parameter, user_request, to the
-    published input schema of every tool.
+    published input schema of every tool. Since mcp 1.10 FastMCP infers an output
+    schema from ``-> str``; structured_output defaults to False here so the
+    published tool surface and the call_tool return shape stay those of mcp 1.9.0
+    (a caller can still pass structured_output explicitly).
     """
     if getattr(mcp, "_revit_mcp_audited", False):
         return
@@ -309,6 +312,7 @@ def install_audited_tools(mcp) -> None:
     original_tool = mcp.tool
 
     def audited_tool(*args, **kwargs):
+        kwargs.setdefault("structured_output", False)
         register = original_tool(*args, **kwargs)
 
         def decorator(fn):

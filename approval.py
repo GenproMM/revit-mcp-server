@@ -14,7 +14,8 @@ queue (D-07). authorize() asks the policy what the route needs:
   (D-22).
 
 A Grant carries the one-time permit minted over the exact argument text (permit.py), bound
-to the target's session token and the policy hash. A Refusal carries text that says the
+to the target's session token and the policy hash. The policy is read again after the human
+answers: an accept given under a policy that has since changed is refused (policy_changed). A Refusal carries text that says the
 request was NOT sent and nothing changed.
 
 Consent is the action of the client's answer on the server's own request, nothing else:
@@ -103,6 +104,9 @@ def refusal_text(label: str, reasons) -> str:
     elif "approval_unavailable" in reasons or "approval_error" in reasons:
         why = ("UNAVAILABLE: this client cannot show a confirmation window "
                "(MCP elicitation).")
+    elif "policy_changed" in reasons:
+        why = ("NOT CONFIRMED: the approval policy changed while the window was open; "
+               "ask again.")
     elif "no_secret" in reasons:
         why = ("DENIED: this MCP server has no shared secret, so no permit can be issued. "
                "Run the Update RevitMCP shortcut and restart the assistant session.")
@@ -254,7 +258,19 @@ async def authorize(request: AuthorizationRequest):
     answer = await ask_human(request.ctx, message, pol.confirm_timeout_s)
     wait_ms = int((time.monotonic() - started) * 1000)
     if answer == "accepted":
-        return _grant(request, pol, "confirm", reasons, "accepted", wait_ms)
+        # SAFE-13: an approval is for the policy that opened the window. Re-read the policy
+        # now (forced, so a change applied while the human decided is seen) and refuse when
+        # the active hash is no longer the one the window was shown under.
+        answered = {"approval": "accepted", "approval_wait_ms": wait_ms}
+        try:
+            latest = await policy.current(force=True)
+        except policy.PolicyError:
+            return _refuse("denied", ["policy_invalid"], None, "confirm",
+                           dict(answered, reasons=reasons + ["policy_invalid"]))
+        if latest.hash != pol.hash:
+            return _refuse("denied", ["policy_changed"], latest, "confirm",
+                           dict(answered, reasons=reasons + ["policy_changed"]))
+        return _grant(request, latest, "confirm", reasons, "accepted", wait_ms)
     label, why = _ANSWERS[answer]
     return _refuse(label, [why], pol, "confirm",
                    {"approval": answer, "approval_wait_ms": wait_ms, "reasons": reasons + [why]})

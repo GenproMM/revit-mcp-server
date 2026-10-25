@@ -9,6 +9,9 @@ is denied by the caller (unknown_route): nothing is classified by default.
 
 Nothing here reads a file at import. The base policy is read on first use, in a worker
 thread, and kept; an invalid base is a PolicyError on every call, never a silent fallback.
+The optional operator file (REVIT_MCP_POLICY_FILE, else the path staged in policy_source)
+is re-read at most every two seconds, in a worker thread under a three second cap, and
+applied atomically only when it is complete, stable and valid.
 This module never prints, never logs, never touches stdout and imports nothing from mcp.
 
 Validation is strict and closed (D-16): every key, word, type and number of a policy file
@@ -25,10 +28,12 @@ import copy
 import dataclasses
 import hashlib
 import os
+import time
 import tomllib
 import types
 from typing import Any, Mapping, Optional, Tuple
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA_VERSION = 1
 BASE_FILE = "policy.base.toml"
 DECISIONS = ("allow", "confirm", "deny", "check")
@@ -333,35 +338,243 @@ def policy_hash(base_bytes: bytes, operator_bytes: Optional[bytes] = None) -> st
     return digest.hexdigest()[:12]
 
 
-def load_base(path: Optional[str] = None) -> Policy:
-    """The base policy file beside this module (or ``path``), parsed, validated and hashed."""
-    if path is None:
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), BASE_FILE)
+def _read_base(path: str):
+    """(Policy, bytes, document) of a base policy file; PolicyError when it is unreadable or invalid."""
     try:
         with open(path, "rb") as handle:
             data = handle.read()
     except OSError as exc:
         raise PolicyError("base policy file cannot be read: {}".format(type(exc).__name__)) from exc
-    return build_policy(parse_policy_bytes(data), "base", policy_hash(data))
+    document = parse_policy_bytes(data)
+    return build_policy(document, "base", policy_hash(data)), data, document
 
 
-_ACTIVE: Optional[Policy] = None
+def load_base(path: Optional[str] = None) -> Policy:
+    """The base policy file beside this module (or ``path``), parsed, validated and hashed."""
+    if path is None:
+        path = os.path.join(_HERE, BASE_FILE)
+    return _read_base(path)[0]
 
 
-async def current() -> Policy:
-    """The active policy: the base, read once in a worker thread and kept.
+# ------------------------------------------------------------- the operator file
 
-    Raises PolicyError while the base is invalid (it is read again on the next call, so
-    a repaired file is picked up); the caller turns it into a refusal, so a broken policy
-    blocks mutations instead of allowing them.
+POLICY_FILE_ENV = "REVIT_MCP_POLICY_FILE"
+POLICY_SOURCE_FILE = "policy_source"
+RELOAD_INTERVAL_S = 2.0   # a gated call re-reads the operator file when this much time has passed
+READ_TIMEOUT_S = 3.0      # cap on the worker-thread read of the share (research Pitfall 9)
+DEBOUNCE_S = 0.2          # the file is read twice this far apart; a torn write differs (Pitfall 15)
+MAX_OPERATOR_BYTES = 262144
+_SOURCE_MAX = 4096
+
+OPERATOR_STATES = ("not_configured", "absent", "pending", "accepted", "rejected", "unreachable")
+_ABSENT_WINERRORS = (None, 2, 3)   # file / path not found; any other WinError (67 "network name not found") is unreachable
+
+_debounce_sleep = time.sleep       # tests replace it; the worker thread looks it up at call time
+
+
+def operator_path(source_dir: Optional[str] = None) -> Optional[str]:
+    """Where the operator policy lives (D-27): REVIT_MCP_POLICY_FILE, else the first line of policy_source.
+
+    ``policy_source`` is staged beside this module by the payload build and holds one UNC
+    path; the text is returned byte-identical (Cyrillic included). An empty or blank value
+    in either place counts as absent. Reads one small local file; the store calls it in a
+    worker thread, never on the event loop.
     """
-    global _ACTIVE
-    if _ACTIVE is None:
-        _ACTIVE = await asyncio.to_thread(load_base)
-    return _ACTIVE
+    value = os.environ.get(POLICY_FILE_ENV, "").strip()
+    if value:
+        return value
+    directory = source_dir if source_dir is not None else _HERE
+    try:
+        with open(os.path.join(directory, POLICY_SOURCE_FILE), "rb") as handle:
+            raw = handle.read(_SOURCE_MAX)
+        lines = raw.decode("utf-8-sig").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return None
+    first = lines[0].strip() if lines else ""
+    return first or None
+
+
+def _read_file(path: str) -> bytes:
+    """The bytes of the operator file, at most one byte more than the cap (the store rejects a longer one)."""
+    with open(path, "rb") as handle:
+        return handle.read(MAX_OPERATOR_BYTES + 1)
+
+
+class PolicyStore:
+    """The active policy: the base, plus the operator overlay when a valid, stable file exists (D-14..D-17).
+
+    ``current()`` re-reads the operator file at most every RELOAD_INTERVAL_S (or when forced),
+    in a worker thread under a READ_TIMEOUT_S cap, reading twice DEBOUNCE_S apart. A file
+    is applied only when both reads agree, it parses and it validates as a whole; the new
+    immutable Policy replaces the old by one reference assignment, so a concurrent caller
+    sees the old or the new object, never a mix. Anything else leaves the active policy as it
+    was (an invalid update keeps the last valid operator version; a first invalid file
+    leaves the base) and sets ``operator_state`` and ``diagnostic``. A deleted file is the
+    one case that falls back to the base ("absent"). An invalid base raises PolicyError on
+    every call (blocked): nothing weaker is substituted.
+    """
+
+    def __init__(self, base_path: Optional[str] = None, reader=None, clock=None,
+                 source_dir: Optional[str] = None):
+        self._base_path = base_path or os.path.join(_HERE, BASE_FILE)
+        self._reader = reader or _read_file
+        self._clock = clock or time.monotonic
+        self._source_dir = source_dir
+        self._base: Optional[Policy] = None
+        self._base_bytes = b""
+        self._base_document: dict = {}
+        self._base_error: Optional[str] = None
+        self._active: Optional[Policy] = None
+        self._operator_sha: Optional[str] = None
+        self._operator_file: Optional[str] = None
+        self._state = "not_configured"
+        self._diagnostic: Optional[str] = None
+        self._last_check: Optional[float] = None
+        self._refreshing = False
+
+    async def current(self, force: bool = False) -> Policy:
+        """The active Policy; PolicyError while the base is invalid. Never blocks the loop on the share."""
+        base = await self._ensure_base()
+        now = self._clock()
+        due = force or self._last_check is None or now - self._last_check >= RELOAD_INTERVAL_S
+        if due and not self._refreshing:
+            self._refreshing = True
+            self._last_check = now
+            try:
+                await self._refresh(base)
+            finally:
+                self._refreshing = False
+        return self._active
+
+    def status(self) -> dict:
+        """What the policy is right now. Never raises; the keys are always the same."""
+        try:
+            active = self._active
+            blocked = self._base is None and self._base_error is not None
+            return {
+                "source": active.source if active else None,
+                "hash": active.hash if active else None,
+                "operator_file": self._operator_file,
+                "operator_state": self._state,
+                "diagnostic": self._diagnostic,
+                "blocked": blocked,
+                "blocked_reason": self._base_error if blocked else None,
+                "confirm_timeout_s": active.confirm_timeout_s if active else None,
+                "permit_ttl_s": active.permit_ttl_s if active else None,
+            }
+        except Exception:  # a status call must never be the thing that fails
+            return {"source": None, "hash": None, "operator_file": None,
+                    "operator_state": "unreachable", "diagnostic": "status failed",
+                    "blocked": True, "blocked_reason": "status failed",
+                    "confirm_timeout_s": None, "permit_ttl_s": None}
+
+    # ----------------------------------------------------------------- internals
+
+    async def _ensure_base(self) -> Policy:
+        if self._base is not None:
+            return self._base
+        try:
+            base, data, document = await asyncio.to_thread(_read_base, self._base_path)
+        except PolicyError as exc:
+            self._base_error = str(exc)
+            raise
+        if self._base is None:  # a concurrent first call may have finished first
+            self._base, self._base_bytes, self._base_document = base, data, document
+            self._base_error = None
+            self._active = base
+            self._operator_sha = None
+            self._last_check = None
+        return self._base
+
+    def _read_operator(self):
+        """Worker thread: (path, first read, second read), or (None, None, None) when no path is configured."""
+        path = operator_path(self._source_dir)
+        self._operator_file = path
+        if not path:
+            return None, None, None
+        first = self._reader(path)
+        _debounce_sleep(DEBOUNCE_S)
+        return path, first, self._reader(path)
+
+    def _set(self, state: str, diagnostic: Optional[str]) -> None:
+        self._state = state
+        self._diagnostic = diagnostic
+
+    def _fall_back_to_base(self, state: str, diagnostic: Optional[str]) -> None:
+        self._active = self._base
+        self._operator_sha = None
+        self._set(state, diagnostic)
+
+    async def _refresh(self, base: Policy) -> None:
+        try:
+            path, first, second = await asyncio.wait_for(
+                asyncio.to_thread(self._read_operator), READ_TIMEOUT_S)
+        except FileNotFoundError as exc:
+            if getattr(exc, "winerror", None) in _ABSENT_WINERRORS:
+                self._fall_back_to_base("absent", "operator policy file not found")
+            else:  # a share that cannot be reached is not a deleted file: keep what is active
+                self._set("unreachable", type(exc).__name__)
+            return
+        except Exception as exc:  # OSError, the read timeout, a failing reader: keep the active policy
+            self._set("unreachable", type(exc).__name__)
+            return
+        if path is None:
+            self._fall_back_to_base("not_configured", None)
+            return
+        if first != second:
+            self._set("pending", "operator policy file changed between two reads")
+            return
+        if not isinstance(first, (bytes, bytearray)) or len(first) > MAX_OPERATOR_BYTES:
+            self._set("rejected", "operator policy file is not a readable file of at most "
+                                  "{} bytes".format(MAX_OPERATOR_BYTES))
+            return
+        first = bytes(first)
+        digest = hashlib.sha256(first).hexdigest()
+        if digest == self._operator_sha:
+            self._set("accepted", None)
+            return
+        try:
+            merged = merge(self._base_document, parse_policy_bytes(first))
+            new = build_policy(merged, "operator", policy_hash(self._base_bytes, first))
+        except PolicyError as exc:
+            self._set("rejected", str(exc))
+            return
+        self._active = new  # one reference assignment: callers see the old or the new object
+        self._operator_sha = digest
+        self._set("accepted", None)
+
+
+_STORE: Optional[PolicyStore] = None
+
+
+def _store() -> PolicyStore:
+    global _STORE
+    if _STORE is None:
+        _STORE = PolicyStore()
+    return _STORE
+
+
+async def current(force: bool = False) -> Policy:
+    """The active policy of this process (see PolicyStore.current); PolicyError while the base is invalid.
+
+    The caller turns the error into a refusal, so a broken policy blocks mutations instead
+    of allowing them.
+    """
+    return await _store().current(force=force)
+
+
+async def status(refresh: bool = True) -> dict:
+    """The policy status dict; refreshes first (forced) unless ``refresh`` is false. Never raises."""
+    try:
+        await current(force=refresh)
+    except PolicyError:
+        pass
+    except Exception:  # the status is read for display; a failure shows in the dict, not as an error
+        pass
+    return _store().status()
 
 
 def _reset() -> None:
-    """Forget the loaded policy (tests)."""
-    global _ACTIVE
-    _ACTIVE = None
+    """Forget the store and everything it loaded (tests)."""
+    global _STORE
+    _STORE = None

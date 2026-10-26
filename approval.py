@@ -286,12 +286,10 @@ async def authorize(request: AuthorizationRequest):
         try:
             latest = await policy.current(force=True)
         except policy.PolicyError:
-            return _refuse("denied", ["policy_invalid"], None, "confirm",
-                           dict(answered, reasons=reasons + ["policy_invalid"]))
+            return _refuse("denied", reasons + ["policy_invalid"], None, "confirm", answered)
         if latest.hash != pol.hash:
-            return _refuse("denied", ["policy_changed"], latest, "confirm",
-                           dict(answered, reasons=reasons + ["policy_changed"]))
+            return _refuse("denied", reasons + ["policy_changed"], latest, "confirm", answered)
         return _grant(request, latest, "confirm", reasons, "accepted", wait_ms)
     label, why = _ANSWERS[answer]
-    return _refuse(label, [why], pol, "confirm",
-                   {"approval": answer, "approval_wait_ms": wait_ms, "reasons": reasons + [why]})
+    return _refuse(label, reasons + [why], pol, "confirm",
+                   {"approval": answer, "approval_wait_ms": wait_ms})

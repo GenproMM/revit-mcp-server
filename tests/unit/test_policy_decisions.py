@@ -223,6 +223,6 @@ async def test_authorize_uses_decide_for_facts_unavailable_parameter_and_shared_
     parameter = await approval.authorize(parameter_request)
     family = await approval.authorize(family_request)
 
-    assert parameter.reasons == ("approval_unavailable",)
+    assert parameter.reasons == ("parameter_write", "facts_unavailable", "approval_unavailable")
     assert parameter.audit_fields["reasons"] == ["parameter_write", "facts_unavailable", "approval_unavailable"]
     assert family.reasons == ("edit_family", "shared_parameter_source")

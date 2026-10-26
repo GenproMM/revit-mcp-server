@@ -135,7 +135,8 @@ def test_outcome_with_no_provenance_kind_reads_as_received():
 def test_outcome_label_is_one_of_the_documented_labels():
     labels = set(row[6] for row in OUTCOME_ROWS)
     assert labels <= set(audit.OUTCOME_LABELS)
-    assert len(audit.OUTCOME_LABELS) == len(set(audit.OUTCOME_LABELS)) == 12
+    assert len(audit.OUTCOME_LABELS) == len(set(audit.OUTCOME_LABELS)) == 15
+    assert audit.OUTCOME_LABELS[-3:] == ("denied", "expired", "rejected_permit")
 
 
 def test_outcome_never_copies_message_error_or_read_data():

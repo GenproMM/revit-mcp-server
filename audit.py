@@ -163,6 +163,7 @@ _OUTCOME_STATUSES = ("success", "partial", "failed", "rolled_back")
 OUTCOME_LABELS = (
     "success", "partial", "failed", "rolled_back", "rejected_auth", "rejected_integrity",
     "rejected_document", "error", "unknown", "no_reply", "unverified_reply", "unrecognized",
+    "denied", "expired", "rejected_permit",
 )
 
 # The refusal codes of revit_mcp/identity.py (the document-* constants and
@@ -208,7 +209,8 @@ SCHEMA_1_FIELDS = (
     "document_source", "document_role", "documents_changed", "observed_active_document",
     "document_scope", "cancelled", "windows_user", "args", "args_truncated", "code_length",
     "code_sha256", "user_request", "user_request_missing", "user_request_length",
-    "user_request_source", "server_pid", "duration_ms",
+    "user_request_source", "policy", "decision", "approval", "approval_wait_ms", "reasons",
+    "permit", "server_pid", "duration_ms",
 )
 
 ALWAYS_PRESENT_FIELDS = (
@@ -428,6 +430,9 @@ def _outcome(kind, http_status, body, mutation, secret=None):
         return "rejected_auth", _text(body.get("auth"), REASON_MAX, secret), None
     if http_status == 423:
         return "rejected_integrity", _text(body.get("integrity"), REASON_MAX, secret), None
+    permit = body.get("permit")
+    if http_status == 403 and isinstance(permit, str):
+        return "rejected_permit", _text(permit, REASON_MAX, secret), None
     code = body.get("error_code")
     if isinstance(code, str) and code in DOCUMENT_REFUSAL_CODES:
         return "rejected_document", _text(code, REASON_MAX, secret), None
@@ -674,7 +679,8 @@ def windows_user() -> str:
 
 
 def build_entry(call, method, endpoint, provenance, body, *, duration_ms, now, server_pid,
-                active_title_hint=None, cancelled=False, windows_user=None, secret=None):
+                active_title_hint=None, cancelled=False, windows_user=None, secret=None,
+                policy_fields=None):
     """One audit entry as a dict, or None for a call that never left this process (D-02).
 
     Pure: no I/O, no clock, no environment (windows_user and secret arrive as
@@ -748,6 +754,10 @@ def build_entry(call, method, endpoint, provenance, body, *, duration_ms, now, s
         entry["args_truncated"] = args_truncated
     entry.update(code_fields)
     entry.update(shape_user_request(call.user_request, secret))
+    if isinstance(policy_fields, dict):
+        for name in ("policy", "decision", "approval", "approval_wait_ms", "reasons", "permit"):
+            if name in policy_fields:
+                entry[name] = policy_fields[name]
     entry["server_pid"] = server_pid
     entry["duration_ms"] = duration_ms
     return redact(entry, secret)
@@ -976,14 +986,49 @@ def _writer() -> logging.Logger:
         return _WRITER.logger
 
 
+def record_decision(call, endpoint, *, label, reasons, decision, approval, approval_wait_ms,
+                    policy, requested, secret):
+    """Write one policy refusal as a not-sent audit entry; return it, never raise."""
+    try:
+        provenance = {"kind": "unknown", "requested": requested, "process": None,
+                      "http_status": None, "corroborated": None}
+        entry = build_entry(call, "POST", endpoint, provenance, None, duration_ms=0,
+                            now=datetime.now(timezone.utc), server_pid=os.getpid(),
+                            windows_user=windows_user(), secret=secret)
+        if entry is None:
+            return None
+        entry.update({
+            "kind": "not-sent", "http_status": None, "outcome": label,
+            "process": None, "corroborated": None, "document": None,
+            "document_source": "none", "document_role": None,
+            "transaction_status": None, "requested": None, "succeeded": None,
+            "succeeded_count": None, "failed": None, "failed_count": None,
+            "revit_failures": None, "decision": decision, "approval": approval,
+            "approval_wait_ms": approval_wait_ms, "reasons": list(reasons),
+        })
+        entry.pop("outcome_block_missing", None)
+        entry.pop("reply_status", None)
+        if reasons:
+            entry["reason"] = _text(reasons[-1], REASON_MAX, secret)
+        if isinstance(policy, dict):
+            entry["policy"] = policy
+        entry = redact(entry, secret)
+        _writer().info(serialize_entry(entry, secret))
+        return entry
+    except Exception as exc:
+        _warn_once(exc)
+        return None
+
+
 def record_call(call, method, endpoint, provenance, body, *, duration_ms, secret,
-                active_title_hint=None, cancelled=False):
+                active_title_hint=None, cancelled=False, policy_fields=None):
     """Write one entry for a finished bridge call; return the entry, or None. Never raises (D-18)."""
     try:
         entry = build_entry(call, method, endpoint, provenance, body, duration_ms=duration_ms,
                             now=datetime.now(timezone.utc), server_pid=os.getpid(),
                             active_title_hint=active_title_hint, cancelled=cancelled,
-                            windows_user=windows_user(), secret=secret)
+                            windows_user=windows_user(), secret=secret,
+                            policy_fields=policy_fields)
         if entry is None:
             return None
         # The message is the finished line: QueueHandler would stringify a dict.

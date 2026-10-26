@@ -928,7 +928,7 @@ async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None,
     except Exception:  # fixed text: an authorizer failure never reaches the model verbatim
         return _uncertain(_AUTHORIZATION_FAILED_TEXT, "not-sent", requested)
     if isinstance(outcome, approval.Refusal):
-        return _uncertain(outcome.text, "not-sent", requested)
+        return _refuse(call, endpoint, resolved, outcome)
     if not isinstance(outcome, approval.Grant):
         return _uncertain(_AUTHORIZATION_FAILED_TEXT, "not-sent", requested)
     try:
@@ -942,7 +942,26 @@ async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Any = None,
     async def write(client) -> Union[Dict, str]:
         return await _send(client, "POST", endpoint, body, timeout, params)
 
-    return await _dispatch("POST", endpoint, ctx, timeout, write, selector, call=call)
+    return await _dispatch("POST", endpoint, ctx, timeout, write, selector, call=call,
+                           policy_fields=outcome.audit_fields)
+
+
+def _refuse(call, endpoint, resolved, refusal):
+    """Record a policy refusal, then attach its call id to the not-sent provenance."""
+    requested = _requested_of(resolved)
+    result = _uncertain(refusal.text, "not-sent", requested)
+    try:
+        fields = refusal.audit_fields
+        entry = audit.record_decision(
+            call, endpoint, label=refusal.label, reasons=fields.get("reasons", refusal.reasons),
+            decision=fields.get("decision", "deny"), approval=fields.get("approval", "none"),
+            approval_wait_ms=fields.get("approval_wait_ms", 0), policy=fields.get("policy"),
+            requested=requested, secret=_secret())
+        if entry is not None:
+            getattr(result, PROVENANCE_ATTR)["audit_call_id"] = entry["call_id"]
+    except Exception:
+        pass
+    return result
 
 
 async def revit_image(endpoint: str, ctx: Any = None, timeout: float = 60.0,
@@ -1100,7 +1119,8 @@ def _queue_busy_message(timeout: float) -> str:
 
 
 async def _dispatch(method: str, endpoint: str, ctx: Any, timeout: float, exchange: Any,
-                    target: Optional[str] = None, call: Any = None) -> Union[Dict, str, Any]:
+                    target: Optional[str] = None, call: Any = None,
+                    policy_fields: Optional[dict] = None) -> Union[Dict, str, Any]:
     """The one bounded-wait, per-incarnation lock path for every non-status call.
 
     ``exchange`` is a coroutine function taking the incarnation's client and
@@ -1131,16 +1151,16 @@ async def _dispatch(method: str, endpoint: str, ctx: Any, timeout: float, exchan
             _audit(call, method, endpoint, None, started,
                    active_title_hint=progress.get("active_title_hint"), cancelled=True,
                    provenance=_meta("unknown" if method == "POST" else "no-reply",
-                                    progress.get("requested")))
+                                    progress.get("requested")), policy_fields=policy_fields)
         raise
     _audit(call, method, endpoint, result, started,
-           active_title_hint=progress.get("active_title_hint"))
+           active_title_hint=progress.get("active_title_hint"), policy_fields=policy_fields)
     return result
 
 
 def _audit(call: Any, method: str, endpoint: str, result: Any, started: float,
            active_title_hint: Optional[str] = None, cancelled: bool = False,
-           provenance: Optional[dict] = None) -> None:
+           provenance: Optional[dict] = None, policy_fields: Optional[dict] = None) -> None:
     """Write one audit entry for a finished call and put its id on the provenance.
 
     Never raises: the log must not change what a call returns (D-18). The id is
@@ -1171,7 +1191,7 @@ def _audit(call: Any, method: str, endpoint: str, result: Any, started: float,
         entry = audit.record_call(call, method, endpoint, meta, body,
                                   duration_ms=int((time.monotonic() - started) * 1000),
                                   secret=secret, active_title_hint=active_title_hint,
-                                  cancelled=cancelled)
+                                  cancelled=cancelled, policy_fields=policy_fields)
         if (entry is not None and attach_to is not None
                 and (entry["mutation"] or entry["outcome"] != "success")):
             attach_to["audit_call_id"] = entry["call_id"]

@@ -105,7 +105,7 @@ Discovery rules that matter when writing a module:
   (`?verbose=true` also lists the registered ones).
 - Imports still live *inside* the register functions, which keeps stdio cold start low.
 
-Current surface: 59 MCP tools over 56 routes across 24 domain modules. The authoritative
+Current surface: 59 MCP tools over 57 routes across 25 domain modules. The authoritative
 list is `tests/unit/tool_manifest.txt`; `deploy/gate.py` blocks a release that diverges from it.
 
 ## Non-negotiable invariants
@@ -116,6 +116,15 @@ when it is not `None`; never add a bypass flag. The seven intentionally open POS
 call `strip_envelope(request)` and are listed in `trust.OPEN_POST_READ_ROUTES`, mirrored in
 `scripts/conventions.py`. `tests/unit/test_phase5_gate_wiring.py` is the closed-by-default
 sentinel: a route that forgets the preamble fails it.
+
+**Every closed non-GET route consumes a one-time permit (Phase 7).** `bridge.revit_post` sends every POST outside the open reads through `bridge._authorize` (`approval.authorize`: policy decision, the client confirmation window, and the permit) before `_dispatch`, so the human wait holds no Revit lock. `revit_mcp/security.gate_or_response` verifies and consumes the permit after the secret and integrity checks (403 on refusal), and it is the only caller of `permits.check_and_consume`. Policy lives only on the CPython side: `policy.base.toml` is in the payload and an optional operator file is named by `app\policy_source` or `REVIT_MCP_POLICY_FILE`. `/mutation_preflight/` is the eighth open POST read and is bridge-internal. A new tool or route needs a `[tools]`/`[routes]` entry in `policy.base.toml` in the same commit; `tests/unit/test_policy_inventory.py` enforces the inventory.
+
+A process that can read the shared secret can mint its own one-time permits: the permit stops callers on the LAN, a stray curl and an outdated payload, not an agent running with the user's own OS rights.
+Confirming execute_revit_code is not a review of the code: arbitrary code can still do anything the Revit API allows, including binding a shared parameter that is not in the company file.
+A permit is bound to its own request bytes; it does not fix cross-process overlap in pyRevit's shared handler (backlog 999.1).
+load_family is confirmed, but the shared parameters inside the loaded family file are not checked against the company shared-parameter file.
+Which operations need a confirmation is the default of the base policy; the fleet operator can change any rule, relaxing ones included.
+A client that redelivers an already executed allow-class call to a new server process can run it a second time without a window; a confirm-class call always opens a new window.
 
 **Every document mutation runs in a transaction, and `suppress_warnings(t)` comes immediately
 after `t.Start()`.** Without it a routine Revit warning pops a modal dialog that blocks the

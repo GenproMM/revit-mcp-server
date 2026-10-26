@@ -24,6 +24,14 @@ Consent is the action of the client's answer on the server's own request, nothin
 not the assistant's text, not any argument, not the content of an accept (the Hermes client
 sends accept with empty content). A client that cannot show the window is "unavailable".
 
+Known limits:
+A process that can read the shared secret can mint its own one-time permits: the permit stops callers on the LAN, a stray curl and an outdated payload, not an agent running with the user's own OS rights.
+Confirming execute_revit_code is not a review of the code: arbitrary code can still do anything the Revit API allows, including binding a shared parameter that is not in the company file.
+A permit is bound to its own request bytes; it does not fix cross-process overlap in pyRevit's shared handler (backlog 999.1).
+load_family is confirmed, but the shared parameters inside the loaded family file are not checked against the company shared-parameter file.
+Which operations need a confirmation is the default of the base policy; the fleet operator can change any rule, relaxing ones included.
+A client that redelivers an already executed allow-class call to a new server process can run it a second time without a window; a confirm-class call always opens a new window.
+
 This module never prints, never logs and imports nothing from mcp at module level, so
 importing bridge keeps the cold start cheap (ask_human imports mcp.types inside).
 """

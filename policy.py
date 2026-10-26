@@ -31,6 +31,8 @@ import os
 import time
 import tomllib
 import types
+import unicodedata
+import uuid
 from typing import Any, Mapping, Optional, Tuple
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -185,6 +187,138 @@ def decide(rule: Rule, data: Any, facts: Any = None, fop: Any = None) -> Decisio
     if rule.check == "family_edit":
         return _family_edit_decision(rule, data, fop)
     return Decision("deny", _deduplicated(rule.reasons + ("unknown_check",)))
+
+
+# ------------------------------------------------------------- company shared parameters
+
+FOP_TIMEOUT_S = 3.0
+FOP_CACHE_TTL_S = 2.0
+MAX_FOP_BYTES = 16 * 1024 * 1024
+_FOP_CACHE = {}
+
+
+class FopError(ValueError):
+    """The company shared-parameter source could not be established."""
+
+
+@dataclasses.dataclass(frozen=True)
+class FopIndex:
+    names_by_guid: Mapping[str, str]
+    guids_by_name: Mapping[str, frozenset]
+
+
+def parse_fop_bytes(data: bytes) -> FopIndex:
+    """Strict BOM-based decoding and tab-separated Revit PARAM records; no guessed encoding."""
+    try:
+        if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+            text = data.decode("utf-16")
+        else:
+            text = data.decode("utf-8-sig")
+    except (UnicodeError, AttributeError) as exc:
+        raise FopError("undecodable") from exc
+    names = {}
+    by_name = {}
+    header = False
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        fields = line.rstrip("\r").split("\t")
+        if fields[0] == "*PARAM":
+            header = True
+        elif fields[0] == "PARAM":
+            if not header or len(fields) < 3 or not fields[2]:
+                raise FopError("invalid PARAM record")
+            try:
+                guid = str(uuid.UUID(fields[1]))
+            except ValueError as exc:
+                raise FopError("invalid PARAM GUID") from exc
+            name = unicodedata.normalize("NFC", fields[2])
+            if guid in names and names[guid] != name:
+                raise FopError("conflicting PARAM GUID")
+            names[guid] = name
+            by_name.setdefault(name, set()).add(guid)
+    if not header:
+        raise FopError("not a shared parameter file")
+    return FopIndex(types.MappingProxyType(names), types.MappingProxyType(
+        {name: frozenset(guids) for name, guids in by_name.items()}))
+
+
+def _read_fop_file(path):
+    with open(path, "rb") as handle:
+        return handle.read(MAX_FOP_BYTES + 1)
+
+
+async def read_fop(path, reader=None, *, force=False) -> FopIndex:
+    """Stat, read and parse in a worker under one deadline, caching only stable successful reads.
+
+    Timeout cannot terminate an OS file read already running in the worker. A late worker
+    does not publish a cache entry; only a completed await can update this process's cache.
+    """
+    def read():
+        before = os.stat(path)
+        key = (os.fspath(path), before.st_mtime_ns, before.st_size)
+        cached = _FOP_CACHE.get(key)
+        if not force and cached is not None and time.monotonic() - cached[0] < FOP_CACHE_TTL_S:
+            return key, cached[1], cached[0]
+        data = (reader or _read_fop_file)(path)
+        if not isinstance(data, bytes) or len(data) > MAX_FOP_BYTES:
+            raise FopError("invalid file size")
+        after = os.stat(path)
+        if (before.st_mtime_ns, before.st_size) != (after.st_mtime_ns, after.st_size):
+            raise FopError("file changed during read")
+        return key, parse_fop_bytes(data), time.monotonic()
+
+    key, index, cached_at = await asyncio.wait_for(asyncio.to_thread(read), FOP_TIMEOUT_S)
+    # Keep one entry per path and a small upper bound even when operator paths change.
+    for previous in list(_FOP_CACHE):
+        if previous[0] == key[0]:
+            _FOP_CACHE.pop(previous, None)
+    if len(_FOP_CACHE) >= 16:
+        _FOP_CACHE.pop(next(iter(_FOP_CACHE)))
+    _FOP_CACHE[key] = (cached_at, index)
+    return index
+
+
+def match_shared(index: FopIndex, definitions) -> dict:
+    """Match every resolved Revit definition by canonical GUID and exact NFC name."""
+    verdicts = {}
+    for definition in definitions:
+        name = definition.get("name")
+        if not isinstance(name, str):
+            raise FopError("invalid definition name")
+        if definition.get("ambiguous") is True:
+            verdict = "ambiguous"
+        elif definition.get("resolved") is not True:
+            verdict = "unresolved"
+        else:
+            try:
+                guid = str(uuid.UUID(definition.get("guid")))
+            except (ValueError, TypeError, AttributeError):
+                guid = None
+            if guid not in index.names_by_guid:
+                verdict = "not_in_fop"
+            elif index.names_by_guid[guid] != unicodedata.normalize("NFC", name):
+                verdict = "name_mismatch"
+            else:
+                verdict = "match"
+        if name in verdicts and verdicts[name] != verdict:
+            verdicts[name] = "ambiguous"
+        else:
+            verdicts[name] = verdict
+    return verdicts
+
+
+async def fop_for(definitions, path, reader=None, *, force=False) -> dict:
+    """An explicit source state and per-name verdicts; source failure never implies a match."""
+    if not path:
+        return {"state": "not_configured"}
+    try:
+        index = await read_fop(path, reader=reader, force=force)
+        return {"state": "ok", "verdicts": match_shared(index, definitions)}
+    except FopError as exc:
+        return {"state": "undecodable" if str(exc) == "undecodable" else "invalid"}
+    except (OSError, TimeoutError, ValueError, TypeError, AttributeError):
+        return {"state": "unreadable"}
 
 
 def parse_policy_bytes(data: bytes) -> dict:

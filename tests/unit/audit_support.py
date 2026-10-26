@@ -38,6 +38,13 @@ class Gate(object):
         self.release = asyncio.Event()
 
 
+def stable_preflight():
+    """Stable unknown facts for tests concerned with consent rather than model facts."""
+    return {"status": "ok", "document": {"document": "doc1.aaaaaaaaaaaa.2",
+            "title": "Project A", "path": "C:/A.rvt"},
+            "facts": {"available": False, "reason": "offline_fixture"}}
+
+
 class Machine(object):
     """Listeners, identities, routes and canned replies of a fake machine."""
 
@@ -90,6 +97,8 @@ class Machine(object):
             if isinstance(canned[1], str):
                 return httpx.Response(canned[0], content=canned[1].encode("utf-8"))
             return httpx.Response(canned[0], json=canned[1])
+        if path == PREFIX + "/mutation_preflight/":
+            return httpx.Response(200, json=stable_preflight())
         if path.startswith(PREFIX + "/get_view/"):
             payload = base64.b64encode(b"\x89PNG-bytes").decode("ascii")
             return httpx.Response(200, json={"image_data": payload})

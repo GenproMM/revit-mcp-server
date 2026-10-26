@@ -46,7 +46,11 @@ async def call(session, name, **arguments):
 
 
 def only_entry():
-    entries = read_entries()
+    all_entries = read_entries()
+    preflights = [entry for entry in all_entries if entry["route"] == "/mutation_preflight/"]
+    assert all(entry["method"] == "POST" and entry["mutation"] is False
+               and entry["kind"] != "not-sent" for entry in preflights)
+    entries = [entry for entry in all_entries if entry["route"] != "/mutation_preflight/"]
     assert len(entries) == 1
     return entries[0]
 

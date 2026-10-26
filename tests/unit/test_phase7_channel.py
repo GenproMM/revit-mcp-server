@@ -76,7 +76,8 @@ def posts(machine, route):
 
 def authorization_request(context):
     async def read_post(*_args, **_kwargs):
-        raise AssertionError("confirmation does not perform an open read")
+        from audit_support import stable_preflight
+        return stable_preflight()
 
     return approval.AuthorizationRequest(
         route="/delete_elements/", endpoint="/delete_elements/", data={"element_ids": [5]},

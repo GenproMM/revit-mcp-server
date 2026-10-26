@@ -9,9 +9,11 @@ queue (D-07). authorize() asks the policy what the route needs:
 * confirm - one confirmation window in the MCP client (server-side elicitation, D-05),
   and a Grant only when the client answers accept;
 * deny   - a Refusal;
-* check  - a built-in check; in this slice a check with no facts means confirm (D-10), and
-  a shared-parameter family edit is denied because the company file cannot be checked yet
-  (D-22).
+* check  - a built-in check using bounded read-only Revit facts (D-10); shared-parameter
+  additions also require a GUID/name match in the company file (D-22).
+
+Document tokens are pinned before confirmation. After accept, the same preflight is repeated;
+changed facts or an unsuccessful re-check void consent before a mutation can be sent.
 
 A Grant carries the one-time permit minted over the exact argument text (permit.py), bound
 to the target's session token and the policy hash. The policy is read again after the human
@@ -28,7 +30,9 @@ importing bridge keeps the cold start cheap (ask_human imports mcp.types inside)
 
 import asyncio
 import dataclasses
+import hashlib
 import json
+import re
 import secrets
 import time
 import unicodedata
@@ -140,40 +144,155 @@ def _plain(text: str) -> str:
                    if not unicodedata.category(ch).startswith("C") and ch not in "  ")
 
 
-def _shown(value: Any) -> str:
-    """A model-controlled value as compact JSON, cleaned, cut to VALUE_MAX with its length."""
-    try:
-        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
-    except (TypeError, ValueError):
-        text = str(value)
-    text = _plain(text)
-    if len(text) > VALUE_MAX:
-        return "{} (длина {})".format(text[:VALUE_MAX], len(text))
-    return text
+def _quote(value: Any) -> str:
+    """Single-line quoted data, not instructions; length is measured before cleaning."""
+    def clean(item):
+        if isinstance(item, str):
+            return _plain(item)
+        if isinstance(item, dict):
+            return {_plain(str(key)): clean(val) for key, val in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [clean(val) for val in item]
+        return item
+
+    original = value if isinstance(value, str) else json.dumps(
+        value, ensure_ascii=False, separators=(",", ":"), default=str)
+    cleaned = clean(value)
+    if not isinstance(cleaned, str):
+        cleaned = _plain(json.dumps(cleaned, ensure_ascii=False, separators=(",", ":"), default=str))
+    suffix = " (длина {})".format(len(original)) if len(original) > VALUE_MAX else ""
+    return json.dumps(cleaned[:VALUE_MAX], ensure_ascii=False) + suffix
 
 
-def build_message(request: AuthorizationRequest, rule: policy.Rule, code: str,
-                  fact_lines=(), timeout_s: int = 300) -> str:
-    """The Russian confirmation text. The first line is the operation code."""
-    minutes = max(1, int(round(timeout_s / 60.0)))
-    tool = getattr(request.call, "tool", None) or request.route
-    target = request.target
-    lines = [
-        "Код операции: {}".format(code),
-        "Revit MCP просит подтвердить операцию (окно действует {} мин).".format(minutes),
-        "Инструмент: {} (маршрут {})".format(tool, request.route),
-        "Revit: PID {}, порт {}".format(target.get("pid"), target.get("port")),
-        "Причины: {}".format(", ".join(rule.reasons) if rule.reasons else "-"),
-    ]
-    lines.extend(fact_lines)
-    items = list(request.data.items()) if isinstance(request.data, dict) else []
-    for key, value in items[:ARGUMENT_LINES]:
-        lines.append("- {} = {}".format(_plain(str(key))[:KEY_MAX], _shown(value)))
-    if len(items) > ARGUMENT_LINES:
-        lines.append("- … ещё аргументов: {}".format(len(items) - ARGUMENT_LINES))
-    lines.append("Ответьте «Да», чтобы выполнить ровно эту операцию один раз, "
-                 "или «Нет», чтобы отменить.")
-    return "\n".join(lines)
+REASON_TEXT = {
+    "delete": "удаление элементов", "transform": "перемещение / копирование / поворот / отражение элементов",
+    "parameter_write": "запись параметров", "type_parameter": "параметр типа: изменение затронет все экземпляры типа",
+    "multiple_elements": "затронуто больше одного элемента", "overwrites_value": "перезаписывается непустое значение",
+    "group_member": "элемент в группе: значение может измениться у других экземпляров группы (не проверено)",
+    "facts_unavailable": "факты из модели получить не удалось", "execute_code": "выполнение произвольного кода",
+    "load_family": "загрузка семейства", "edit_family": "правка и перезагрузка семейства",
+    "shared_parameter_source": "источник общих параметров не подтверждён",
+    "family_contents_unchecked": "содержимое семейства не проверено",
+    "parameter_definition": "определение параметра проекта", "create": "создание элементов",
+    "read": "чтение", "view_state": "изменение вида", "file_io": "операция с файлом",
+    "document_state": "изменение состояния документа", "process_local": "локальная операция",
+}
+
+
+def _fact(value):
+    if value is None or value == "unknown":
+        return "неизвестно"
+    if isinstance(value, bool):
+        return "да" if value else "нет"
+    return _quote(value)
+
+
+def facts_digest(reply) -> str:
+    """Bind all supplied facts and the selected document token, not incidental reply fields."""
+    descriptor = (reply.get("document") or {}) if isinstance(reply, dict) else {}
+    payload = {"document": descriptor.get("document"),
+               "facts": reply.get("facts") if isinstance(reply, dict) else None}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=True,
+                                    separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def _fact_lines(request, preflight):
+    facts = preflight.get("facts") if isinstance(preflight, dict) else None
+    if not isinstance(facts, dict) or facts.get("available") is not True:
+        return ["Факты из модели: неизвестно"]
+    route = request.route
+    if route in ("/set_parameter/", "/modify_element/"):
+        element = facts.get("element") or {}
+        lines = []
+        for parameter in (facts.get("parameters") or [])[:3]:
+            name = parameter.get("name")
+            if parameter.get("resolved") == "type" or element.get("is_type") is True:
+                count = element.get("type_instance_count")
+                impact = ("затронет {} экземпляров".format(count) if isinstance(count, int) else
+                          "затронет: неизвестно" + (" (подсчёт остановлен на пределе)" if element.get("count_capped") else ""))
+                lines.append("параметр типа {} у типа {} — {}".format(_fact(name), _fact(element.get("type")), impact))
+            else:
+                level = {"instance": "экземпляр", "not_found": "не найден"}.get(parameter.get("resolved"), "неизвестно")
+                lines.append("параметр {}: уровень {}".format(_fact(name), level))
+            new = request.data.get("value") if route == "/set_parameter/" else (request.data.get("parameters") or {}).get(name)
+            lines.append("текущее {} (raw {}) → новое {} (raw, внутренние единицы)".format(
+                _fact(parameter.get("display_value")), _fact(parameter.get("raw_value")), _quote(new)))
+        return lines or ["Параметры: неизвестно"]
+    if route in ("/delete_elements/", "/transform_elements/"):
+        lines = ["{}: {} (найдено {}, не найдено: {})".format(
+            "элементов к удалению" if route == "/delete_elements/" else "элементов к трансформации",
+            facts.get("requested", "неизвестно"), facts.get("found", "неизвестно"),
+            ", ".join(_plain(str(x))[:VALUE_MAX] for x in facts.get("missing", [])) if "missing" in facts else "неизвестно"),
+            "категории: {}".format(_fact(facts.get("categories"))),
+            "каскад удаления: неизвестно"]
+        if (facts.get("kinds") or {}).get("parameter_definition", 0):
+            lines.insert(0, "Удаляется определение параметра проекта и его значения.")
+        return lines
+    if route == "/edit_family/":
+        family = facts.get("family") or {}
+        shared = facts.get("shared") or {}
+        lines = ["Семейство: {}; экземпляров: {}".format(_fact(family.get("name")), _fact(family.get("instance_count")))]
+        definitions = shared.get("definitions", [])
+        for item in definitions:
+            verdict = (preflight.get("fop") or {}).get("verdicts", {}).get(item.get("name"))
+            words = {"match": "совпадает с ФОП", "unresolved": "не разрешён", "ambiguous": "неоднозначен",
+                     "not_in_fop": "нет в ФОП", "name_mismatch": "имя не совпадает"}
+            lines.append("Общий параметр {}: {}".format(_quote(item.get("name")), words.get(verdict, "неизвестно")))
+        lines.append("Файл общих параметров Revit: {}".format(_fact(shared.get("configured_file"))))
+        return lines
+    if route == "/load_family/":
+        file = facts.get("file") or {}
+        return ["Файл: {}; размер: {}; уже загружено: {}".format(
+            _fact(file.get("path")), _fact(file.get("size")), _fact(facts.get("already_loaded")))]
+    return ["Факты: неизвестно"]
+
+
+def build_message(request: AuthorizationRequest, rule: policy.Rule, decision=None, code=None,
+                  timeout_s: int = 300, preflight=None) -> str:
+    """Russian plain-text window, at most 1500 characters; fixed warnings survive trimming."""
+    if isinstance(decision, str) and code is None:  # existing callers supply the operation code third
+        code, decision = decision, None
+    reasons = decision.reasons if decision is not None else rule.reasons
+    descriptor = (preflight or {}).get("document") or {}
+    if request.route == "/execute_code/":
+        document = "не привязан (код выполняется в Revit)"
+    elif descriptor:
+        document = "«{}» — {}".format(_plain(str(descriptor.get("title", "неизвестно")))[:120],
+                                     _fact(descriptor.get("path")))
+    else:
+        document = "не определён"
+    fixed = ["Код операции: {}".format(code),
+             "Revit MCP просит подтвердить операцию (окно действует {} мин).".format(max(1, round(timeout_s / 60))),
+             "Инструмент: {} (маршрут {})".format(_plain(str(getattr(request.call, "tool", None) or request.route))[:60], request.route),
+             "Revit: PID {}, порт {}".format(request.target.get("pid"), request.target.get("port")),
+             "Документ: " + document,
+             "Причины: " + "; ".join(REASON_TEXT.get(reason, "причина неизвестна") for reason in reasons)]
+    excerpt = ""
+    if request.route == "/execute_code/":
+        source = request.data.get("code", "")
+        fixed.extend(["длина кода: {}".format(len(source)),
+                      "SHA-256: " + hashlib.sha256(source.encode("utf-8")).hexdigest()[:16],
+                      "произвольный код, безопасность содержимого не проверяется"])
+        excerpt = "Код (начало, данные): " + json.dumps(_plain(source[:600]), ensure_ascii=False)
+    if request.route == "/load_family/":
+        fixed.extend(["содержимое семейства: неизвестно", "общие параметры внутри семейства не проверяются по ФОП"])
+    if request.route == "/edit_family/" and request.data.get("reload", True):
+        fixed.append("перезагрузка перезапишет значения параметров у всех экземпляров")
+    final = "Ответьте «Да», чтобы выполнить ровно эту операцию один раз, или «Нет», чтобы отменить."
+    details = _fact_lines(request, preflight) if request.route != "/execute_code/" else []
+    arguments = ["- {} = {}".format(_quote(str(key)[:KEY_MAX]), _quote(value))
+                 for key, value in list(request.data.items())[:ARGUMENT_LINES] if key != "code"]
+    # Reserve the final question and prioritize facts over normalized argument display.
+    result = "\n".join(fixed)
+    budget = 1500 - len(final) - 2
+    if len(result) > budget:
+        result = result[:budget - 1] + "…"
+    for line in details + arguments + ([excerpt] if excerpt else []):
+        room = budget - len(result) - 1
+        if room <= 0:
+            break
+        result += "\n" + (line if len(line) <= room else line[:max(0, room - 1)] + "…")
+    return result + "\n" + final
 
 
 # ----------------------------------------------------------------------- human
@@ -242,6 +361,42 @@ _ANSWERS = {
 }
 
 
+_PREFLIGHT_FACTS = frozenset(("parameter", "elements", "family", "load"))
+_DOCUMENT_REFUSAL = re.compile(r"^Error: (400|404|412|503) - (.*)", re.DOTALL)
+
+
+async def _preflight(request):
+    body = {"route": request.route, "args": request.data}
+    if "document" in request.data:
+        body["document"] = request.data["document"]
+    try:
+        return await request.read_post("/mutation_preflight/", body)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return None
+
+
+def _valid_preflight(reply):
+    return (isinstance(reply, dict) and reply.get("status") == "ok"
+            and isinstance(reply.get("document"), dict)
+            and isinstance(reply["document"].get("document"), str)
+            and bool(reply["document"]["document"])
+            and isinstance(reply.get("facts"), dict))
+
+
+async def _fop(request, pol, reply, *, force=False):
+    if not request.data.get("add_shared_parameters"):
+        return None
+    facts = reply.get("facts") if _valid_preflight(reply) else None
+    if not facts or facts.get("available") is not True:
+        return None
+    definitions = (facts.get("shared") or {}).get("definitions")
+    if not isinstance(definitions, list):
+        return None
+    return await policy.fop_for(definitions, pol.settings.get("shared_parameters_file"), force=force)
+
+
 async def authorize(request: AuthorizationRequest):
     """A Grant, or a Refusal that says nothing was sent. Raises nothing the bridge must not expect."""
     try:
@@ -256,7 +411,21 @@ async def authorize(request: AuthorizationRequest):
     if not request.secret:
         return _refuse("denied", ["no_secret"], pol)
 
-    effective_decision = policy.decide(rule, request.data, facts=None, fop=None)
+    needs_preflight = rule.facts in _PREFLIGHT_FACTS
+    preflight = await _preflight(request) if needs_preflight else None
+    refusal = _DOCUMENT_REFUSAL.match(preflight) if isinstance(preflight, str) else None
+    if refusal:
+        denied = _refuse("denied", ["preflight_refused"], pol)
+        return dataclasses.replace(denied, text=denied.text + " Revit: " + _plain(refusal.group(2))[:300])
+    if not _valid_preflight(preflight):
+        preflight = None
+    facts = preflight["facts"] if preflight else None
+    fop = await _fop(request, pol, preflight) if rule.check == "family_edit" else None
+    effective_decision = policy.decide(rule, request.data, facts=facts, fop=fop)
+    if preflight and rule.document_bound and "document" not in request.data:
+        request = dataclasses.replace(request, data=dict(request.data, document=preflight["document"]["document"]))
+    if preflight and fop is not None:
+        preflight = dict(preflight, fop=fop)
     decision, reasons = effective_decision.decision, list(effective_decision.reasons)
     if decision == "deny":
         return _refuse("denied", reasons, pol)
@@ -273,7 +442,8 @@ async def authorize(request: AuthorizationRequest):
         async with asyncio.timeout(pol.confirm_timeout_s):
             async with _window_lock():
                 code = operation_code()
-                message = build_message(request, effective, code, timeout_s=pol.confirm_timeout_s)
+                message = build_message(request, effective, effective_decision, code,
+                                        timeout_s=pol.confirm_timeout_s, preflight=preflight)
                 answer = await ask_human(request.ctx, message, pol.confirm_timeout_s)
     except TimeoutError:
         answer = "expired"
@@ -289,6 +459,19 @@ async def authorize(request: AuthorizationRequest):
             return _refuse("denied", reasons + ["policy_invalid"], None, "confirm", answered)
         if latest.hash != pol.hash:
             return _refuse("denied", reasons + ["policy_changed"], latest, "confirm", answered)
+        if needs_preflight:
+            checked = await _preflight(request)
+            try:
+                unchanged = (_valid_preflight(checked) and preflight is not None
+                             and facts_digest(checked) == facts_digest(preflight))
+            except (TypeError, ValueError):
+                unchanged = False
+            if not unchanged:
+                return _refuse("denied", reasons + ["facts_changed"], latest, "confirm", answered)
+            if rule.check == "family_edit" and request.data.get("add_shared_parameters"):
+                checked_fop = await _fop(request, latest, checked, force=True)
+                if policy.decide(rule, request.data, checked["facts"], checked_fop).decision == "deny":
+                    return _refuse("denied", reasons + ["shared_parameter_source"], latest, "confirm", answered)
         return _grant(request, latest, "confirm", reasons, "accepted", wait_ms)
     label, why = _ANSWERS[answer]
     return _refuse(label, reasons + [why], pol, "confirm",

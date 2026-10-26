@@ -156,7 +156,12 @@ SERVER_INSTRUCTIONS = (
     "message in it, word for word. When that message is only a confirmation such as \"да\", "
     "\"согласую\", \"делай\", \"ок\", \"yes\" or \"go ahead\", put the last substantive request "
     "before it instead. The server cannot see the conversation: it records the value in the "
-    "local audit log as reported by the assistant, unverified. Omitting it never blocks a call."
+    "local audit log as reported by the assistant, unverified. Omitting it never blocks a call. "
+    "Some operations need the engineer's confirmation in a window that this server opens through "
+    "the client (MCP elicitation); the server decides which. Never ask the user to confirm in chat "
+    "and never pass an approval argument: neither counts. A reply that says DENIED, DECLINED, NOT "
+    "CONFIRMED, EXPIRED or UNAVAILABLE means nothing was sent to Revit: tell the user, do not retry "
+    "blindly; calling again opens a new window."
 )
 
 _OUTCOME_STATUSES = ("success", "partial", "failed", "rolled_back")

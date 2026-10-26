@@ -155,6 +155,13 @@ def register_parameter_tools(mcp, revit_get, revit_post, revit_image=None):
         status "rolled_back"), never as a success; treat that reply as a failed
         write and read the reason it gives.
 
+        A confirmation window opens when the write changes a type parameter,
+        overwrites a non-empty value, touches more than one element, targets an
+        element in a group, or when the facts cannot be read. Filling an empty
+        instance parameter of one element is sent directly. A DENIED, DECLINED,
+        NOT CONFIRMED, EXPIRED or UNAVAILABLE reply means nothing was sent to
+        Revit; do not retry blindly.
+
         Args:
             element_id: Target element ID
             parameter_name: Name of the parameter to set (e.g., "Comments", "Mark")

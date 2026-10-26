@@ -56,6 +56,10 @@ def register_transform_tools(mcp, revit_get, revit_post, revit_image=None):
         Outcome: all or nothing. If Revit rolls the transaction back the reply
         is an error (HTTP 409, rolled_back) and nothing was changed.
 
+        This always asks the engineer for confirmation in a client window before
+        anything is sent. A DENIED, DECLINED, NOT CONFIRMED, EXPIRED or UNAVAILABLE
+        reply means nothing was sent to Revit; do not retry blindly.
+
         Args:
             element_ids: List of element IDs to transform
             operation: Transform type — "move", "copy", "rotate", or "mirror"

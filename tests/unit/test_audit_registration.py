@@ -85,6 +85,16 @@ def test_server_instructions_state_the_full_rule_once():
     assert "unverified" in text
     assert "audit log" in text
     assert text.count("user_request") >= 1
+    for phrase in (
+        "confirmation",
+        "window",
+        "Never ask the user to confirm in chat",
+        "DENIED",
+        "EXPIRED",
+        "nothing was sent",
+        "do not retry",
+    ):
+        assert phrase in text
 
 
 def test_the_production_server_publishes_the_wrapped_surface_and_the_instructions():

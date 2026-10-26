@@ -53,6 +53,10 @@ def register_editing_tools(mcp, revit_get, revit_post, revit_image=None):
         Outcome: all or nothing. If Revit rolls the transaction back the reply
         is an error (HTTP 409, rolled_back) and nothing was changed.
 
+        This always asks the engineer for confirmation in a client window before
+        anything is sent. A DENIED, DECLINED, NOT CONFIRMED, EXPIRED or UNAVAILABLE
+        reply means nothing was sent to Revit; do not retry blindly.
+
         Args:
             element_ids: List of Revit element IDs to delete
             target: Optional opaque process selector from discover_revit_targets;
@@ -98,6 +102,13 @@ def register_editing_tools(mcp, revit_get, revit_post, revit_image=None):
         is an error (HTTP 422, status failed). If Revit rolls the transaction
         back the reply is an error (HTTP 409, rolled_back) and nothing was
         changed.
+
+        A confirmation window opens when the write changes a type parameter,
+        overwrites a non-empty value, touches more than one element, targets an
+        element in a group, or when the facts cannot be read. Filling an empty
+        instance parameter of one element is sent directly. A DENIED, DECLINED,
+        NOT CONFIRMED, EXPIRED or UNAVAILABLE reply means nothing was sent to
+        Revit; do not retry blindly.
 
         Args:
             element_id: Revit element ID to modify

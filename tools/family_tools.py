@@ -198,6 +198,11 @@ def register_family_tools(mcp, revit_get, revit_post, revit_image=None):
         nothing is activated: use activate_document, then retry with the same
         selector.
 
+        This always asks the engineer for confirmation in a client window before
+        anything is sent. load_family is confirmed, but the shared parameters inside
+        the loaded family file are not checked against the company shared-parameter file.
+        A DENIED, DECLINED, NOT CONFIRMED, EXPIRED or UNAVAILABLE reply means nothing was sent to Revit; do not retry blindly.
+
         Args:
             file_path: Full path to the .rfa family file, e.g.
                 "C:\\ProgramData\\Autodesk\\RVT 2027\\Libraries\\English\\Furniture\\Chair.rfa"
@@ -268,6 +273,11 @@ def register_family_tools(mcp, revit_get, revit_post, revit_image=None):
         is an error (HTTP 422, status failed). If Revit rolls the transaction
         back the reply is an error (HTTP 409, rolled_back) and nothing was
         changed.
+
+        A confirmation window opens when the edit adds a shared parameter or
+        otherwise needs protected facts. A shared parameter that is not in the
+        company file is refused. A DENIED, DECLINED, NOT CONFIRMED, EXPIRED or
+        UNAVAILABLE reply means nothing was sent to Revit; do not retry blindly.
 
         Args:
             family_name: Name of the loaded family, as list_families reports it

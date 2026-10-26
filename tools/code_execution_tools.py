@@ -45,6 +45,12 @@ def register_code_execution_tools(mcp, revit_get, revit_post, revit_image=None):
         typed tool whenever one exists: typed mutation tools take a document and refuse when
         it is not the active one.
 
+        This always asks the engineer for confirmation in a client window before anything is
+        sent, and shows the code length, a SHA-256 prefix and its first lines. Confirming is
+        not a review of the code, and this tool remains a trusted arbitrary-code path. A
+        DENIED, DECLINED, NOT CONFIRMED, EXPIRED or UNAVAILABLE reply means nothing was sent
+        to Revit; do not retry blindly.
+
         Args:
             code: The IronPython code to execute (as a string)
             description: Optional description of what the code does

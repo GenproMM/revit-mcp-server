@@ -6,6 +6,7 @@ Handles element deletion, modification, and selection retrieval
 
 from .utils import get_element_name, make_element_id, get_element_id_value, suppress_warnings, parse_request_data, commit_and_report, finalize_outcome, build_outcome, exception_outcome
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .lookup import resolve_instance_parameter
 from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import traceback
@@ -200,7 +201,7 @@ def register_editing_routes(api):
                     outcome_failed.append({"item": param_name, "reason": reason})
 
                 for param_name, new_value in parameters.items():
-                    param = elem.LookupParameter(param_name)
+                    param = resolve_instance_parameter(elem, param_name)
                     if not param:
                         # List available parameters for better error messages
                         available = []

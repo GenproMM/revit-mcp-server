@@ -13,6 +13,7 @@ from .utils import (
     exception_outcome,
 )
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
+from .lookup import resolve_set_parameter
 from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import traceback
@@ -443,15 +444,8 @@ def register_parameter_routes(api):
                     status=404,
                 )
 
-            # Find the parameter
-            param = elem.LookupParameter(parameter_name)
-            if not param:
-                # Try type parameters
-                type_id = elem.GetTypeId()
-                if type_id and type_id != DB.ElementId.InvalidElementId:
-                    elem_type = doc.GetElement(type_id)
-                    if elem_type:
-                        param = elem_type.LookupParameter(parameter_name)
+            # Find the parameter with the same instance-then-type resolution as preflight.
+            param, _parameter_level = resolve_set_parameter(doc, elem, parameter_name)
 
             if not param:
                 available = []

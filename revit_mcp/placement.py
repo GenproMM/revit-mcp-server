@@ -22,6 +22,7 @@ from .identity import (
     attribute_response,
     family_document_info,
 )
+from .lookup import find_family_by_name, shared_definitions_by_name
 from .security import gate_or_response
 from pyrevit import routes, revit, DB
 import os
@@ -840,13 +841,7 @@ def register_placement_routes(api):
                     status=400,
                 )
 
-            target = None
-            for fam in (DB.FilteredElementCollector(doc)
-                        .OfClass(DB.Family)
-                        .ToElements()):
-                if get_element_name(fam) == family_name:
-                    target = fam
-                    break
+            target = find_family_by_name(doc, family_name)
 
             if target is None:
                 return routes.make_response(
@@ -952,11 +947,9 @@ def register_placement_routes(api):
                                          for n in add_shared}
                     else:
                         sp_file = app.OpenSharedParameterFile()
-                        # Build a lookup: name -> ExternalDefinition
-                        sp_defs = {}
-                        for grp in sp_file.Groups:
-                            for defn in grp.Definitions:
-                                sp_defs[defn.Name] = defn
+                        # Preserve the prior last-definition-wins behaviour for duplicate names.
+                        sp_defs = shared_definitions_by_name(sp_file)
+
 
                         # Determine the category set for this family
                         fam_category = target.FamilyCategory
@@ -970,7 +963,8 @@ def register_placement_routes(api):
                             if manager.get_Parameter(param_name) is not None:
                                 added_shared[param_name] = "already exists"
                                 continue
-                            ext_def = sp_defs.get(param_name)
+                            definitions = sp_defs.get(param_name, [])
+                            ext_def = definitions[-1] if definitions else None
                             if ext_def is None:
                                 failed_shared[param_name] = (
                                     "not found in shared parameters file")

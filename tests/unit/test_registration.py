@@ -255,7 +255,7 @@ def test_no_revit_mcp_module_imports_another_revit_mcp_module():
     """
     helpers = {
         "utils", "textutils", "registry", "identity", "trust", "integrity", "security",
-        "permits",
+        "permits", "lookup",
     }
     targets = re.compile(
         r"^from \.(\w+) import|^from revit_mcp\.(\w+) import|^\s*from \. import (\w+)",

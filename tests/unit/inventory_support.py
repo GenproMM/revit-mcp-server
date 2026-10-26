@@ -108,6 +108,9 @@ ACTIVATE = "registry-activation"
 FILE_PREVIEW = "file-preview"
 PROCESS_OPEN_ROUTE = "process-open"
 D15_ROUTE = "d15-execute"
+PREFLIGHT_READ = "preflight-read"
+
+BRIDGE_INTERNAL_ROUTES = frozenset(("/mutation_preflight/",))
 
 ROUTE_CLASSES = {}
 for _route in (
@@ -138,6 +141,7 @@ ROUTE_CLASSES.update({
     "/model_worksets/": FILE_PREVIEW,
     "/open_model/": PROCESS_OPEN_ROUTE,
     "/execute_code/": D15_ROUTE,
+    "/mutation_preflight/": PREFLIGHT_READ,
 })
 
 # The two handlers that pyRevit runs on its HTTP thread because they declare none of

@@ -6,13 +6,15 @@ one place makes the confirmation preflight report the same Revit objects the mut
 will touch.
 """
 
-from pyrevit import DB
+import logging
 
 from .utils import get_element_name, get_element_id_value
 
+logger = logging.getLogger(__name__)
+
 
 def _db():
-    """The current pyRevit DB namespace; test worlds replace it between route imports."""
+    """Resolve the active pyRevit DB namespace when a helper needs API types."""
     from pyrevit import DB as current_db
     return current_db
 
@@ -22,25 +24,21 @@ def resolve_set_parameter(doc, element, name):
     parameter = resolve_instance_parameter(element, name)
     if parameter is not None:
         return parameter, "instance"
-    try:
-        type_id = element.GetTypeId()
-        if type_id is None or type_id == _db().ElementId.InvalidElementId:
-            return None, None
-        element_type = doc.GetElement(type_id)
-        parameter = resolve_instance_parameter(element_type, name)
-        if parameter is not None:
-            return parameter, "type"
-    except Exception:
-        pass
+    if element is None:
+        return None, None
+    type_id = element.GetTypeId()
+    if type_id is None or type_id == _db().ElementId.InvalidElementId:
+        return None, None
+    element_type = doc.GetElement(type_id)
+    parameter = resolve_instance_parameter(element_type, name)
+    if parameter is not None:
+        return parameter, "type"
     return None, None
 
 
 def resolve_instance_parameter(element, name):
     """The instance-only LookupParameter resolution used by modify_element."""
-    try:
-        return element.LookupParameter(name) if element is not None else None
-    except Exception:
-        return None
+    return element.LookupParameter(name) if element is not None else None
 
 
 def shared_definitions_by_name(shared_file):
@@ -48,37 +46,19 @@ def shared_definitions_by_name(shared_file):
     result = {}
     if shared_file is None:
         return result
-    try:
-        groups = shared_file.Groups
-    except Exception:
-        return result
-    try:
-        for group in groups:
-            try:
-                definitions = group.Definitions
-            except Exception:
-                continue
-            for definition in definitions:
-                try:
-                    name = definition.Name
-                except Exception:
-                    continue
-                result.setdefault(name, []).append(definition)
-    except Exception:
-        pass
+    for group in shared_file.Groups:
+        for definition in group.Definitions:
+            result.setdefault(definition.Name, []).append(definition)
     return result
 
 
 def find_family_by_name(doc, name):
     """The first loaded Family whose sanitized Revit name equals ``name``."""
-    try:
-        db = _db()
-        families = db.FilteredElementCollector(doc).OfClass(db.Family).ToElements()
-        for family in families:
-            if get_element_name(family) == name:
-                return family
-    except Exception:
-        pass
+    db = _db()
+    families = db.FilteredElementCollector(doc).OfClass(db.Family).ToElements()
+    for family in families:
+        if get_element_name(family) == name:
+            return family
     return None
 
 
@@ -90,12 +70,13 @@ def parameter_has_value(parameter):
         if parameter.StorageType == _db().StorageType.String:
             return bool(parameter.AsString())
         return True
-    except Exception:
+    except Exception as exc:
+        logger.warning("Parameter value unavailable: %s", type(exc).__name__)
         return None
 
 
 def type_instance_count(doc, type_element, cap):
-    """Count instances of a type up to ``cap``; (None, True) means the cap was reached."""
+    """Count type instances scanning at most ``cap`` elements; capped counts are unknown."""
     try:
         db = _db()
         if getattr(type_element, "Family", None) is not None:
@@ -108,15 +89,14 @@ def type_instance_count(doc, type_element, cap):
                 collector = collector.OfCategoryId(category.Id)
             collector = collector.WhereElementIsNotElementType()
         count = 0
+        scanned = 0
         for element in collector:
-            try:
-                if get_element_id_value(element.GetTypeId()) != get_element_id_value(type_element.Id):
-                    continue
-            except Exception:
-                continue
-            count += 1
-            if count >= cap:
+            scanned += 1
+            if scanned >= cap:
                 return None, True
+            if get_element_id_value(element.GetTypeId()) == get_element_id_value(type_element.Id):
+                count += 1
         return count, False
-    except Exception:
+    except Exception as exc:
+        logger.warning("Type instance count unavailable: %s", type(exc).__name__)
         return None, False

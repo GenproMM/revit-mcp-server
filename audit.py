@@ -140,6 +140,7 @@ OPEN_POST_READ_ROUTES = frozenset({
     "/clash_check/",
     "/ai_filter/",
     "/list_category_parameters/",
+    "/mutation_preflight/",  # Phase 7 preflight read, D-09.
 })
 
 # The wording the model sees (D-12). The short form rides in every tool's schema; the full

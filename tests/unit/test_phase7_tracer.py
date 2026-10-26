@@ -300,7 +300,7 @@ def test_the_base_policy_covers_every_manifest_tool_and_the_delete_decision_is_c
     from inventory_support import manifest_names
 
     assert sorted(pol.tools) == manifest_names()
-    assert len(pol.rules) == 56
+    assert len(pol.rules) == 57
     assert pol.rule_for("/delete_elements/").decision == "confirm"
     assert pol.rule_for("/create_level/").decision == "allow"
     assert pol.rule_for("/no_such_route/") is None

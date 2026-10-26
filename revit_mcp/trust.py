@@ -40,7 +40,7 @@ AUTH_FAILURE_STATUS = 401
 # is gated, so a route added with a new verb is closed rather than silently open.
 UNGATED_METHODS = ("GET", "HEAD")
 
-# The seven POST routes that only read (D-02). They are never refused: their handlers
+# The eight POST routes that only read (D-02, Phase 7 D-09). They are never refused: their handlers
 # call security.strip_envelope so the reserved key does not reach the route's own
 # parse, but a missing or wrong secret does not change their answer. Adding a key is
 # an edit of this set plus the pinning test (05-06), like UNLOCKED_GET in bridge.py;
@@ -53,6 +53,7 @@ OPEN_POST_READ_ROUTES = frozenset((
     "/clash_check/",
     "/ai_filter/",
     "/list_category_parameters/",
+    "/mutation_preflight/",  # Phase 7 preflight read, D-09.
 ))
 
 _AUTH_HINTS = {

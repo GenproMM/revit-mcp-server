@@ -193,7 +193,14 @@ routes = ["/tag_walls/"]
 [tools.transform_elements]
 routes = ["/transform_elements/"]
 
-# --------------------------------------------------------------- routes (56)
+# --------------------------------------------------------------- routes (57)
+[routes."/mutation_preflight/"]
+method = "POST"
+decision = "allow"
+reasons = ["read"]
+document_bound = true
+facts = "none"
+
 [routes."/activate_document/"]
 method = "POST"
 decision = "allow"

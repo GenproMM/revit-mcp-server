@@ -625,10 +625,10 @@ def test_the_open_list_mirrors_trust_exactly():
 
 
 def test_local_modules_lists_every_security_sibling():
-    assert {"identity", "trust", "integrity", "security"} <= set(conventions.LOCAL_MODULES)
+    assert {"identity", "trust", "integrity", "security", "lookup", "permits"} <= set(conventions.LOCAL_MODULES)
 
 
-@pytest.mark.parametrize("name", ["identity", "trust", "integrity", "security"])
+@pytest.mark.parametrize("name", ["identity", "trust", "integrity", "security", "lookup", "permits"])
 def test_a_flat_import_of_a_security_sibling_is_reported_by_the_dialect_check(name):
     source = _route(imports="from {} import x\n".format(name) + _GATE_IMPORT)
     violations = conventions.check_ironpython_dialect("revit_mcp/x.py", source)

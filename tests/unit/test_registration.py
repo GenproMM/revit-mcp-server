@@ -218,9 +218,17 @@ def test_every_route_domain_has_a_matching_tool_module():
         if name.endswith("_tools.py")
     }
 
+    from inventory_support import BRIDGE_INTERNAL_ROUTES, route_inventory
+    internal_domains = {route.module for route in route_inventory()
+                        if route.key in BRIDGE_INTERNAL_ROUTES}
     orphans = []
     for domain in _revit_mcp_modules():
         if not ROUTE_DECORATOR.search(_source_of(domain)):
+            continue
+        if domain in internal_domains:
+            # A bridge-internal read deliberately has no model-callable MCP tool.
+            assert all(route.key in BRIDGE_INTERNAL_ROUTES for route in route_inventory()
+                       if route.module == domain)
             continue
         candidates = {KNOWN_MAPPINGS.get(domain, ""), domain + "_tools"}
         if not (candidates & available):

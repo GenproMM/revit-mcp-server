@@ -40,6 +40,7 @@ import pytest
 import tools as tools_package
 from inventory_support import (
     ACTIVATE, ACTIVATION, ACTIVE_READ, ADDRESSED_READ, ALLOWED_ROUTE_CLASSES,
+    BRIDGE_INTERNAL_ROUTES, PREFLIGHT_READ,
     API_CONTEXT_ARGUMENTS, D15, D15_ROUTE, DOCUMENT_SELECTOR, FILE_PREVIEW, FILE_READ, GUARDED,
     GUARDED_WITHOUT_TRANSACTION, HTTP_THREAD, HTTP_THREAD_ALLOWLIST, LOCAL, MUTATION,
     MUTATION_PRIMITIVES, NO_TARGET_BY_DESIGN, PROCESS_OPEN, PROCESS_OPEN_ROUTE,
@@ -123,8 +124,11 @@ def test_every_tool_transport_call_addresses_a_route_that_exists_with_a_matching
             method = "POST" if transport == "revit_post" else "GET"
             assert method in route.methods, (tool, key, route.methods)
             addressed.setdefault(key, set()).add(tool)
-    assert set(addressed) == set(ROUTE_BY_KEY), (
-        "routes no tool addresses: {}".format(sorted(set(ROUTE_BY_KEY) - set(addressed))))
+    assert set(addressed) == set(ROUTE_BY_KEY) - BRIDGE_INTERNAL_ROUTES, (
+        "routes no tool addresses: {}".format(
+            sorted(set(ROUTE_BY_KEY) - BRIDGE_INTERNAL_ROUTES - set(addressed))))
+    assert BRIDGE_INTERNAL_ROUTES <= set(ROUTE_BY_KEY)
+    assert not BRIDGE_INTERNAL_ROUTES & set(addressed)
 
 
 def test_every_registered_tool_is_in_the_source_scan_and_addresses_at_most_one_route():
@@ -519,7 +523,9 @@ def test_guarded_routes_are_exactly_the_routes_the_behavioural_route_suites_exer
             assert ROUTE_BY_KEY[route].module == module, (module, route)
 
 
-@pytest.mark.parametrize("key", sorted(k for k, c in ROUTE_CLASSES.items() if c != GUARDED))
+# Preflight uses the mutation's document guard, but only reads the resolved document.
+@pytest.mark.parametrize("key", sorted(
+    k for k, c in ROUTE_CLASSES.items() if c not in (GUARDED, PREFLIGHT_READ)))
 def test_a_route_that_is_not_a_guarded_mutation_never_calls_the_mutation_guard(key):
     route = ROUTE_BY_KEY[key]
     assert "mutation_document_or_response" not in reachable_calls(route), key
@@ -527,7 +533,7 @@ def test_a_route_that_is_not_a_guarded_mutation_never_calls_the_mutation_guard(k
 
 @pytest.mark.parametrize("key", sorted(
     k for k, c in ROUTE_CLASSES.items()
-    if c in (ACTIVE_READ, HTTP_THREAD, REGISTRY_LIST, REGISTRY_READ, FILE_PREVIEW)))
+    if c in (ACTIVE_READ, HTTP_THREAD, REGISTRY_LIST, REGISTRY_READ, FILE_PREVIEW, PREFLIGHT_READ)))
 def test_a_read_route_reaches_no_transaction_save_delete_open_or_activation(key):
     """Classified by what the route does: a POST read is a read, and a read mutates nothing."""
     route = ROUTE_BY_KEY[key]

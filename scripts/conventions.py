@@ -48,7 +48,7 @@ PY3_ONLY_MODULES = {
 # are the Phase 2 and Phase 5 siblings; a flat import of the security module in
 # particular would load a second copy with its own state and no secret.
 LOCAL_MODULES = {"utils", "textutils", "registry", "revit_mcp",
-                 "identity", "trust", "integrity", "security"}
+                 "identity", "trust", "integrity", "security", "lookup", "permits"}
 
 # Phase 5 D-01/D-02: the gate a route opens with, the strip an open read opens
 # with, and the only names a route module may take from revit_mcp/security.py.
@@ -56,7 +56,7 @@ GATE_FUNCTION = "gate_or_response"
 STRIP_FUNCTION = "strip_envelope"
 SECURITY_IMPORTS = frozenset((GATE_FUNCTION, STRIP_FUNCTION, "status_block"))
 
-# The seven POST routes that only read and are never refused (D-02). This mirrors
+# The eight POST routes that only read and are never gated (D-02, Phase 7 D-09). This mirrors
 # OPEN_POST_READ_ROUTES in revit_mcp/trust.py because the contributor kit cannot
 # import the repository; tests/unit/test_conventions.py pins the two equal, and
 # tests/unit/test_phase5_gate_wiring.py pins both to a literal. Opening another
@@ -69,6 +69,7 @@ OPEN_POST_READ_ROUTES = frozenset((
     "/clash_check/",
     "/ai_filter/",
     "/list_category_parameters/",
+    "/mutation_preflight/",  # Phase 7 preflight read, D-09.
 ))
 
 # Gone in Python 3, so gone in IronPython 3.

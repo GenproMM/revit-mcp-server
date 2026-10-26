@@ -72,7 +72,7 @@ def test_routes_equal_the_ast_inventory():
     routes = route_inventory()
 
     assert set(active.rules) == {route.key for route in routes}
-    assert len(active.rules) == len(routes) == 56
+    assert len(active.rules) == len(routes) == 57
 
 
 def test_policy_methods_match_route_decorators_and_get_is_always_allow():

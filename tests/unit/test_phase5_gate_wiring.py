@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Closed by default (Phase 5, D-01): every non-GET route opens with the shared-secret and
-integrity gate unless it is one of the seven open POST reads of D-02. Source-only; needs no Revit.
+integrity gate unless it is one of the eight open POST reads (D-02, Phase 7 D-09). Source-only; needs no Revit.
 
 The route inventory is read with ``ast`` from the real ``revit_mcp/`` modules (they cannot be
 imported without pyRevit), so a route added tomorrow is covered the day it is written. The
@@ -15,6 +15,7 @@ import pytest
 
 from inventory_support import (
     ACTIVE_READ, FILE_PREVIEW, MUTATION_PRIMITIVES, REGISTRY_READ, ROUTE_CLASSES, GUARDED,
+    PREFLIGHT_READ,
     call_name, parse_revit_module, reachable_calls, revit_mcp_modules, route_inventory)
 from revit_mcp import trust
 
@@ -32,6 +33,7 @@ D02_OPEN = frozenset((
     "/clash_check/",
     "/ai_filter/",
     "/list_category_parameters/",
+    "/mutation_preflight/",  # Phase 7 preflight read, D-09.
 ))
 
 # D-03: state changes, file writes, code execution and process-level opens. Always gated.
@@ -46,7 +48,7 @@ D03_BOUNDARY = frozenset((
     "/execute_code/",
 ))
 
-OPEN_READ_CLASSES = frozenset((ACTIVE_READ, REGISTRY_READ, FILE_PREVIEW))
+OPEN_READ_CLASSES = frozenset((ACTIVE_READ, REGISTRY_READ, FILE_PREVIEW, PREFLIGHT_READ))
 
 ROUTES = route_inventory()
 ROUTE_BY_KEY = {route.key: route for route in ROUTES}
@@ -112,17 +114,17 @@ def _strip_statement(route):
 
 # --------------------------------------------------------------- the pinned inventory
 
-def test_the_open_list_in_trust_equals_the_seven_d02_keys():
+def test_the_open_list_in_trust_equals_the_eight_d02_keys():
     assert trust.OPEN_POST_READ_ROUTES == D02_OPEN
-    assert len(D02_OPEN) == 7
+    assert len(D02_OPEN) == 8
 
 
 def test_the_measured_route_counts_are_pinned():
-    assert len(ROUTES) == 56
-    assert len(NON_GET) == 41
+    assert len(ROUTES) == 57
+    assert len(NON_GET) == 42
     assert len(GET_ROUTES) == 15
     assert len(GATED_KEYS) == 34
-    assert len(NON_GET_KEYS & D02_OPEN) == 7
+    assert len(NON_GET_KEYS & D02_OPEN) == 8
     assert D02_OPEN <= NON_GET_KEYS
 
 

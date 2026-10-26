@@ -50,10 +50,12 @@ namespace migration; keep the foreign MCP unchanged.
 ├─ ext-staging\                    next extension while it is built and gated; never register with pyRevit
 ├─ ext-previous\                   one prior extension for rollback; never register with pyRevit
 ├─ ext-rejected\                   extension displaced by a rollback; never register with pyRevit
+├─ _build\operator_policy.toml     optional fleet operator policy, beside bridge_secret
 ├─ payload\                        mirrored to workstations
 │   ├─ VERSION                     written LAST by build-payload.cmd
 │   ├─ ENGINE                      pyRevit CPython the wheels were built for
 │   ├─ app\                        main.py, bridge.py, tools\, server.py, libs\, gate.py, warm.py
+│   │   └─ policy_source            staged path to operator_policy.toml
 │   ├─ install-libs\               ruamel.yaml, for the installer only
 │   └─ configure_hermes.py
 └─ install\  install.cmd, update.cmd, find-python.cmd

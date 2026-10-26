@@ -410,6 +410,32 @@ scripts\scan_envelope_tolerance.py --dir "\\<main-share>\ext\revit-mcp-server.ex
 
 ---
 
+## R5: confirmations and one-time permits (Phase 7)
+
+Выполняйте этот раздел только после решения пользователя о выпуске R5 и успешного пилота.
+
+1. **До публикации остановитесь на первом подозрительном результате.** На build-хосте проверьте опубликованное расширение и затем pre-phase гейт:
+
+   ```bat
+   python scripts\scan_envelope_tolerance.py --dir "<share>\ext\revit-mcp-server.extension\revit_mcp"
+   uv run pytest tests/unit/test_phase7_rollout.py -q
+   ```
+
+   Продолжать можно только после чистого сканирования и зелёного теста.
+2. **Сначала payload.** Соберите и опубликуйте payload обычным `deploy\build-payload.cmd`; пользователи получают CPython-сторону через обновление. При старом расширении новый payload уже запрашивает подтверждения, но старое расширение ещё игнорирует ключ permit; `get_revit_status` сообщает, что extension не enforcing permits. Это временное состояние, а не финальная приёмка.
+3. **Затем запланированный полный restart и atomic extension publish.** Объявите окно, дайте пользователям обновить payload и полностью перезапустить Revit, после чего публикуйте расширение существующим `deploy\publish-extension.cmd`. Скрипт использует `ext-staging`, атомарную замену и `ext-previous` для отката; Reload в pyRevit не заменяет полный restart.
+4. **Не маскируйте обратное смешанное состояние.** При новом extension и старом payload мутации отвечают 403 с «Обновите RevitMCP и перезапустите сессию ассистента». Исправление — обновить payload и сессию помощника; не откатывайте расширение молча.
+5. **Операторская политика.** Файл `%MCP_SHARE_ROOT%\_build\operator_policy.toml` находится рядом с `bridge_secret`, использует TOML schema 1 и перед сохранением проверяется так:
+
+   ```bat
+   "%MCP_PYEXE%" deploy\policy_tool.py check --policy-file "%MCP_SHARE_ROOT%\_build\operator_policy.toml"
+   ```
+
+   Изменения применяются примерно за две секунды без релиза. Невалидная правка сохраняет последнюю валидную версию, а status показывает причину. Оператор может ослабить любое правило, поэтому обычным пользователям нужен read-only доступ; оператор обязан проверить ACL. Which operations need a confirmation is the default of the base policy; the fleet operator can change any rule, relaxing ones included.
+6. **Границы транспорта.** Подтверждение через Telegram/gateway не проверено вживую. HTTP-транспорты `--streamable-http`, `--sse` и `--combined` stateless и не могут показать окно, поэтому confirm-class операции в них отклоняются. Поддерживаемый путь — Hermes Desktop по stdio.
+
+---
+
 ## 7. Раскатка пользователям
 
 Отдельные действия от пользователей **не нужны** — это и есть смысл схемы.

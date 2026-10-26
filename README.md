@@ -4,6 +4,10 @@ MCP server for Autodesk Revit 2024/2025/2026/2027 via pyRevit — 51 tools for b
 
 Works with any MCP client: Claude Desktop, Claude Code, Cursor, Windsurf, Copilot, or any other MCP-compatible application.
 
+## Подтверждение опасных операций / Confirmation of risky operations
+
+Рискованные изменения требуют подтверждения в окне клиента, которое открывает сервер; подтверждение в чате не заменяет его. Что показывает окно, что означает отказ и границы этой защиты описаны в [deploy/USER-GUIDE.md](deploy/USER-GUIDE.md).
+
 ## How It Works
 
 ```

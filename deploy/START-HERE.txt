@@ -1,8 +1,8 @@
 ﻿RevitMCP — пилот: установка и обновление
 =======================================
 
-Версия комплекта:  2026.10.26-180614.92fbaf5.pilot2-dirty
-                   (сверять с payload\VERSION в папке пилота)
+Версия комплекта:  RevitMCP 2.0.0; точная сборка — строка в
+                   \\srv-dfs\BIM\06_RevitMCP_pilot\payload\VERSION
 Папка пилота:      \\srv-dfs\BIM\06_RevitMCP_pilot
   установщик       \\srv-dfs\BIM\06_RevitMCP_pilot\install\install.cmd
   обновлятор       \\srv-dfs\BIM\06_RevitMCP_pilot\install\update.cmd
@@ -213,7 +213,7 @@ Revit должен быть закрыт. Выполнить в PowerShell од�
    ("< nul" нужен при запуске помощником: в конце скрипта стоит pause.)
 
    Ожидаемый вывод: шаги [1/6]…[5/6] и строка
-     Installed. Version 2026.10.26-180614.92fbaf5.pilot2-dirty
+     Installed. Version <строка из payload\VERSION папки пилота>
    Строка "share : \\srv-dfs\BIM\06_RevitMCP_pilot\install\.." — норма.
    Шаг [3/6] только напоминает про Hermes; для сценария А в Hermes
    ничего менять не нужно (раздел 5, п. 4).
@@ -266,8 +266,9 @@ install.cmd остановился на проверке Routes (нет host) п
 1) Версия payload:
 
      Get-Content "$env:LOCALAPPDATA\RevitMCP\current-version.txt"
+     Get-Content "\\srv-dfs\BIM\06_RevitMCP_pilot\payload\VERSION"
 
-   Должно быть: 2026.10.26-180614.92fbaf5.pilot2-dirty
+   Две строки должны совпадать. Не совпадают — сценарий Б (обновление).
 
 2) Шаг 1.1 ещё раз: наш путь ровно ОДИН, и он в 06_RevitMCP_pilot
    (обычно \\srv-dfs\BIM\06_RevitMCP_pilot\install\..\ext).
@@ -313,7 +314,15 @@ install.cmd остановился на проверке Routes (нет host) п
    secret" / secret configured false (мутации отвечают 401
    server_not_configured) — шаг 4.
 3) В Hermes: «Проверь состояние Revit инструментом get_revit_status.
-   Ничего не изменяй».
+   Ничего не изменяй». В ответе должны быть строки:
+     MCP server: RevitMCP 2.0.0, build <строка из payload\VERSION>, ...
+     Revit extension: RevitMCP 2.0.0, build ..., loaded from
+       \\srv-dfs\BIM\06_RevitMCP_pilot\...
+     Revit side: pyRevit ..., engine IPY342 (ironpython 3.4.2), ...
+     Shared secret: both halves hold the same secret ...
+   Строки "Versions DIFFER", "reports no version" или "build development
+   checkout" — половины не обновились: сценарий Б, затем перезапуск
+   Hermes и полный перезапуск Revit.
 4) Только если расширение не видит секрет. Секрет читается ОДИН раз при
    загрузке Revit из папки зарегистрированного расширения. Диагностика —
    отдельный файл рядом с этой инструкцией; он только читает и НЕ выводит

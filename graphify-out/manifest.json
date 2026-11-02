@@ -1,497 +1,3878 @@
 {
   "extension.json": {
     "mtime": 1788524621.9055014,
+    "seen": 1792156149.294043,
     "ast_hash": "fb287571ad3938797d1b6c1994feb2de",
     "semantic_hash": ""
   },
   "main.py": {
-    "mtime": 1785427937.2221625,
-    "ast_hash": "a5c9e3793df97d9dbfcba05a2f50856b",
-    "semantic_hash": "a5c9e3793df97d9dbfcba05a2f50856b"
+    "mtime": 1792923505.1965928,
+    "seen": 1792926206.789801,
+    "ast_hash": "9079ec0cb96f0f4a982f7ebadf4d9a06",
+    "semantic_hash": ""
   },
   "pyproject.toml": {
-    "mtime": 1788727547.1116538,
-    "ast_hash": "c25ef3257d67aca037de55c004a47ab7",
+    "mtime": 1793624643.3673282,
+    "seen": 1793626083.1401794,
+    "ast_hash": "77cf267bcde236c893299ec8159223c4",
     "semantic_hash": ""
   },
   "revit_mcp/__init__.py": {
     "mtime": 1788778937.774155,
+    "seen": 1792156149.294049,
     "ast_hash": "b55cc9122b4f4784e724f42b6ae278b3",
     "semantic_hash": ""
   },
   "revit_mcp/analysis.py": {
-    "mtime": 1788778937.7841482,
-    "ast_hash": "9f105dcd74e9c414c8334a5c7b620522",
+    "mtime": 1793035095.6383514,
+    "seen": 1793036792.0446372,
+    "ast_hash": "1d9a854b4ffef5662e95808d43c84d93",
     "semantic_hash": ""
   },
   "revit_mcp/annotation.py": {
-    "mtime": 1788778937.798747,
-    "ast_hash": "46fbe4aab88c4a0a3a3f57bc6589135f",
+    "mtime": 1792839598.139564,
+    "seen": 1792848408.9595585,
+    "ast_hash": "9fe67598850cd6e2b8a07e8de39b4dd3",
     "semantic_hash": ""
   },
   "revit_mcp/building.py": {
-    "mtime": 1788778937.8106718,
-    "ast_hash": "f0f14fedaa1699e77ced71f2a826c6ed",
+    "mtime": 1792839602.1831803,
+    "seen": 1792848408.9595594,
+    "ast_hash": "f76143ba60da5d5a5625a52162a299c3",
     "semantic_hash": ""
   },
   "revit_mcp/clash.py": {
-    "mtime": 1788778937.8235328,
-    "ast_hash": "7e90d99414a21aa73a8e441137c47d9c",
+    "mtime": 1793035095.6413634,
+    "seen": 1793036792.044642,
+    "ast_hash": "e3cc7940611538f750bf6de02c98d7d5",
     "semantic_hash": ""
   },
   "revit_mcp/code_execution.py": {
-    "mtime": 1788778950.1518672,
-    "ast_hash": "701e2116e8ec2c8b6adce874a223228b",
+    "mtime": 1792841571.8912144,
+    "seen": 1792848408.959561,
+    "ast_hash": "b7a8015857b6960d83e63ddc7472271a",
     "semantic_hash": ""
   },
   "revit_mcp/colors.py": {
-    "mtime": 1788778937.8448277,
-    "ast_hash": "3bdab4629097b275b8b62113ea2e0bab",
+    "mtime": 1793036470.8806236,
+    "seen": 1793036792.044645,
+    "ast_hash": "8dfa9642a6487b3ea34e4f91083229d5",
     "semantic_hash": ""
   },
   "revit_mcp/detail.py": {
-    "mtime": 1788778937.8578572,
-    "ast_hash": "d70c0ddad7b7d3e6ff0f2db9be11c57c",
+    "mtime": 1792868931.5754013,
+    "seen": 1792926206.7898126,
+    "ast_hash": "8abe6448cd7e90b38b5538cf5cbe2ce7",
     "semantic_hash": ""
   },
   "revit_mcp/document.py": {
-    "mtime": 1788778937.8689594,
-    "ast_hash": "317493813549684ec552718b535a114d",
+    "mtime": 1792840306.4220903,
+    "seen": 1792848408.9595642,
+    "ast_hash": "398e21751959c0ecd79f6e1d8d6fd7c1",
     "semantic_hash": ""
   },
   "revit_mcp/documentation.py": {
-    "mtime": 1788778937.8790565,
-    "ast_hash": "6b493a940904899cb9831a0162891e59",
+    "mtime": 1792840306.4251144,
+    "seen": 1792848408.9595659,
+    "ast_hash": "634f3189415f29315a38d4652410d493",
     "semantic_hash": ""
   },
   "revit_mcp/editing.py": {
-    "mtime": 1788778937.890674,
-    "ast_hash": "5bfc281b358707947bcde0d1b12b9c30",
+    "mtime": 1793036460.3723173,
+    "seen": 1793036792.044652,
+    "ast_hash": "d97cd438f0b577cd0fbb717b6ee8e9cc",
     "semantic_hash": ""
   },
   "revit_mcp/interop.py": {
-    "mtime": 1788778937.9026506,
-    "ast_hash": "c9d9f42c6707b529fa78ef58c525c4c5",
+    "mtime": 1792840498.4522636,
+    "seen": 1792848408.9595706,
+    "ast_hash": "066272d4b4e5732cfaa4c1b7a08777c0",
     "semantic_hash": ""
   },
   "revit_mcp/mep.py": {
-    "mtime": 1788778937.9132392,
-    "ast_hash": "75c94b07db278cec3d45a3150d38f6cc",
+    "mtime": 1792840895.7832048,
+    "seen": 1792848408.9595716,
+    "ast_hash": "b5fc88f6a50b09816cf3151d4d6eb92e",
     "semantic_hash": ""
   },
   "revit_mcp/model_info.py": {
-    "mtime": 1788778937.9248116,
-    "ast_hash": "edcdd53c78bbc44a826dfda2e5f933d8",
+    "mtime": 1793036486.3582811,
+    "seen": 1793036792.044661,
+    "ast_hash": "c2024c9a28a03564033a3eab5202c8ea",
     "semantic_hash": ""
   },
   "revit_mcp/parameters.py": {
-    "mtime": 1788778994.1236393,
-    "ast_hash": "8e70d9ecb8e18f0c9b58115b80ff2f42",
+    "mtime": 1793036466.0623965,
+    "seen": 1793036792.044662,
+    "ast_hash": "3240c43f1cffa9d5e4b5505b06628304",
     "semantic_hash": ""
   },
   "revit_mcp/placement.py": {
-    "mtime": 1788778937.9469981,
-    "ast_hash": "579ace7637a00e9af14ffb69c8256a9c",
+    "mtime": 1793036475.820764,
+    "seen": 1793036792.0446646,
+    "ast_hash": "6c9433d58d20b6722650319f9d282cbd",
     "semantic_hash": ""
   },
   "revit_mcp/rooms.py": {
-    "mtime": 1788778937.9705257,
-    "ast_hash": "8bd3eb85ec0b6ad0da86b21368a3a799",
+    "mtime": 1792841033.0175447,
+    "seen": 1792848408.9595761,
+    "ast_hash": "c5271e305790f0683573f821f28426c8",
     "semantic_hash": ""
   },
   "revit_mcp/status.py": {
-    "mtime": 1788779116.0721762,
-    "ast_hash": "b4c46b3e90915d3344e83e08e2b5db1e",
+    "mtime": 1793624607.1791444,
+    "seen": 1793626083.140238,
+    "ast_hash": "639770a1b1cbdf7502aff98882d48c09",
     "semantic_hash": ""
   },
   "revit_mcp/structure.py": {
-    "mtime": 1788778937.9897485,
-    "ast_hash": "4a7d091f3d5f7527246dbd8497b0b14f",
+    "mtime": 1792841033.0185547,
+    "seen": 1792848408.95958,
+    "ast_hash": "032ee65f3c21f8723ea7bebf65c92831",
     "semantic_hash": ""
   },
   "revit_mcp/tags.py": {
-    "mtime": 1788778938.000766,
-    "ast_hash": "29cf8eadc35401d3df958e68eb814151",
+    "mtime": 1792841033.0200727,
+    "seen": 1792848408.959581,
+    "ast_hash": "663cee23976996b27ea4dd76eed10280",
     "semantic_hash": ""
   },
   "revit_mcp/transforms.py": {
-    "mtime": 1788778938.0205708,
-    "ast_hash": "08102b3abe8e20a4a68df74a8ef2a399",
+    "mtime": 1792841571.8886938,
+    "seen": 1792848408.9595828,
+    "ast_hash": "1926fcabe43b01a2818620392131391b",
     "semantic_hash": ""
   },
   "revit_mcp/utils.py": {
-    "mtime": 1788778979.7452338,
-    "ast_hash": "e2a45c31994f886bd248f1cae41e25d3",
+    "mtime": 1792776318.2565675,
+    "seen": 1792848408.9595847,
+    "ast_hash": "775b962249935635c82e5550e492f46c",
     "semantic_hash": ""
   },
   "revit_mcp/view_management.py": {
-    "mtime": 1788778938.0417824,
-    "ast_hash": "51062a5389dc5deb7e442fee1b251f91",
+    "mtime": 1792841571.8902178,
+    "seen": 1792848408.959586,
+    "ast_hash": "9ad18cc069ba7440cbc0660ac265e260",
     "semantic_hash": ""
   },
   "revit_mcp/views.py": {
-    "mtime": 1788779713.9021096,
-    "ast_hash": "a36b64e15005ab289e049035c173d87c",
+    "mtime": 1793036442.7197804,
+    "seen": 1793036792.0446804,
+    "ast_hash": "63d0621cf357483a574b01682a9f788b",
     "semantic_hash": ""
   },
   "startup.py": {
-    "mtime": 1788787769.05119,
-    "ast_hash": "6ab5d37be52fa65f743e927442a072ab",
+    "mtime": 1792842475.7624607,
+    "seen": 1792848408.9595978,
+    "ast_hash": "e8ee09073595a4d6ef0599b505ea4fc9",
     "semantic_hash": ""
   },
   "tests/test_init_latency.py": {
     "mtime": 1785427937.243635,
+    "seen": 1792156149.2940984,
     "ast_hash": "47d97772e93c6d81b936390afef743b8",
     "semantic_hash": "47d97772e93c6d81b936390afef743b8"
   },
   "tests/test_model_info_format.py": {
     "mtime": 1785427937.2446327,
+    "seen": 1792156149.2941,
     "ast_hash": "6721186961fdb9362cef7ccfeb29d102",
     "semantic_hash": "6721186961fdb9362cef7ccfeb29d102"
   },
   "tools/__init__.py": {
     "mtime": 1788726512.4304187,
+    "seen": 1792156149.294125,
     "ast_hash": "f3a6f4d04543f09150f41e0effa33423",
     "semantic_hash": ""
   },
   "tools/analysis_tools.py": {
-    "mtime": 1785427937.2456343,
-    "ast_hash": "b3946564a7ed07165172ceaf276312a6",
-    "semantic_hash": "b3946564a7ed07165172ceaf276312a6"
+    "mtime": 1793036830.7135448,
+    "seen": 1793037238.7933497,
+    "ast_hash": "cb66d0ba453649661f4640cde8758d73",
+    "semantic_hash": ""
   },
   "tools/annotation_tools.py": {
-    "mtime": 1785427937.2466338,
-    "ast_hash": "d11b6bd8748d1bc88a3c06448b1a9911",
-    "semantic_hash": "d11b6bd8748d1bc88a3c06448b1a9911"
+    "mtime": 1792781330.5073667,
+    "seen": 1792848408.9596539,
+    "ast_hash": "16f160349fcbf17faa319b6e96bb91d7",
+    "semantic_hash": ""
   },
   "tools/building_tools.py": {
-    "mtime": 1785427937.2466338,
-    "ast_hash": "cf40bb923c7e3f8beea32ff13cff361b",
-    "semantic_hash": "cf40bb923c7e3f8beea32ff13cff361b"
+    "mtime": 1792781330.5093842,
+    "seen": 1792848408.9596546,
+    "ast_hash": "9a69a9d94dc7f15a2ba565190a2a2206",
+    "semantic_hash": ""
   },
   "tools/clash_tools.py": {
-    "mtime": 1785427937.2476337,
-    "ast_hash": "7604dd6b2c58379563a15e78574f794d",
-    "semantic_hash": "7604dd6b2c58379563a15e78574f794d"
+    "mtime": 1793036843.1931937,
+    "seen": 1793037238.7933526,
+    "ast_hash": "169074d58546d3ebe4d0d9c39d4ed4d8",
+    "semantic_hash": ""
   },
   "tools/code_execution_tools.py": {
-    "mtime": 1785427937.2486353,
-    "ast_hash": "eda988612cabd6eae7a1bbbb24353dc5",
-    "semantic_hash": "eda988612cabd6eae7a1bbbb24353dc5"
+    "mtime": 1793001873.33614,
+    "seen": 1793004495.868187,
+    "ast_hash": "8acf8f067698693e4eac018b868e348a",
+    "semantic_hash": ""
   },
   "tools/colors_tools.py": {
-    "mtime": 1785427937.2496324,
-    "ast_hash": "5c0416be9deb2380e62d21d8ddc6a763",
-    "semantic_hash": "5c0416be9deb2380e62d21d8ddc6a763"
+    "mtime": 1793036861.5297914,
+    "seen": 1793037238.793355,
+    "ast_hash": "30be42418ecc7b4d0b8ff863f7c6d22f",
+    "semantic_hash": ""
   },
   "tools/detail_tools.py": {
-    "mtime": 1785427937.2496324,
-    "ast_hash": "76d07a5302f2a15f8a1819726b1ee886",
-    "semantic_hash": "76d07a5302f2a15f8a1819726b1ee886"
+    "mtime": 1792781420.725464,
+    "seen": 1792848408.9596574,
+    "ast_hash": "3b94d77dac84c054038f50833caa5e18",
+    "semantic_hash": ""
   },
   "tools/document_tools.py": {
-    "mtime": 1785427937.2506435,
-    "ast_hash": "d191c46717cb1f0832531e9d9262286c",
-    "semantic_hash": "d191c46717cb1f0832531e9d9262286c"
+    "mtime": 1793035691.9452777,
+    "seen": 1793036792.0448453,
+    "ast_hash": "5d3640f3e34406dc389b8cac82a509da",
+    "semantic_hash": ""
   },
   "tools/documentation_tools.py": {
-    "mtime": 1785427937.2506435,
-    "ast_hash": "c22dedb03c9cbf77461b6f86082c727a",
-    "semantic_hash": "c22dedb03c9cbf77461b6f86082c727a"
+    "mtime": 1792781420.7284453,
+    "seen": 1792848408.9596593,
+    "ast_hash": "29d9bbecd5961e34364c53541150d83c",
+    "semantic_hash": ""
   },
   "tools/editing_tools.py": {
-    "mtime": 1785427937.251641,
-    "ast_hash": "d95e809829dd31819784e2d7df96915f",
-    "semantic_hash": "d95e809829dd31819784e2d7df96915f"
+    "mtime": 1793036867.0750897,
+    "seen": 1793037238.793359,
+    "ast_hash": "05c392900864ecf6bf962d2cf0af90d1",
+    "semantic_hash": ""
   },
   "tools/family_tools.py": {
-    "mtime": 1788736223.2654939,
-    "ast_hash": "88280e421cd48e9fc56bfb8930d31c30",
+    "mtime": 1793035242.3808322,
+    "seen": 1793036792.0448484,
+    "ast_hash": "60ca7e9364ab898f5a032a0eb753aaaa",
     "semantic_hash": ""
   },
   "tools/interop_tools.py": {
-    "mtime": 1785427937.252642,
-    "ast_hash": "f8ba99e20aa7c9e058b1b4d46cd1d698",
-    "semantic_hash": "f8ba99e20aa7c9e058b1b4d46cd1d698"
+    "mtime": 1792782382.1249444,
+    "seen": 1792848408.959661,
+    "ast_hash": "ebf5f3535eff1cd60a108e6a9805ed3b",
+    "semantic_hash": ""
   },
   "tools/mep_tools.py": {
-    "mtime": 1785427937.25364,
-    "ast_hash": "86f24594318272e0d1a4e4243e6c0746",
-    "semantic_hash": "86f24594318272e0d1a4e4243e6c0746"
+    "mtime": 1792781420.7269635,
+    "seen": 1792848408.9596617,
+    "ast_hash": "9df9162580c79e01c432f964b6b55d58",
+    "semantic_hash": ""
   },
   "tools/model_tools.py": {
-    "mtime": 1788736238.130681,
-    "ast_hash": "23999ebbacc68bf63b743feb7204f5d7",
+    "mtime": 1793036873.819322,
+    "seen": 1793037238.793363,
+    "ast_hash": "2392f5c3847eab13706218b1288555fa",
     "semantic_hash": ""
   },
   "tools/parameter_tools.py": {
-    "mtime": 1788517244.671237,
-    "ast_hash": "72cedc564b024e316321ff591bd22fd4",
-    "semantic_hash": "72cedc564b024e316321ff591bd22fd4"
+    "mtime": 1793035242.3798232,
+    "seen": 1793036792.0448525,
+    "ast_hash": "f2b15a9ad3655ab42ae3fb1a52dfa4c6",
+    "semantic_hash": ""
   },
   "tools/room_tools.py": {
-    "mtime": 1785427937.2546394,
-    "ast_hash": "27a8e9f3aab268e500c2a88a5530d024",
-    "semantic_hash": "27a8e9f3aab268e500c2a88a5530d024"
+    "mtime": 1792781420.7279477,
+    "seen": 1792848408.9596643,
+    "ast_hash": "598d9228cbb40e90e022835455efdcef",
+    "semantic_hash": ""
   },
   "tools/status_tools.py": {
-    "mtime": 1788736250.08386,
-    "ast_hash": "92666cd790f710105bdf094ab5359863",
+    "mtime": 1793624910.2593744,
+    "seen": 1793626083.1405337,
+    "ast_hash": "dc22f2c8316badca206b17b06f8ee06c",
     "semantic_hash": ""
   },
   "tools/structure_tools.py": {
-    "mtime": 1785427937.256642,
-    "ast_hash": "529592dbe0c21f21d8dcfa89faebdd4a",
-    "semantic_hash": "529592dbe0c21f21d8dcfa89faebdd4a"
+    "mtime": 1792781330.5098932,
+    "seen": 1792848408.959666,
+    "ast_hash": "5f66d47eb512baaae31a0f58115ef295",
+    "semantic_hash": ""
   },
   "tools/tag_tools.py": {
-    "mtime": 1785427937.256642,
-    "ast_hash": "2b68dbd7bf9b15a9282646d9588e8ba0",
-    "semantic_hash": "2b68dbd7bf9b15a9282646d9588e8ba0"
+    "mtime": 1792781330.5058515,
+    "seen": 1792848408.9596663,
+    "ast_hash": "c991830fec5991976271b3b95c0b67ca",
+    "semantic_hash": ""
   },
   "tools/transform_tools.py": {
-    "mtime": 1785427937.2576427,
-    "ast_hash": "ed1d55282641c4d344a23e24612debff",
-    "semantic_hash": "ed1d55282641c4d344a23e24612debff"
+    "mtime": 1793001790.6605694,
+    "seen": 1793004495.8682177,
+    "ast_hash": "6005338c4ac389e89f0b461d02aef5b9",
+    "semantic_hash": ""
   },
   "tools/utils.py": {
-    "mtime": 1785427937.25864,
-    "ast_hash": "c4562466ba85c6df91b0bda48b1b876a",
-    "semantic_hash": "c4562466ba85c6df91b0bda48b1b876a"
+    "mtime": 1793035114.944569,
+    "seen": 1793036792.044861,
+    "ast_hash": "1831e69ab169cefebbfa91b986b3ad6d",
+    "semantic_hash": ""
   },
   "tools/view_management_tools.py": {
-    "mtime": 1785427937.25864,
-    "ast_hash": "baebd9d3e21555572afab9f6d016a8bc",
-    "semantic_hash": "baebd9d3e21555572afab9f6d016a8bc"
+    "mtime": 1792782382.1259515,
+    "seen": 1792848408.9596686,
+    "ast_hash": "8e09cef5e2381ff943b7520fadfcf4ad",
+    "semantic_hash": ""
   },
   "tools/view_tools.py": {
-    "mtime": 1788736271.1495163,
-    "ast_hash": "6640b5e0ca63fbcc2d5b24aa947fe242",
+    "mtime": 1793036883.1007502,
+    "seen": 1793037238.7933755,
+    "ast_hash": "563363388094957cba1e94487785517c",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1788779258.2610402,
-    "ast_hash": "7bf15828ef34e7ed71da846974b2a24e",
+    "mtime": 1793002624.4602482,
+    "seen": 1793004495.868695,
+    "ast_hash": "4f5ec095fcb9d868dd261721227fd8d3",
     "semantic_hash": ""
   },
   "LLM.txt": {
     "mtime": 1785427937.2044933,
+    "seen": 1792156149.294271,
     "ast_hash": "4a21e85243fc2979bfc5feebffd16731",
     "semantic_hash": "4a21e85243fc2979bfc5feebffd16731"
   },
   "README.md": {
-    "mtime": 1788729160.5673823,
-    "ast_hash": "def7f73665c55adac8b5b8d317d49c6d",
+    "mtime": 1793036730.5579436,
+    "seen": 1793036792.0451736,
+    "ast_hash": "6cd6bd73db441c319df08e74eb15dd85",
     "semantic_hash": ""
   },
   "requirements.txt": {
     "mtime": 1785427937.2241611,
+    "seen": 1792156149.2942858,
     "ast_hash": "66efb34d564eb723d892727a54e9a753",
     "semantic_hash": "66efb34d564eb723d892727a54e9a753"
   },
   "images/get_view_tool.png": {
     "mtime": 1785427937.2126453,
+    "seen": 1792156149.2944486,
     "ast_hash": "00522398abe95b5e93e8bf36d8e10ab5",
     "semantic_hash": "00522398abe95b5e93e8bf36d8e10ab5"
   },
   "images/list_model_tool.png": {
     "mtime": 1785427937.2211623,
+    "seen": 1792156149.2944498,
     "ast_hash": "98ad6d466eb37fe3bbd2faec9b50ceb1",
     "semantic_hash": "98ad6d466eb37fe3bbd2faec9b50ceb1"
   },
   "contrib-kit/conventions.py": {
     "mtime": 1788785482.8488133,
+    "seen": 1792156149.2939737,
     "ast_hash": "64100bc647ae2e85162fa042c44f2d1f",
     "semantic_hash": ""
   },
   "contrib-kit/revitmcp_kit.py": {
-    "mtime": 1788785500.7388146,
-    "ast_hash": "0292c472a73524d68e10fe88b8216404",
+    "mtime": 1792846385.3935554,
+    "seen": 1792848408.9595392,
+    "ast_hash": "1d5bb336dc5e2e2b3c53748bb8b43f9a",
     "semantic_hash": ""
   },
   "deploy/configure_hermes.py": {
     "mtime": 1788773223.8073106,
+    "seen": 1792156149.294028,
     "ast_hash": "15a7b0413ab4863912445e5b74045636",
     "semantic_hash": ""
   },
   "deploy/gate.py": {
-    "mtime": 1788728148.7530854,
-    "ast_hash": "0a3957f05f8c5b5fdb7707e7d2df4adb",
+    "mtime": 1792953729.3206646,
+    "seen": 1792964443.8070214,
+    "ast_hash": "ac50c822ded991fb65d51aa3cbe8db44",
     "semantic_hash": ""
   },
   "deploy/server.py": {
-    "mtime": 1788698600.6543813,
-    "ast_hash": "049d38f7613aceca36c9aecee4372d0c",
+    "mtime": 1792952491.8529482,
+    "seen": 1792964443.8070285,
+    "ast_hash": "c6cac825831816afd4b53bc429e2d19f",
     "semantic_hash": ""
   },
   "deploy/warm.py": {
-    "mtime": 1788698749.6916504,
-    "ast_hash": "675622edbef9db2bd8ff7a76318547b5",
+    "mtime": 1792952517.1504388,
+    "seen": 1792964443.8070295,
+    "ast_hash": "7d069149a108ee5ad9c1b4d78f79656f",
     "semantic_hash": ""
   },
   "revit_mcp/registry.py": {
     "mtime": 1788778937.9606924,
+    "seen": 1792156149.294073,
     "ast_hash": "6e5ebec511b9b74a28a052933465ad5d",
     "semantic_hash": ""
   },
   "revit_mcp/textutils.py": {
-    "mtime": 1788787755.3630726,
-    "ast_hash": "5a56e34a7fbe84d554ec28d689e90acc",
+    "mtime": 1792942625.5477672,
+    "seen": 1792964443.8070714,
+    "ast_hash": "a9a4fbc37f2ee26737c5c134a4e1552b",
     "semantic_hash": ""
   },
   "scripts/build_contrib_kit.py": {
-    "mtime": 1788739856.9469256,
-    "ast_hash": "535ec627bd75db7d88281496d187b208",
+    "mtime": 1788951038.8236113,
+    "seen": 1792156149.2940884,
+    "ast_hash": "073ae446a102b0779a4d7ede391ed680",
     "semantic_hash": ""
   },
   "scripts/conventions.py": {
-    "mtime": 1788785461.9739795,
-    "ast_hash": "64100bc647ae2e85162fa042c44f2d1f",
+    "mtime": 1792995108.6378112,
+    "seen": 1792995264.6621015,
+    "ast_hash": "c1e465f992cd51a24cc6c52fb51b76f3",
     "semantic_hash": ""
   },
   "scripts/intake_package.py": {
-    "mtime": 1788737549.052255,
-    "ast_hash": "a7648d6c055871da9d6a78f89f8d1d38",
+    "mtime": 1792159818.220412,
+    "seen": 1792159906.3676338,
+    "ast_hash": "a5896614a78b58ff89ca676ccde88460",
     "semantic_hash": ""
   },
   "scripts/new_tool.py": {
-    "mtime": 1788736983.924101,
-    "ast_hash": "6955731c8cb64cbdd26eac905588115c",
+    "mtime": 1792846351.607119,
+    "seen": 1792848408.9595935,
+    "ast_hash": "03e81934d1fca3b13bf7924f255d7780",
     "semantic_hash": ""
   },
   "tests/unit/conftest.py": {
-    "mtime": 1788727553.835541,
-    "ast_hash": "af762d058b170f6ed5cc68429a638bf8",
+    "mtime": 1792954485.6881087,
+    "seen": 1792964443.8071055,
+    "ast_hash": "ef0d4a072a8c7ee86770a0ae9a3673ef",
     "semantic_hash": ""
   },
   "tests/unit/test_conventions.py": {
-    "mtime": 1788779827.5203311,
-    "ast_hash": "66c874c3c36e47dbb4b6bef45b3e29c0",
+    "mtime": 1792995195.7967224,
+    "seen": 1792995264.6621437,
+    "ast_hash": "db90a8d557f3bd8928fd9b3a7682ca77",
     "semantic_hash": ""
   },
   "tests/unit/test_format_response.py": {
-    "mtime": 1788727576.365774,
-    "ast_hash": "edda7454be54ddde1562498645ac4a61",
+    "mtime": 1792776305.3564003,
+    "seen": 1792848408.9596128,
+    "ast_hash": "7657c4750b0af99c54914cc1d2e90746",
     "semantic_hash": ""
   },
   "tests/unit/test_registration.py": {
-    "mtime": 1788779161.8925004,
-    "ast_hash": "257221ea87f13fefd69d8938381b812c",
+    "mtime": 1793624643.3783665,
+    "seen": 1793626083.1404395,
+    "ast_hash": "79107f746991000fbf7e50d0297818b2",
     "semantic_hash": ""
   },
   "tests/unit/test_textutils.py": {
-    "mtime": 1788787735.3545697,
-    "ast_hash": "b7dccee42eef77d15a5ffa4d5e249459",
+    "mtime": 1792776305.3553998,
+    "seen": 1792848408.959645,
+    "ast_hash": "f3d724439f93b0154b0f913a5febc405",
     "semantic_hash": ""
   },
   "tools/process_tools.py": {
-    "mtime": 1788699372.2022884,
-    "ast_hash": "78a066cba5755d7b5f0f4de74dbc803b",
+    "mtime": 1792652387.5457292,
+    "seen": 1792655870.695555,
+    "ast_hash": "be33847408c0bd5ff6efb66520ec66ef",
     "semantic_hash": ""
   },
   ".kilo/agents/revit-tool.md": {
-    "mtime": 1788737110.8282726,
-    "ast_hash": "91c3f391bb8f3a2fcd62a78a112366ad",
+    "mtime": 1792759969.0432084,
+    "seen": 1792848408.9596715,
+    "ast_hash": "7756eddda95262ea0ff8535cc771db54",
     "semantic_hash": ""
   },
   ".planning/codebase/ARCHITECTURE.md": {
     "mtime": 1788507007.2022593,
+    "seen": 1792156149.2941706,
     "ast_hash": "8137640d62fe8c3fd49eed88fcfdce8e",
     "semantic_hash": ""
   },
   ".planning/codebase/CONCERNS.md": {
     "mtime": 1788507041.7382424,
+    "seen": 1792156149.294172,
     "ast_hash": "1b14e8e91e83544796fe451cf0b11947",
     "semantic_hash": ""
   },
   ".planning/codebase/CONVENTIONS.md": {
     "mtime": 1788506994.7100923,
+    "seen": 1792156149.2941737,
     "ast_hash": "96dbe6ffec5dd1af5b57234b251e7245",
     "semantic_hash": ""
   },
   ".planning/codebase/INTEGRATIONS.md": {
     "mtime": 1788507015.4450257,
+    "seen": 1792156149.2941751,
     "ast_hash": "03ed298465a294daec98a57c0b4c51c6",
     "semantic_hash": ""
   },
   ".planning/codebase/STACK.md": {
     "mtime": 1788506981.471419,
+    "seen": 1792156149.2941766,
     "ast_hash": "5797c8a6500b201cdb07a65098672f35",
     "semantic_hash": ""
   },
   ".planning/codebase/STRUCTURE.md": {
     "mtime": 1788507036.4847143,
+    "seen": 1792156149.294178,
     "ast_hash": "bf0b35e0cabfabd837c3b249cc1fd36c",
     "semantic_hash": ""
   },
   ".planning/codebase/TESTING.md": {
     "mtime": 1788507026.856406,
+    "seen": 1792156149.2941794,
     "ast_hash": "eff5f9d351eba3aa5f0f5da06a56c969",
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1788737075.1484146,
-    "ast_hash": "a545bc7439d8dbcfcb179b64e11ea4c9",
+    "mtime": 1792759969.044208,
+    "seen": 1792848408.9598053,
+    "ast_hash": "006ef88ef464993b59fb9bf1d85d6c0d",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1788729102.4582512,
-    "ast_hash": "a7f4c2586f4a433377d663925a323bc3",
+    "mtime": 1792846418.9075634,
+    "seen": 1792848408.9598067,
+    "ast_hash": "3cebb9c548786d9ce1b3c4fea947d7ec",
     "semantic_hash": ""
   },
   "contrib-kit/.kilo/agents/revit-tool.md": {
     "mtime": 1788785551.785169,
+    "seen": 1792156149.2942734,
     "ast_hash": "e133d4865310de0f40f198df59e3451c",
     "semantic_hash": ""
   },
   "contrib-kit/AGENTS.md": {
     "mtime": 1788785523.9605174,
+    "seen": 1792156149.2942748,
     "ast_hash": "50662090450ed3fe79d0bacb481e2889",
     "semantic_hash": ""
   },
   "contrib-kit/INSTRUCTION.md": {
-    "mtime": 1788785528.8926392,
-    "ast_hash": "07d119646aece5edda96b4a3a9c213ce",
+    "mtime": 1792759969.0517366,
+    "seen": 1792848408.9598105,
+    "ast_hash": "cf225847dc76950aa6964c91e41d0e8c",
     "semantic_hash": ""
   },
   "contrib-kit/README.md": {
-    "mtime": 1788785546.9444866,
-    "ast_hash": "e014e59548c90d0d58aeef44eca533d7",
+    "mtime": 1792759969.052737,
+    "seen": 1792848408.959811,
+    "ast_hash": "588d18a590fb5323b626b045343876c4",
     "semantic_hash": ""
   },
   "deploy/README.md": {
-    "mtime": 1788773253.0828593,
-    "ast_hash": "7b0387b407864626e45e2133e4677c2b",
+    "mtime": 1793002921.4519124,
+    "seen": 1793004495.8687096,
+    "ast_hash": "55ac16689da53a8ad3535259f541fb6b",
     "semantic_hash": ""
   },
   "deploy/SETUP-RUNBOOK.md": {
-    "mtime": 1788778318.5747786,
-    "ast_hash": "a96514d464fd3d43af81f02e08a5df7b",
+    "mtime": 1792159837.6117342,
+    "seen": 1792159906.3678064,
+    "ast_hash": "747af992d33038d599732634a59ea229",
     "semantic_hash": ""
   },
   "deployment-map.html": {
-    "mtime": 1788785927.6996372,
-    "ast_hash": "2ab593342b4163751c795d54537966ca",
+    "mtime": 1792759969.055735,
+    "seen": 1792848408.959815,
+    "ast_hash": "67d3aec827d8b1c4b7f8f2fe104c5282",
     "semantic_hash": ""
   },
   "docs/hermes-skill/README.md": {
     "mtime": 1788737185.360953,
+    "seen": 1792156149.2942832,
     "ast_hash": "91ff9c281b43082b621986545c4484cd",
     "semantic_hash": ""
   },
   "docs/hermes-skill/SKILL.md": {
-    "mtime": 1788737163.83011,
-    "ast_hash": "431f37f54baf6ffeb34b68999d2936a1",
+    "mtime": 1792759969.0577364,
+    "seen": 1792848408.9598165,
+    "ast_hash": "a777102dfb7e01e390538be93d6b55e9",
     "semantic_hash": ""
   },
   "tests/unit/tool_manifest.txt": {
-    "mtime": 1788737594.7801003,
-    "ast_hash": "26e1b869c9add60abbe0b93b2875c5d9",
+    "mtime": 1792654182.9108865,
+    "seen": 1792655870.695751,
+    "ast_hash": "a461c69eecac00e5ee4241db187a8383",
     "semantic_hash": ""
   },
   "tool-developer-guide.md": {
-    "mtime": 1788785782.3348393,
-    "ast_hash": "404daa2a733305af6828eeb95de2dafc",
+    "mtime": 1788951038.8256097,
+    "seen": 1792156149.2944474,
+    "ast_hash": "f0a888574fb4780dbc9cf0e7d95fd328",
+    "semantic_hash": ""
+  },
+  ".gsd/dispatch-isolation-sentinel.json": {
+    "mtime": 1793011623.3842785,
+    "seen": 1793030362.296548,
+    "ast_hash": "1e091b805b251ea7b5588dd67df38418",
+    "semantic_hash": ""
+  },
+  ".planning/config.json": {
+    "mtime": 1793009453.0458784,
+    "seen": 1793030362.2965562,
+    "ast_hash": "b7f1b8ae37724bffcaf154e1c86a9926",
+    "semantic_hash": ""
+  },
+  ".planning/state.json": {
+    "mtime": 1793009621.6593282,
+    "seen": 1793030362.296559,
+    "ast_hash": "87c87f95ed21e566d7f74e61dbb440cb",
+    "semantic_hash": ""
+  },
+  "bridge.py": {
+    "mtime": 1793035166.4776537,
+    "seen": 1793036792.0446048,
+    "ast_hash": "73405af3bce1341051597d4addde6cee",
+    "semantic_hash": ""
+  },
+  "deploy/forget_retired_path.py": {
+    "mtime": 1788959980.6789975,
+    "seen": 1792156149.2940328,
+    "ast_hash": "0f85e7679ee559ae017c6ae5f0c2e78a",
+    "semantic_hash": ""
+  },
+  "revit_mcp/worksharing.py": {
+    "mtime": 1792942736.5508878,
+    "seen": 1792964443.8070786,
+    "ast_hash": "6769bbe85ff3b95838206c72d45b7e8c",
+    "semantic_hash": ""
+  },
+  "scripts/probe_handler_overlap.py": {
+    "mtime": 1792159413.671812,
+    "seen": 1792159649.0830684,
+    "ast_hash": "73d43e03efb8844a8b3058b13a9480af",
+    "semantic_hash": ""
+  },
+  "tests/test_phase2_preflight.py": {
+    "mtime": 1792221409.7750401,
+    "seen": 1792652013.331756,
+    "ast_hash": "853747f63a2abe698705176823bcb759",
+    "semantic_hash": ""
+  },
+  "tests/test_two_instance_targets.py": {
+    "mtime": 1791356082.954872,
+    "seen": 1792156149.2941031,
+    "ast_hash": "0fe5562092f826048c1a4764d7dc5641",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_bridge_serialization.py": {
+    "mtime": 1792698327.678863,
+    "seen": 1792759075.6145997,
+    "ast_hash": "9d82af919347fc6925c9fcc6cd8aba42",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_broken_paths.py": {
+    "mtime": 1789570558.9782016,
+    "seen": 1792156149.2941074,
+    "ast_hash": "f1e552e78fb1feb97da4faeab051aff8",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_local_bridge_transport.py": {
+    "mtime": 1792651809.7956467,
+    "seen": 1792652013.331773,
+    "ast_hash": "87a36e691201377611b8eca71468c3f4",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_payload_ships_root_modules.py": {
+    "mtime": 1792952149.0900354,
+    "seen": 1792964443.8071396,
+    "ast_hash": "25f82eb6fbbea63248cfe28ab77d790a",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase2_preflight.py": {
+    "mtime": 1792221452.5357141,
+    "seen": 1792652013.3317814,
+    "ast_hash": "951fc7132db42eb2de98920db22af792",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_probe_handler_overlap.py": {
+    "mtime": 1791356317.8351538,
+    "seen": 1792156149.294115,
+    "ast_hash": "d610c3f3ffc3391cbfdf479ce7c6027e",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_revit_server_paths.py": {
+    "mtime": 1789973723.3903842,
+    "seen": 1792156149.294118,
+    "ast_hash": "01bc6d88c5b0539de79980c3387d15b9",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_section_basis.py": {
+    "mtime": 1788822072.3427014,
+    "seen": 1792156149.2941194,
+    "ast_hash": "26bb8ac875ba1746be51be555a755752",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_serialization_scope_docs.py": {
+    "mtime": 1792651809.7956467,
+    "seen": 1792652013.3317935,
+    "ast_hash": "c64218d15306adbddf4c46969a7068b7",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_status_target.py": {
+    "mtime": 1792968883.3266397,
+    "seen": 1792972476.7813327,
+    "ast_hash": "8bd18a7608a4929dcd508413b7e9c35e",
+    "semantic_hash": ""
+  },
+  "tools/worksharing_tools.py": {
+    "mtime": 1792942827.0395257,
+    "seen": 1792964443.8072233,
+    "ast_hash": "aabff4331ba84ef1f2eebcbaf3155a1e",
+    "semantic_hash": ""
+  },
+  ".planning/PROJECT.md": {
+    "mtime": 1792929932.3573213,
+    "seen": 1792964443.8072252,
+    "ast_hash": "105ebf016241fc95c641f23d5951ae84",
+    "semantic_hash": ""
+  },
+  ".planning/REQUIREMENTS.md": {
+    "mtime": 1792956750.2116563,
+    "seen": 1792964443.8072274,
+    "ast_hash": "0d07e07d0c1c3a29493ee932bc2882a3",
+    "semantic_hash": ""
+  },
+  ".planning/ROADMAP.md": {
+    "mtime": 1793002711.1862965,
+    "seen": 1793004495.8682334,
+    "ast_hash": "1b8e6db127ca191864ec4642b9b2c654",
+    "semantic_hash": ""
+  },
+  ".planning/STATE.md": {
+    "mtime": 1793013032.8085818,
+    "seen": 1793030362.2968197,
+    "ast_hash": "cfdc01a0162f9645835421e5f4218937",
+    "semantic_hash": ""
+  },
+  ".planning/debug/param-write-rolls-back.md": {
+    "mtime": 1791965431.116938,
+    "seen": 1792156149.2941809,
+    "ast_hash": "b81883da3d274160d2a1550e56ffa64b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-01-PLAN.md": {
+    "mtime": 1791323882.3260477,
+    "seen": 1792156149.294183,
+    "ast_hash": "e748743a4eaf5174664af9164a1de98f",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-01-SUMMARY.md": {
+    "mtime": 1791355703.5864391,
+    "seen": 1792156149.2941844,
+    "ast_hash": "e7a114e02056a9472c2b179979f05bfd",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-02-PLAN.md": {
+    "mtime": 1791323968.2018278,
+    "seen": 1792156149.2941856,
+    "ast_hash": "e40ac086955ae0501aa2d2c7f1024210",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-02-SUMMARY.md": {
+    "mtime": 1791965331.3533707,
+    "seen": 1792156149.294187,
+    "ast_hash": "e8f94ef751e082772eb20b5b4f5ea12b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-03-PLAN.md": {
+    "mtime": 1791324077.097613,
+    "seen": 1792156149.2941885,
+    "ast_hash": "40f6b4c178c54675cd88c2c35b6ab5fa",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-03-SUMMARY.md": {
+    "mtime": 1791356188.3930888,
+    "seen": 1792156149.2941902,
+    "ast_hash": "8a9e62f08ad629a99841acbed3e3eab2",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-04-PLAN.md": {
+    "mtime": 1791324227.5221915,
+    "seen": 1792156149.2941911,
+    "ast_hash": "a54f49ecbe4a648a814cdc8b29b65748",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-04-SUMMARY.md": {
+    "mtime": 1791365903.0441587,
+    "seen": 1792156149.2941923,
+    "ast_hash": "dd0b984af237fd115f3876689839d0d7",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-05-PLAN.md": {
+    "mtime": 1791367662.5440192,
+    "seen": 1792156149.294194,
+    "ast_hash": "a2841b801786667009d1af76ba62c792",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-06-PLAN.md": {
+    "mtime": 1791368110.3103914,
+    "seen": 1792156149.2941952,
+    "ast_hash": "29cc28186a8685b61e8e7fde0c7337ca",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-06-SUMMARY.md": {
+    "mtime": 1791965753.1382234,
+    "seen": 1792156149.2941964,
+    "ast_hash": "269946ead6586c083847899ec0fe4336",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-07-PLAN.md": {
+    "mtime": 1791368111.7907326,
+    "seen": 1792156149.2941976,
+    "ast_hash": "afe9eb51f6620f8cf5e157a62a83763c",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-07-SUMMARY.md": {
+    "mtime": 1791966124.0244124,
+    "seen": 1792156149.2941988,
+    "ast_hash": "558d9e53805177fd1e60b38d3065207a",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-08-PLAN.md": {
+    "mtime": 1791368161.015787,
+    "seen": 1792156149.2942004,
+    "ast_hash": "269856c8785d3f3bb2965c564d8d79e9",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-08-SUMMARY.md": {
+    "mtime": 1791965477.4514182,
+    "seen": 1792156149.2942014,
+    "ast_hash": "a93c857e2ff49a625ce533287877244c",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-CONTEXT.md": {
+    "mtime": 1791965374.672433,
+    "seen": 1792156149.2942026,
+    "ast_hash": "67a298e95c069da834454bafc973b1c4",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-DISCUSSION-LOG.md": {
+    "mtime": 1790771235.3256862,
+    "seen": 1792156149.294204,
+    "ast_hash": "484a51d8aa9170c5cff3d0a912244a5a",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-PATTERNS.md": {
+    "mtime": 1791322778.6517444,
+    "seen": 1792156149.2942052,
+    "ast_hash": "9bcbcfe64b928e24408286b21c4014d5",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-RESEARCH.md": {
+    "mtime": 1791322529.0423708,
+    "seen": 1792156149.2942061,
+    "ast_hash": "0b89b54d9c4af53ef2ac1515b7df30a3",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-REVIEW.md": {
+    "mtime": 1791966450.1368077,
+    "seen": 1792156149.2942076,
+    "ast_hash": "8642f62228476dce9a95aa35da7b2242",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-SECURITY.md": {
+    "mtime": 1791973075.1786442,
+    "seen": 1792156149.2942085,
+    "ast_hash": "9e4eb555c1429f827315f766bd1bdec5",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-UAT.md": {
+    "mtime": 1791972561.730802,
+    "seen": 1792156149.2942097,
+    "ast_hash": "3a77d069c029067e717b6c50fb4922be",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-VALIDATION.md": {
+    "mtime": 1791972673.5544872,
+    "seen": 1792156149.2942114,
+    "ast_hash": "80422f6167360fb24240f6587efb3ce9",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/01-VERIFICATION.md": {
+    "mtime": 1791973114.7765138,
+    "seen": 1792156149.2942128,
+    "ast_hash": "5219683b0f284fcbfd05da9563b99980",
+    "semantic_hash": ""
+  },
+  ".planning/phases/01-serialization-and-configurable-addressing/COVERAGE.md": {
+    "mtime": 1791368051.1672878,
+    "seen": 1792156149.2942142,
+    "ast_hash": "b4fe61d945cfaab2866f1f2fe87c67f0",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-01-PLAN.md": {
+    "mtime": 1792185082.3410726,
+    "seen": 1792185134.3811176,
+    "ast_hash": "47ec7ec383fd4b38792788121e5af408",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-02-PLAN.md": {
+    "mtime": 1792219234.538489,
+    "seen": 1792652013.331955,
+    "ast_hash": "6a545268cc7b2c7afc90badad628c1c6",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-03-PLAN.md": {
+    "mtime": 1792219260.4352078,
+    "seen": 1792652013.3319588,
+    "ast_hash": "ed32133858806cf938562c5bd10e922e",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-04-PLAN.md": {
+    "mtime": 1792219720.2773776,
+    "seen": 1792652013.3319623,
+    "ast_hash": "0e8ad5e731255cfbf34ebbebbf9a0b04",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-05-PLAN.md": {
+    "mtime": 1792219358.774362,
+    "seen": 1792652013.3319647,
+    "ast_hash": "404e67a698724828cab37f72afcfd18a",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-06-PLAN.md": {
+    "mtime": 1792219381.1725461,
+    "seen": 1792652013.3319666,
+    "ast_hash": "9f23826f68aeec9cd1614bdd9498daaa",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-07-PLAN.md": {
+    "mtime": 1792219419.2067852,
+    "seen": 1792652013.3319688,
+    "ast_hash": "4983d45c98b66ee2d44d8cd5056c04df",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-08-PLAN.md": {
+    "mtime": 1792015985.8883114,
+    "seen": 1792156149.2942238,
+    "ast_hash": "830b44f3b05cae5a0044ca0a438f4f15",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-09-PLAN.md": {
+    "mtime": 1792220075.5001075,
+    "seen": 1792652013.3319726,
+    "ast_hash": "df4b0bc4b69aa14a1daedf9f968ccfb5",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-10-PLAN.md": {
+    "mtime": 1792016564.8755329,
+    "seen": 1792156149.2942262,
+    "ast_hash": "5a5c220565d364b6aa482b0bed6fa4bc",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-11-PLAN.md": {
+    "mtime": 1792220075.5011077,
+    "seen": 1792652013.3319767,
+    "ast_hash": "3d5a6cadcb2a757ee01cc4d256be23fe",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-12-PLAN.md": {
+    "mtime": 1792220075.5017848,
+    "seen": 1792652013.3319786,
+    "ast_hash": "d2cfed9ff9d9fb540c9dc8a7f3105adb",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-13-PLAN.md": {
+    "mtime": 1792219455.317691,
+    "seen": 1792652013.33198,
+    "ast_hash": "a0b8a027ab2686c18fbca7c8911d8c4d",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-14-PLAN.md": {
+    "mtime": 1792219463.9521704,
+    "seen": 1792652013.3319817,
+    "ast_hash": "f7dfaee11c4d9d07ea1e3cf009d6af31",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-15-PLAN.md": {
+    "mtime": 1792219497.8586519,
+    "seen": 1792652013.3319833,
+    "ast_hash": "d0f4e9bba2c4d8366753337825512673",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-16-PLAN.md": {
+    "mtime": 1792219511.2088723,
+    "seen": 1792652013.3319852,
+    "ast_hash": "07bde608170712bb22a7f457960ac9e7",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-17-PLAN.md": {
+    "mtime": 1792219544.2728965,
+    "seen": 1792652013.331987,
+    "ast_hash": "1a102e52b2bd5e45e1b050e0a04aabf1",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-18-PLAN.md": {
+    "mtime": 1792219595.000848,
+    "seen": 1792652013.3319886,
+    "ast_hash": "6c3e074061536ec6d963f191c770a1b6",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-19-PLAN.md": {
+    "mtime": 1792219612.3187773,
+    "seen": 1792652013.33199,
+    "ast_hash": "ddb79cd26c708348ad385938629075fa",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-20-PLAN.md": {
+    "mtime": 1792174469.4623818,
+    "seen": 1792179277.6224835,
+    "ast_hash": "86da154e62064b3231a44a23cb46ce82",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-CONTEXT.md": {
+    "mtime": 1792184626.2777503,
+    "seen": 1792185134.3811636,
+    "ast_hash": "6b42a9bb4bf6d58f9446bc9dc540d37f",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-DISCUSSION-LOG.md": {
+    "mtime": 1792003689.1812837,
+    "seen": 1792156149.2942398,
+    "ast_hash": "d6f468244bf7b9cfb772d302aee062b9",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-PATTERNS.md": {
+    "mtime": 1792172821.6597064,
+    "seen": 1792172923.8535764,
+    "ast_hash": "1c80600a6183542a22d2b7f82b4e0e2e",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-RESEARCH.md": {
+    "mtime": 1792010814.1192174,
+    "seen": 1792156149.2942464,
+    "ast_hash": "26bd7046a9791db6d788312c1d49adaa",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-VALIDATION.md": {
+    "mtime": 1792017976.6746027,
+    "seen": 1792156149.2942476,
+    "ast_hash": "52f38264e2d244acdb2af8bd8215272e",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-CONTEXT.md": {
+    "mtime": 1790771284.3063743,
+    "seen": 1792156149.2942488,
+    "ast_hash": "27e9e38b9308ee029924600cc8dd3ea2",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-DISCUSSION-LOG.md": {
+    "mtime": 1790771284.413749,
+    "seen": 1792156149.2942495,
+    "ast_hash": "5faefa4930849a65eded96706e8c09bd",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-CONTEXT.md": {
+    "mtime": 1792767480.3897398,
+    "seen": 1792848408.9597716,
+    "ast_hash": "48ee225ce7e2b1eee7456878851a7f74",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-DISCUSSION-LOG.md": {
+    "mtime": 1790771284.6271508,
+    "seen": 1792156149.2942514,
+    "ast_hash": "0dc800a6e1e80712156491ae60dc370e",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-CONTEXT.md": {
+    "mtime": 1792917290.9287493,
+    "seen": 1792926206.7901917,
+    "ast_hash": "2e4ac1f67dd61dfc439a01f8e2cec1c8",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-DISCUSSION-LOG.md": {
+    "mtime": 1792917322.6209235,
+    "seen": 1792926206.7901926,
+    "ast_hash": "90fe464115df16014864c282e282a082",
+    "semantic_hash": ""
+  },
+  ".planning/research/ARCHITECTURE.md": {
+    "mtime": 1789995082.1551647,
+    "seen": 1792156149.294255,
+    "ast_hash": "86fd64c26b6e960414eab1b88156cd35",
+    "semantic_hash": ""
+  },
+  ".planning/research/FEATURES.md": {
+    "mtime": 1789995087.0950153,
+    "seen": 1792156149.2942564,
+    "ast_hash": "96d6bc10cd629b992d8456674251d7e7",
+    "semantic_hash": ""
+  },
+  ".planning/research/PITFALLS.md": {
+    "mtime": 1789995177.1796627,
+    "seen": 1792156149.2942574,
+    "ast_hash": "8525ae42d545365a286714a711f70a98",
+    "semantic_hash": ""
+  },
+  ".planning/research/STACK.md": {
+    "mtime": 1789995040.4849458,
+    "seen": 1792156149.2942586,
+    "ast_hash": "555beec0c98aeaa901ab98c9a1263a74",
+    "semantic_hash": ""
+  },
+  ".planning/research/SUMMARY.md": {
+    "mtime": 1789995970.1557372,
+    "seen": 1792156149.2942598,
+    "ast_hash": "b98876587ab9ea515539001d05c45361",
+    "semantic_hash": ""
+  },
+  ".rvt-mcp_Obsidian/00-home/index.md": {
+    "mtime": 1789388292.7337575,
+    "seen": 1792156149.2942607,
+    "ast_hash": "5b50dad6a7fd1c096cba3333a41b7f5f",
+    "semantic_hash": ""
+  },
+  ".rvt-mcp_Obsidian/knowledge/debugging/2026-09-14-null-document-transaction.md": {
+    "mtime": 1789388292.6913366,
+    "seen": 1792156149.294262,
+    "ast_hash": "18f0e1767a7da88c47a96914acd6c62b",
+    "semantic_hash": ""
+  },
+  ".rvt-mcp_Obsidian/sessions/2026-09-14-open-models-and-null-document-fix.md": {
+    "mtime": 1789388292.7156324,
+    "seen": 1792156149.2942631,
+    "ast_hash": "367ca4838659c06aff5d4582a2b8da08",
+    "semantic_hash": ""
+  },
+  ".rvt-mcp_Obsidian/\u0442\u0435\u043a\u0443\u0449\u0438\u0435 \u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442\u044b.md": {
+    "mtime": 1789388292.7056317,
+    "seen": 1792156149.2942655,
+    "ast_hash": "696a6bdec54cb35752c43a6d9aa513f8",
+    "semantic_hash": ""
+  },
+  "deploy/USER-GUIDE.md": {
+    "mtime": 1793002953.5036805,
+    "seen": 1793004495.868715,
+    "ast_hash": "5b0937c5380b35583c30292f5dfc9640",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/00-home/index.md": {
+    "mtime": 1793025279.9087813,
+    "seen": 1793030362.2971327,
+    "ast_hash": "586afbbebe94e71d9687a21ce02871a2",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/00-home/\u0442\u0435\u043a\u0443\u0449\u0438\u0435 \u043f\u0440\u0438\u043e\u0440\u0438\u0442\u0435\u0442\u044b.md": {
+    "mtime": 1793025298.5578263,
+    "seen": 1793030362.2971344,
+    "ast_hash": "039156565b8328085c595fd9b821097c",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/atlas/48 MCP-\u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u043e\u0432 \u0437\u0435\u0440\u043a\u0430\u043b\u044f\u0442 48 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u043e\u0432 pyRevit.md": {
+    "mtime": 1788522095.9772942,
+    "seen": 1792156149.29429,
+    "ast_hash": "713f547bccaca779ac61b20f351800ab",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/atlas/\u0410\u0440\u0445\u0438\u0442\u0435\u043a\u0442\u0443\u0440\u0430 \u2014 \u044d\u0442\u043e \u043c\u043e\u0441\u0442 \u043c\u0435\u0436\u0434\u0443 \u0434\u0432\u0443\u043c\u044f \u0440\u0430\u043d\u0442\u0430\u0439\u043c\u0430\u043c\u0438 Python.md": {
+    "mtime": 1788512095.1317286,
+    "seen": 1792156149.294292,
+    "ast_hash": "e7a0a322af16077b990581d371e75e6d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/atlas/\u0411\u0430\u0437\u044b \u0434\u0430\u043d\u043d\u044b\u0445 \u043d\u0435\u0442 \u2014 \u0441\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u0435 \u0436\u0438\u0432\u0451\u0442 \u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u043e\u043c \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0435 Revit.md": {
+    "mtime": 1788512181.3665264,
+    "seen": 1792156149.2942932,
+    "ast_hash": "d9efdbf56ca9754e3eec1fc7dee2cdad",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/atlas/\u0414\u0435\u043f\u043b\u043e\u0439 \u2014 \u044d\u0442\u043e \u0434\u0432\u0430 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0445 \u043f\u0440\u043e\u0446\u0435\u0441\u0441\u0430 \u043d\u0430 \u0440\u0430\u0431\u043e\u0447\u0435\u0439 \u0441\u0442\u0430\u043d\u0446\u0438\u0438 \u0438\u043d\u0436\u0435\u043d\u0435\u0440\u0430.md": {
+    "mtime": 1788512181.4305468,
+    "seen": 1792156149.294295,
+    "ast_hash": "7d9959ec08a52814bf932071beab978f",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/atlas/\u041a\u0430\u0440\u0442\u0430 \u043c\u043e\u0434\u0443\u043b\u0435\u0439 \u0438 \u0438\u0445 \u0440\u0430\u0437\u043c\u0435\u0440\u044b.md": {
+    "mtime": 1788522115.9960828,
+    "seen": 1792156149.2942963,
+    "ast_hash": "8a9744f24130b97c853c87cb6cbd6b6f",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/atlas/\u0421\u043b\u043e\u0438 \u043f\u0440\u043e\u0435\u043a\u0442\u0430 \u2014 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442, \u043c\u043e\u0441\u0442, \u043c\u0430\u0440\u0448\u0440\u0443\u0442, Revit API.md": {
+    "mtime": 1788512138.926517,
+    "seen": 1792156149.294298,
+    "ast_hash": "6309e16d91301ae18220353f4d8e8cac",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/atlas/\u0421\u0442\u0435\u043a \u0434\u0435\u043b\u0438\u0442\u0441\u044f \u043d\u0430 CPython 3.11+ \u0438 IronPython 2.7.md": {
+    "mtime": 1788512138.9897535,
+    "seen": 1792156149.294299,
+    "ast_hash": "9375ad4bf6af9d0ee3a0e58e20b1dbb8",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/inbox/LLM.txt \u0443\u0441\u0442\u0430\u0440\u0435\u043b \u0438 \u043e\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u0442 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0443 \u043d\u0430 31 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442.md": {
+    "mtime": 1788513343.062683,
+    "seen": 1792156149.2943003,
+    "ast_hash": "7d7c5813757344852c2b79812c79c910",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/inbox/\u041e\u0442\u043a\u0440\u044b\u0442\u044b\u0435 \u0432\u043e\u043f\u0440\u043e\u0441\u044b \u043f\u043e \u043f\u0440\u043e\u0435\u043a\u0442\u0443.md": {
+    "mtime": 1788781622.6568313,
+    "seen": 1792156149.2943017,
+    "ast_hash": "59317a02ba6063bc4d45f44652e899c0",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/business/\u0410\u0443\u0434\u0438\u0442\u043e\u0440\u0438\u044f \u2014 BIM-\u0438\u043d\u0436\u0435\u043d\u0435\u0440\u044b \u043d\u0430 Windows \u0441 Revit \u0438 pyRevit.md": {
+    "mtime": 1788513189.4807048,
+    "seen": 1792156149.2943032,
+    "ast_hash": "5afffc87a6761881d42a507546909434",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/business/\u0412\u0430\u043b\u0438\u0434\u0430\u0446\u0438\u044f \u043f\u0440\u043e\u0434\u0443\u043a\u0442\u0430 \u2014 \u0441\u0431\u043e\u0440\u043a\u0430 Empire State Building \u0432 \u0436\u0438\u0432\u043e\u043c Revit 2027.md": {
+    "mtime": 1788513270.1099448,
+    "seen": 1792156149.2943048,
+    "ast_hash": "ec3be7a55415733b3b886cc3d84aa0e7",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/business/\u041f\u0440\u043e\u0434\u0443\u043a\u0442 \u2014 \u044d\u0442\u043e \u043c\u043e\u0441\u0442 \u043c\u0435\u0436\u0434\u0443 \u0418\u0418-\u0430\u0441\u0441\u0438\u0441\u0442\u0435\u043d\u0442\u043e\u043c \u0438 Autodesk Revit.md": {
+    "mtime": 1788513189.422013,
+    "seen": 1792156149.2943063,
+    "ast_hash": "aedfcc66e33366e9b151a0a9fb74fa85",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/business/\u0424\u043e\u0440\u043a GenproMM \u2014 \u0440\u0430\u0431\u043e\u0447\u0430\u044f \u043b\u0438\u043d\u0438\u044f Genpro \u043f\u043e\u0432\u0435\u0440\u0445 \u0430\u043f\u0441\u0442\u0440\u0438\u043c\u0430 Demolinator.md": {
+    "mtime": 1788515377.9530883,
+    "seen": 1792156149.2943075,
+    "ast_hash": "8563309e8fbe08d8613beb1ea9207eaf",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/business/\u0426\u0435\u043d\u044b \u043d\u0435\u0442 \u2014 \u043f\u0440\u043e\u0435\u043a\u0442 \u043f\u043e\u0434 \u043b\u0438\u0446\u0435\u043d\u0437\u0438\u0435\u0439 MIT.md": {
+    "mtime": 1788513239.6730883,
+    "seen": 1792156149.2943091,
+    "ast_hash": "77d53bd3a79fc6c86dd4c4c85d04c68a",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/Bare DB.ElementId(int) \u0432 Revit 2027 \u043f\u0430\u0434\u0430\u0435\u0442 \u043d\u0430 \u043d\u0435\u043e\u0434\u043d\u043e\u0437\u043d\u0430\u0447\u043d\u043e\u0441\u0442\u0438 \u043f\u0435\u0440\u0435\u0433\u0440\u0443\u0437\u043e\u043a.md": {
+    "mtime": 1788512817.8563833,
+    "seen": 1792156149.2943103,
+    "ast_hash": "d1858ad399c17d182e06fc84ea3763c1",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/MCP Bridge \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043b Windows proxy \u0434\u043b\u044f localhost.md": {
+    "mtime": 1789973723.3874092,
+    "seen": 1792156149.294312,
+    "ast_hash": "d2dc269abf68bb008e7c278f744c5c8c",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/RSN-\u043f\u0443\u0442\u044c \u0441 \u043e\u0431\u0440\u0430\u0442\u043d\u044b\u043c\u0438 \u0441\u043b\u0435\u0448\u0430\u043c\u0438 \u0443\u0445\u043e\u0434\u0438\u043b \u0432 \u0432\u0435\u0442\u043a\u0443 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0445 \u0444\u0430\u0439\u043b\u043e\u0432.md": {
+    "mtime": 1789973723.3874092,
+    "seen": 1792156149.2943132,
+    "ast_hash": "6b393dfb8f654af17c26a8461d7dbe06",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/cmd.exe \u0447\u0438\u0442\u0430\u0435\u0442 config.cmd \u0432 \u043a\u043e\u043d\u0441\u043e\u043b\u044c\u043d\u043e\u0439 \u043a\u043e\u0434\u043e\u0432\u043e\u0439 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0435, \u043d\u0435 \u0432 UTF-8 \u0444\u0430\u0439\u043b\u0430.md": {
+    "mtime": 1792999308.517205,
+    "seen": 1793004495.868769,
+    "ast_hash": "6951ec80848bea310705bfab8fcfdd81",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/configure_hermes.py \u043f\u0438\u0441\u0430\u043b \u0432 \u0444\u0430\u0439\u043b, \u043a\u043e\u0442\u043e\u0440\u043e\u0433\u043e Hermes \u043d\u0430 Windows \u043d\u0435 \u0447\u0438\u0442\u0430\u0435\u0442.md": {
+    "mtime": 1788781562.1085267,
+    "seen": 1792156149.294316,
+    "ast_hash": "9897512482934bf9afc91779403ab0d8",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/create_surface \u043f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e \u043f\u043e\u043f\u0430\u0434\u0430\u043b \u043d\u0430 Foundation Slab \u0432\u043c\u0435\u0441\u0442\u043e \u043f\u0435\u0440\u0435\u043a\u0440\u044b\u0442\u0438\u044f.md": {
+    "mtime": 1788512785.6258163,
+    "seen": 1792156149.2943172,
+    "ast_hash": "a544d991742d21fa6ab8513ebe95e79e",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/create_view section \u2014 direction cross up \u0434\u0430\u0432\u0430\u043b \u043b\u0435\u0432\u043e\u0441\u0442\u043e\u0440\u043e\u043d\u043d\u0438\u0439 \u0431\u0430\u0437\u0438\u0441 \u0438 \u043f\u0443\u0441\u0442\u043e\u0435 \u0438\u0441\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435.md": {
+    "mtime": 1788823574.0375614,
+    "seen": 1792156149.294319,
+    "ast_hash": "552c79799190576cb371879547769c2d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/format_response \u043f\u0440\u044f\u0447\u0435\u0442 \u043f\u043e\u043b\u044f \u043e\u0442\u0432\u0435\u0442\u0430 \u0437\u0430 \u043a\u043b\u044e\u0447\u043e\u043c message.md": {
+    "mtime": 1788723745.066392,
+    "seen": 1792156149.29432,
+    "ast_hash": "9a98ec930e5239cf9578a36cb9e968ee",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/get_revit_model_info \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u043b \u0434\u0430\u043d\u043d\u044b\u0435 \u043f\u043e\u0434 \u043b\u043e\u0436\u043d\u044b\u043c \u0437\u0430\u0433\u043e\u043b\u043e\u0432\u043a\u043e\u043c \u043e\u0448\u0438\u0431\u043a\u0438.md": {
+    "mtime": 1788512745.6085014,
+    "seen": 1792156149.2943218,
+    "ast_hash": "0cfec2bd6eb4d4e42d88c0e7f57f7b68",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/get_revit_process_status \u0440\u0430\u0437\u043b\u0438\u0447\u0430\u0435\u0442 Revit \u0437\u0430\u043a\u0440\u044b\u0442 \u043e\u0442 Revit \u0431\u0435\u0437 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430.md": {
+    "mtime": 1788723730.0813532,
+    "seen": 1792156149.2943232,
+    "ast_hash": "b170a1244d895e1391239de9bc26bb0d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/get_view \u0432\u043e\u0437\u0432\u0440\u0430\u0449\u0430\u043b 404 \u043d\u0430 \u0438\u043c\u0435\u043d\u0430\u0445 \u0432\u0438\u0434\u043e\u0432 \u0441 \u043f\u0440\u043e\u0431\u0435\u043b\u0430\u043c\u0438.md": {
+    "mtime": 1788512745.5529628,
+    "seen": 1792156149.2943244,
+    "ast_hash": "ed4c91664636332ba703eacda8ba32e4",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/link_file \u043f\u0435\u0440\u0435\u0434\u0430\u0432\u0430\u043b None \u0432\u043c\u0435\u0441\u0442\u043e out-\u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u0430 \u0438 \u0442\u0435\u0440\u044f\u043b \u0438\u043c\u043f\u043e\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0439 \u044d\u043b\u0435\u043c\u0435\u043d\u0442.md": {
+    "mtime": 1788512785.5031762,
+    "seen": 1792156149.2943258,
+    "ast_hash": "c61f8e03aa9045036259f6f369b57e2b",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/place_family \u0442\u0440\u0430\u043a\u0442\u043e\u0432\u0430\u043b \u043c\u0438\u043b\u043b\u0438\u043c\u0435\u0442\u0440\u044b \u043a\u0430\u043a \u0444\u0443\u0442\u044b \u0438 \u0443\u043d\u043e\u0441\u0438\u043b \u0441\u0435\u043c\u0435\u0439\u0441\u0442\u0432\u043e \u043d\u0430 2.4 \u043a\u043c.md": {
+    "mtime": 1788512665.0545156,
+    "seen": 1792156149.294327,
+    "ast_hash": "8e5e717e4155890d8a0f2c6a42bcc2db",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/pyRevit Reload \u043f\u0440\u0438 \u0432\u043a\u043b\u044e\u0447\u0451\u043d\u043d\u044b\u0445 Routes \u0432\u0430\u043b\u0438\u0442 Revit \u043d\u0430 \u043f\u0435\u0440\u0432\u043e\u043c \u0436\u0435 \u0437\u0430\u043f\u0440\u043e\u0441\u0435.md": {
+    "mtime": 1788512712.2399085,
+    "seen": 1792156149.2943282,
+    "ast_hash": "e11fad9916f922003a41f077979d294e",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/pyRevit \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u044f\u0435\u0442 unicode \u043a\u0430\u043a \u0430\u043b\u0438\u0430\u0441 str \u0432 IronPython 3, \u043b\u043e\u043c\u0430\u044f NameError-\u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443.md": {
+    "mtime": 1788823666.3466628,
+    "seen": 1792156149.2943296,
+    "ast_hash": "5ba3ce79aa172907ec286538b5ed4538",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/pyRevit \u0445\u0440\u0430\u043d\u0438\u0442 disabled=true \u043f\u043e \u0438\u043c\u0435\u043d\u0438 \u043f\u0430\u043f\u043a\u0438 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043d\u0438\u044f.md": {
+    "mtime": 1788781538.2956338,
+    "seen": 1792156149.2943308,
+    "ast_hash": "e2d1f18940ef2529202bb8a45e650608",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/sanitize_string \u043f\u0440\u0435\u0432\u0440\u0430\u0449\u0430\u0435\u0442 \u043a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0443 \u0432 \u0432\u043e\u043f\u0440\u043e\u0441\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u0437\u043d\u0430\u043a\u0438.md": {
+    "mtime": 1788522011.1147237,
+    "seen": 1792156149.2943325,
+    "ast_hash": "b8d3fe327661f9709ab2a515ce3ea418",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/suppress_warnings \u0433\u043b\u0443\u0448\u0438\u0442 \u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u044b\u0439 \u0441\u0431\u043e\u0439 \u0438 \u043e\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u0442 \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u044e \u0431\u0435\u0437 \u0437\u0430\u0449\u0438\u0442\u044b.md": {
+    "mtime": 1788512869.0908406,
+    "seen": 1792156149.2943337,
+    "ast_hash": "38a833793e6e6def18ed8e88c10fa4a9",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/sys.stdout \u043c\u043e\u0436\u0435\u0442 \u043e\u0441\u0442\u0430\u0442\u044c\u0441\u044f \u0437\u0430\u043a\u0440\u044b\u0442\u044b\u043c StringIO \u0434\u043e \u043a\u043e\u043d\u0446\u0430 \u0441\u0435\u0441\u0441\u0438\u0438 Revit.md": {
+    "mtime": 1788512868.974888,
+    "seen": 1792156149.294335,
+    "ast_hash": "2f9a8670f74c5bc2660614af08f2b87d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/tag_walls \u043c\u043e\u043b\u0447\u0430 \u043f\u0440\u043e\u043f\u0443\u0441\u043a\u0430\u043b \u0441\u0442\u0435\u043d\u044b \u0438 \u0432\u043e\u0437\u0432\u0440\u0430\u0449\u0430\u043b \u043e\u0442\u043c\u0435\u0447\u0435\u043d\u043e 0.md": {
+    "mtime": 1788512817.7885332,
+    "seen": 1792156149.2943363,
+    "ast_hash": "ed6f2f91993b1986222a45d9e77b692d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/unicode \u0432\u043d\u0443\u0442\u0440\u0438 \u0448\u0438\u0440\u043e\u043a\u043e\u0433\u043e except \u043c\u043e\u043b\u0447\u0430 \u043e\u0431\u043d\u0443\u043b\u044f\u043b \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044f \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u043e\u0432.md": {
+    "mtime": 1788781517.6951227,
+    "seen": 1792156149.2943377,
+    "ast_hash": "9c39ffb5061c86d91fcd3552da841c07",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/webbridge MCP \u043f\u0430\u0434\u0430\u0435\u0442 CONNECTION_CLOSED \u0438\u0437-\u0437\u0430 \u0437\u0430\u043d\u044f\u0442\u043e\u0433\u043e \u043f\u043e\u0440\u0442\u0430 10086.md": {
+    "mtime": 1788794874.5296586,
+    "seen": 1792156149.2943387,
+    "ast_hash": "d05f8dfbe627fd39bd0ce01b473990cb",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u0411\u0430\u043b\u043a\u0438 \u0441\u0430\u0434\u0438\u043b\u0438\u0441\u044c \u043d\u0430 Z=0 \u0432\u043c\u0435\u0441\u0442\u043e \u043e\u0442\u043c\u0435\u0442\u043a\u0438 \u0443\u0440\u043e\u0432\u043d\u044f.md": {
+    "mtime": 1788512710.7408874,
+    "seen": 1792156149.29434,
+    "ast_hash": "213823a013686b208d23f2d2e5027f50",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u0413\u0435\u0439\u0442 \u0445\u043e\u043b\u043e\u0434\u043d\u043e\u0433\u043e \u0441\u0442\u0430\u0440\u0442\u0430 \u043c\u0435\u0440\u0438\u043b SMB-\u0437\u0430\u0434\u0435\u0440\u0436\u043a\u0443 \u0448\u0430\u0440\u044b, \u0430 \u043d\u0435 \u0441\u0442\u0430\u0440\u0442 \u0441\u0435\u0440\u0432\u0435\u0440\u0430.md": {
+    "mtime": 1788781605.0007298,
+    "seen": 1792156149.294341,
+    "ast_hash": "515fe1d0dba27c70e34b45cdd088ad55",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u0413\u043e\u043b\u044b\u0439 import \u0441\u043e\u0441\u0435\u0434\u0430 \u0432\u043d\u0443\u0442\u0440\u0438 revit_mcp \u0441\u043b\u043e\u043c\u0430\u043b 22 \u0438\u0437 23 \u0434\u043e\u043c\u0435\u043d\u043e\u0432.md": {
+    "mtime": 1788781493.6591148,
+    "seen": 1792156149.2943425,
+    "ast_hash": "99722446b85681217c27884ce3f60332",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u0414\u0432\u0430 \u043f\u0440\u043e\u0446\u0435\u0441\u0441\u0430 Revit.exe \u043c\u043e\u0433\u0443\u0442 \u0441\u043b\u0443\u0448\u0430\u0442\u044c 48884 \u043e\u0434\u043d\u043e\u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u0431\u0435\u0437 \u043e\u0448\u0438\u0431\u043a\u0438.md": {
+    "mtime": 1791355491.8580706,
+    "seen": 1792156149.294344,
+    "ast_hash": "4573b594661cf8ec6f77b10e7f7fabac",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u0417\u0430\u043c\u044b\u043a\u0430\u044e\u0449\u0430\u044f \u0442\u043e\u0447\u043a\u0430 \u043a\u043e\u043d\u0442\u0443\u0440\u0430 \u0434\u0430\u0432\u0430\u043b\u0430 \u043d\u0443\u043b\u0435\u0432\u043e\u0439 \u0441\u0435\u0433\u043c\u0435\u043d\u0442 \u043a\u0440\u0438\u0432\u043e\u0439.md": {
+    "mtime": 1788512785.5663276,
+    "seen": 1792156149.2943451,
+    "ast_hash": "4fce9f5aca3872b94708cebd2c4800c8",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041c\u043e\u0434\u0430\u043b\u044c\u043d\u044b\u0439 \u0434\u0438\u0430\u043b\u043e\u0433 Revit \u0432\u0435\u0448\u0430\u043b headless-\u0441\u0435\u0440\u0432\u0435\u0440 \u043d\u0430\u0432\u0441\u0435\u0433\u0434\u0430.md": {
+    "mtime": 1788512665.1498685,
+    "seen": 1792156149.2943466,
+    "ast_hash": "901e33523de9bd54040f4eff11dea0cc",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041e\u043a\u043d\u0430 \u0438 \u0434\u0432\u0435\u0440\u0438 \u0431\u0435\u0437 \u0445\u043e\u0441\u0442\u0430 \u043f\u0440\u0438\u043b\u0438\u043f\u0430\u043b\u0438 \u043a \u043d\u0430\u0447\u0430\u043b\u0443 \u043a\u043e\u043e\u0440\u0434\u0438\u043d\u0430\u0442.md": {
+    "mtime": 1788512710.6831834,
+    "seen": 1792156149.2943475,
+    "ast_hash": "61756f24940794d4dbe8b47adaaec0ae",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041e\u043f\u0440\u0435\u0434\u0435\u043b\u0435\u043d\u0438\u0435 \u043e\u0431\u0449\u0438\u0445 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u043e\u0432 \u0447\u0435\u0440\u0435\u0437 ExternalDefinition \u043e\u0448\u0438\u0431\u043e\u0447\u043d\u043e \u043d\u0430 BindingMap.md": {
+    "mtime": 1788522053.1396573,
+    "seen": 1792156149.294349,
+    "ast_hash": "e15d1fc6889fdcf3b820b9ec2ca46cb8",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041e\u0442\u043a\u0440\u044b\u0442\u0438\u0435 \u0446\u0435\u043d\u0442\u0440\u0430\u043b\u044c\u043d\u043e\u0439 \u0431\u0435\u0437 \u043e\u0442\u0441\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u044f \u0448\u043b\u043e \u043c\u0438\u043c\u043e CreateNewLocal.md": {
+    "mtime": 1789637447.8600962,
+    "seen": 1792156149.2943506,
+    "ast_hash": "4ebd8fbaeba49939098c57cb4cd1c9ee",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041e\u0448\u0438\u0431\u043a\u0438 \u0443\u0440\u043e\u0432\u043d\u044f Error \u0432\u0435\u0448\u0430\u043b\u0438 \u0441\u0435\u0440\u0432\u0435\u0440, \u043f\u043e\u043a\u0430 \u043d\u0435 \u0434\u043e\u0431\u0430\u0432\u0438\u043b\u0438 \u043e\u0442\u043a\u0430\u0442 \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0438.md": {
+    "mtime": 1788512710.6237297,
+    "seen": 1792156149.2943516,
+    "ast_hash": "d0dbbfc27da335015908595575263a19",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041f\u0430\u043a\u0435\u0442\u043d\u044b\u0435 \u043e\u043f\u0435\u0440\u0430\u0446\u0438\u0438 \u0432\u043e\u0437\u0432\u0440\u0430\u0449\u0430\u044e\u0442 success, \u0441\u043a\u0440\u044b\u0432\u0430\u044f \u043f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0435 \u044d\u043b\u0435\u043c\u0435\u043d\u0442\u044b.md": {
+    "mtime": 1788512869.0326993,
+    "seen": 1792156149.294353,
+    "ast_hash": "4f7bb7aa6da935a8219de06fcbecbddc",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041f\u0435\u0440\u0435\u0441\u0435\u043a\u0430\u044e\u0449\u0438\u0435\u0441\u044f \u0437\u0430\u043f\u0440\u043e\u0441\u044b pyRevit \u043f\u043e\u043b\u0443\u0447\u0430\u044e\u0442 \u0447\u0443\u0436\u043e\u0439 \u043e\u0442\u0432\u0435\u0442, \u0430 \u0438\u0445 \u043a\u043e\u0434 \u043d\u0435 \u0432\u044b\u043f\u043e\u043b\u043d\u044f\u0435\u0442\u0441\u044f.md": {
+    "mtime": 1791366041.4159243,
+    "seen": 1792156149.2943542,
+    "ast_hash": "db73ddf1093cebd904c48e8dc936c99f",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041f\u0443\u0442\u044c \u0441 \u043a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0435\u0439 \u043d\u0435 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u043b\u0441\u044f \u2014 \u0432\u0438\u043d\u043e\u0432\u0430\u0442\u044b \u0431\u044d\u043a\u0441\u043b\u0435\u0448\u0438, \u0430 \u043d\u0435 \u043a\u043e\u0434\u0438\u0440\u043e\u0432\u043a\u0430.md": {
+    "mtime": 1789570790.721992,
+    "seen": 1792156149.2943554,
+    "ast_hash": "e71aaf7233a0def757e89a8d82a9f558",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u0421\u0431\u043e\u0440\u043a\u0430 pyRevit 6.5.5 \u0441 GitHub \u0440\u043e\u043d\u044f\u0435\u0442 \u0432\u0441\u0435 IronPython-\u043a\u043d\u043e\u043f\u043a\u0438 \u043d\u0430 clr.AddReference.md": {
+    "mtime": 1789135726.397303,
+    "seen": 1792156149.2943568,
+    "ast_hash": "ff409bc67879700c770811f522669d62",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/ElementId \u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044f \u0438 \u0441\u043e\u0437\u0434\u0430\u0451\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0447\u0435\u0440\u0435\u0437 \u0445\u0435\u043b\u043f\u0435\u0440\u044b.md": {
+    "mtime": 1788512476.8582,
+    "seen": 1792156149.294358,
+    "ast_hash": "e0a7f938d56e9cf36b291abb4841fc2f",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/Revit-\u0447\u0430\u0441\u0442\u044c \u043d\u0430\u043f\u0438\u0441\u0430\u043d\u0430 \u043d\u0430 IronPython 2.7 \u0438 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0434\u0435\u043b\u0438\u0442\u044c \u043a\u043e\u0434 \u0441 MCP-\u0447\u0430\u0441\u0442\u044c\u044e.md": {
+    "mtime": 1788781467.7851813,
+    "seen": 1792156149.2943592,
+    "ast_hash": "4a78018d790b4fdc2b787afa3969ef27",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/Save \u0438 SaveAs \u0432\u044b\u043f\u043e\u043b\u043d\u044f\u044e\u0442\u0441\u044f \u0432\u043d\u0435 \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0438.md": {
+    "mtime": 1788512511.5478706,
+    "seen": 1792156149.2943604,
+    "ast_hash": "0909ab6f6336051f588e1e2ce08b5e0f",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/SaveAs \u0434\u0435\u0442\u0430\u0447-\u043c\u043e\u0434\u0435\u043b\u0438 \u0442\u0440\u0435\u0431\u0443\u0435\u0442 WorksharingSaveAsOptions.SaveAsCentral.md": {
+    "mtime": 1788823617.4201183,
+    "seen": 1792156149.294362,
+    "ast_hash": "a6add6d0a516c69ee78c4439465e4352",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/execute_code \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u0430\u0432\u0430\u0440\u0438\u0439\u043d\u044b\u043c \u043b\u044e\u043a\u043e\u043c \u0434\u043b\u044f \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u044e\u0449\u0438\u0445 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u043e\u0432.md": {
+    "mtime": 1788512630.1646657,
+    "seen": 1792156149.2943635,
+    "ast_hash": "5ebac0aac722e22e396e776a08eadec0",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/open_model \u0437\u0430\u043a\u0440\u044b\u0432\u0430\u0435\u0442 \u0432\u043e\u0440\u043a\u0441\u0435\u0434\u044b \u043f\u043e \u043f\u0430\u0442\u0442\u0435\u0440\u043d\u0443 \u0438\u043c\u0435\u043d\u0438, \u043f\u0435\u0440\u0435\u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u044f \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044e \u0438\u0437 \u0441\u043a\u0438\u043b\u043b\u0430 revit-open-links-closed.md": {
+    "mtime": 1788823647.1154702,
+    "seen": 1792156149.2943647,
+    "ast_hash": "0b2ca0085e18d080756ebd907c62e2a4",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/start_revit \u2014 \u0435\u0434\u0438\u043d\u0441\u0442\u0432\u0435\u043d\u043d\u0430\u044f \u043f\u0430\u0440\u0430 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u043e\u0432 \u0431\u0435\u0437 Revit-\u0441\u0442\u043e\u0440\u043e\u043d\u044b.md": {
+    "mtime": 1788723762.3720884,
+    "seen": 1792156149.2943661,
+    "ast_hash": "a9527fa8e26b5024213545ba387e0c0d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0412\u0441\u0435 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u044b \u043f\u0440\u0438\u043d\u0438\u043c\u0430\u044e\u0442 \u043c\u0438\u043b\u043b\u0438\u043c\u0435\u0442\u0440\u044b, Revit \u0432\u043d\u0443\u0442\u0440\u0438 \u0441\u0447\u0438\u0442\u0430\u0435\u0442 \u0432 \u0444\u0443\u0442\u0430\u0445.md": {
+    "mtime": 1788512476.9144673,
+    "seen": 1792156149.2943678,
+    "ast_hash": "5bf52478f56a21861414df23dc768efd",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0414\u0435\u043f\u043b\u043e\u0439 \u0432 \u043a\u043e\u043d\u0442\u0443\u0440 \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u0440\u0430\u0437\u0434\u0430\u0451\u0442 \u0444\u0430\u0439\u043b\u044b, \u043e\u0431\u0430 \u043f\u0440\u043e\u0446\u0435\u0441\u0441\u0430 \u0436\u0438\u0432\u0443\u0442 \u043d\u0430 \u0441\u0442\u0430\u043d\u0446\u0438\u0438.md": {
+    "mtime": 1788723712.2878125,
+    "seen": 1792156149.2943692,
+    "ast_hash": "b6ad702748fef90cdb659bf693d73d62",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0418\u0437\u043e\u043b\u044f\u0446\u0438\u044f \u043e\u0442\u043a\u0430\u0437\u0430 \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 \u043f\u043e \u0434\u043e\u043c\u0435\u043d\u0443.md": {
+    "mtime": 1788761941.1770895,
+    "seen": 1792156149.294371,
+    "ast_hash": "595fd75b47765b9142e40863888605b6",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u041a\u0430\u0436\u0434\u0430\u044f \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u044f \u0433\u043b\u0443\u0448\u0438\u0442 \u043c\u043e\u0434\u0430\u043b\u044c\u043d\u044b\u0435 \u0434\u0438\u0430\u043b\u043e\u0433\u0438 Revit.md": {
+    "mtime": 1788512440.0870674,
+    "seen": 1792156149.294372,
+    "ast_hash": "3a345fb8b5e97b24a4192d76586b9c06",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u041c\u043d\u043e\u0433\u043e\u044d\u043a\u0437\u0435\u043c\u043f\u043b\u044f\u0440\u043d\u0430\u044f \u043f\u0440\u0438\u0451\u043c\u043a\u0430 \u2014 \u043f\u043e\u043e\u0447\u0435\u0440\u0451\u0434\u043d\u044b\u0439 \u0437\u0430\u043f\u0443\u0441\u043a, \u0442\u043e\u043b\u044c\u043a\u043e stdio, \u0441\u0442\u043e\u043f \u043f\u0440\u0438 \u043f\u0435\u0440\u0435\u0445\u0432\u0430\u0442\u0435 \u0447\u0442\u0435\u043d\u0438\u044f.md": {
+    "mtime": 1791355490.2992036,
+    "seen": 1792156149.2943733,
+    "ast_hash": "66232d930d632ef623f66fe55578b9e0",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u041e\u0431\u0449\u0438\u0435 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u044f\u044e\u0442\u0441\u044f \u043f\u043e \u043f\u0440\u0435\u0444\u0438\u043a\u0441\u0443 ForgeTypeId, \u0430 \u043d\u0435 \u043f\u043e \u0442\u0438\u043f\u0443 Definition.md": {
+    "mtime": 1788522072.767486,
+    "seen": 1792156149.294375,
+    "ast_hash": "97b6411b08c93bc0c519aa449cf06580",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u041e\u0434\u0438\u043d keep-alive HTTP-\u043a\u043b\u0438\u0435\u043d\u0442 \u043e\u0431\u0441\u043b\u0443\u0436\u0438\u0432\u0430\u0435\u0442 \u0432\u0441\u0435 \u0432\u044b\u0437\u043e\u0432\u044b.md": {
+    "mtime": 1788512548.9529934,
+    "seen": 1792156149.2943757,
+    "ast_hash": "d85c97ed49d25c783be6c883e371a152",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u041e\u0448\u0438\u0431\u043a\u0438 \u043d\u0435 \u0432\u044b\u0431\u0440\u0430\u0441\u044b\u0432\u0430\u044e\u0442\u0441\u044f, \u0430 \u0432\u043e\u0437\u0432\u0440\u0430\u0449\u0430\u044e\u0442\u0441\u044f \u0441\u0442\u0440\u043e\u043a\u0430\u043c\u0438.md": {
+    "mtime": 1788512404.0274925,
+    "seen": 1792156149.2943773,
+    "ast_hash": "b523592c4e4dd1efb406070de8ea4dc0",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u041f\u0435\u0440\u0435\u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 1 \u2014 \u043d\u043e\u0432\u044b\u0435 gap-\u043f\u043b\u0430\u043d\u044b \u0432\u043c\u0435\u0441\u0442\u043e \u043f\u0435\u0440\u0435\u043f\u0438\u0441\u044b\u0432\u0430\u043d\u0438\u044f 01-05, d27-c \u0432 \u0431\u044d\u043a\u043b\u043e\u0433.md": {
+    "mtime": 1791965220.8150241,
+    "seen": 1792156149.2943785,
+    "ast_hash": "6b9f2c2ee38aa78288df6a7e643921f6",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u041f\u043e\u0434 \u0437\u0430\u043c\u043e\u043a \u0432\u0441\u0435 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u044b \u043a\u0440\u043e\u043c\u0435 status, \u043e\u0434\u043d\u0430 \u043e\u0431\u0449\u0430\u044f \u0437\u0430\u043f\u0438\u0441\u044c \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u0431\u0435\u0437 \u043a\u043e\u043f\u0438\u0439.md": {
+    "mtime": 1791366042.8502767,
+    "seen": 1792156149.2943797,
+    "ast_hash": "db066de8a332bd078a413154dfad15f1",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u041f\u043e\u0440\u0442 48884 \u0437\u0430\u0445\u0430\u0440\u0434\u043a\u043e\u0436\u0435\u043d, \u043d\u0430\u0441\u0442\u0440\u0430\u0438\u0432\u0430\u0435\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0445\u043e\u0441\u0442.md": {
+    "mtime": 1788512549.009436,
+    "seen": 1792156149.294381,
+    "ast_hash": "74d09236acfd3c7860dc3ace8f50e31e",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u041f\u0440\u043e\u0432\u0430\u043b \u043e\u0442\u0432\u0435\u0442\u0430 \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u044f\u0435\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u043a\u043b\u044e\u0447\u043e\u043c error \u0438\u043b\u0438 \u044f\u0432\u043d\u044b\u043c \u0441\u0442\u0430\u0442\u0443\u0441\u043e\u043c.md": {
+    "mtime": 1788512440.0273368,
+    "seen": 1792156149.294382,
+    "ast_hash": "c0e67751f7fe8c209aab7a4dda02ff41",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0420\u0430\u0437\u0440\u0430\u0431\u043e\u0442\u0447\u0438\u043a\u0438 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u043e\u0432 \u0440\u0430\u0431\u043e\u0442\u0430\u044e\u0442 \u0431\u0435\u0437 \u0434\u043e\u0441\u0442\u0443\u043f\u0430 \u043a \u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u044e.md": {
+    "mtime": 1788761963.255822,
+    "seen": 1792156149.2943833,
+    "ast_hash": "3332c749182e2387b91dd615cd235dee",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u044f \u0432\u0435\u0434\u0451\u0442\u0441\u044f \u0434\u0432\u0443\u043c\u044f \u0440\u0443\u043a\u043e\u043f\u0438\u0441\u043d\u044b\u043c\u0438 \u0441\u043f\u0438\u0441\u043a\u0430\u043c\u0438.md": {
+    "mtime": 1788761980.478813,
+    "seen": 1792156149.2943847,
+    "ast_hash": "fd73102d027f89e1310a5a0dd4c937e1",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u044f \u2014 \u0430\u0432\u0442\u043e\u043e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d\u0438\u0435 \u0432\u043c\u0435\u0441\u0442\u043e \u0440\u0443\u043a\u043e\u043f\u0438\u0441\u043d\u044b\u0445 \u0441\u043f\u0438\u0441\u043a\u043e\u0432.md": {
+    "mtime": 1788761926.6175952,
+    "seen": 1792156149.2943861,
+    "ast_hash": "f3b6e97362b44f85e25ab211cb279b4c",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0422\u0435\u0441\u0442\u044b \u2014 \u044d\u0442\u043e \u0441\u0430\u043c\u043e\u0441\u0442\u043e\u044f\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u0441\u043a\u0440\u0438\u043f\u0442\u044b, \u0430 \u043d\u0435 pytest-\u0441\u044c\u044e\u0442.md": {
+    "mtime": 1788512630.1076243,
+    "seen": 1792156149.2943878,
+    "ast_hash": "665a1f78f66c998d9f6de841f69be60b",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0422\u0440\u0430\u043d\u0441\u043f\u043e\u0440\u0442 \u0432\u043d\u0435\u0434\u0440\u044f\u0435\u0442\u0441\u044f \u0432 \u043c\u043e\u0434\u0443\u043b\u0438 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u043e\u0432, \u0430 \u043d\u0435 \u0438\u043c\u043f\u043e\u0440\u0442\u0438\u0440\u0443\u0435\u0442\u0441\u044f.md": {
+    "mtime": 1788512511.6056616,
+    "seen": 1792156149.2943888,
+    "ast_hash": "c9a24bb0be675d0fadb94165c78425df",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 2 \u0430\u0434\u0440\u0435\u0441\u0443\u0435\u0442 \u043f\u0440\u043e\u0446\u0435\u0441\u0441 \u043d\u0430 \u0432\u044b\u0437\u043e\u0432 \u0438 \u0440\u0430\u0437\u0434\u0435\u043b\u044f\u0435\u0442 \u0447\u0442\u0435\u043d\u0438\u0435 \u0441 \u043c\u0443\u0442\u0430\u0446\u0438\u0435\u0439 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430.md": {
+    "mtime": 1792061807.6240077,
+    "seen": 1792156149.29439,
+    "ast_hash": "2af0974803568a0518a6046e8b922cc5",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0425\u043e\u043b\u043e\u0434\u043d\u044b\u0439 \u0441\u0442\u0430\u0440\u0442 0.9 \u0441 \u2014 \u044d\u0442\u043e \u043f\u043e\u043b \u0444\u0440\u0435\u0439\u043c\u0432\u043e\u0440\u043a\u0430, \u043e\u043f\u0442\u0438\u043c\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043d\u0435\u0447\u0435\u0433\u043e.md": {
+    "mtime": 1788512586.4745195,
+    "seen": 1792156149.2943914,
+    "ast_hash": "fb4a40daab53867412d0271e875a70d8",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0426\u0435\u043b\u0435\u0432\u043e\u0439 \u0440\u0430\u043d\u0442\u0430\u0439\u043c Revit-\u043f\u043e\u043b\u043e\u0432\u0438\u043d\u044b \u2014 IronPython 3, \u043d\u0435 2.7.md": {
+    "mtime": 1788781457.5111444,
+    "seen": 1792156149.2943926,
+    "ast_hash": "3036b024efe2154caf580eb9afe66733",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/integrations/MCP-\u043a\u043b\u0438\u0435\u043d\u0442\u044b \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0430\u044e\u0442\u0441\u044f \u0447\u0435\u0442\u044b\u0440\u044c\u043c\u044f \u0442\u0440\u0430\u043d\u0441\u043f\u043e\u0440\u0442\u0430\u043c\u0438.md": {
+    "mtime": 1788512331.431435,
+    "seen": 1792156149.2943938,
+    "ast_hash": "740897e2a33d2275259eddb0184aab3a",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/integrations/Revit API \u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d \u0442\u043e\u043b\u044c\u043a\u043e \u0432\u043d\u0443\u0442\u0440\u0438 \u043f\u0440\u043e\u0446\u0435\u0441\u0441\u0430 Revit.md": {
+    "mtime": 1788512293.9057014,
+    "seen": 1792156149.2943952,
+    "ast_hash": "567c81acb187d257a484aa80a7c8c70b",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/integrations/execute_code \u0434\u0430\u0451\u0442 \u043d\u0435\u0430\u0443\u0442\u0435\u043d\u0442\u0438\u0444\u0438\u0446\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0435 \u0438\u0441\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435 \u043a\u043e\u0434\u0430 \u0432\u043d\u0443\u0442\u0440\u0438 Revit.md": {
+    "mtime": 1788512356.9574666,
+    "seen": 1792156149.2943966,
+    "ast_hash": "0a5dbec677f3420a4eb519b4d5f11b41",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/integrations/pyRevit Routes \u2014 \u0435\u0434\u0438\u043d\u0441\u0442\u0432\u0435\u043d\u043d\u0430\u044f \u0432\u043d\u0435\u0448\u043d\u044f\u044f \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u0446\u0438\u044f \u043f\u0440\u043e\u0435\u043a\u0442\u0430.md": {
+    "mtime": 1788512293.847151,
+    "seen": 1792156149.2943983,
+    "ast_hash": "69e547f1a39abebc184495fa2b7f78d5",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/integrations/\u0424\u0430\u0439\u043b\u043e\u0432\u0430\u044f \u0441\u0438\u0441\u0442\u0435\u043c\u0430 \u2014 \u0435\u0434\u0438\u043d\u0441\u0442\u0432\u0435\u043d\u043d\u044b\u0439 \u0432\u044b\u0445\u043e\u0434 \u043d\u0430\u0440\u0443\u0436\u0443 \u0447\u0435\u0440\u0435\u0437 IFC \u0438 \u0438\u043c\u043f\u043e\u0440\u0442.md": {
+    "mtime": 1788512331.4924214,
+    "seen": 1792156149.2943995,
+    "ast_hash": "f16ae87fb3f84a2564e116f03bb02914",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/patterns/\u0414\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0432\u043e\u0437\u043c\u043e\u0436\u043d\u043e\u0441\u0442\u0438 \u0442\u0440\u0435\u0431\u0443\u0435\u0442 \u043f\u0440\u0430\u0432\u043e\u043a \u0432 \u0447\u0435\u0442\u044b\u0440\u0451\u0445 \u043c\u0435\u0441\u0442\u0430\u0445.md": {
+    "mtime": 1788762002.6557784,
+    "seen": 1792156149.2944007,
+    "ast_hash": "b42c97bb9f30788b40eb0d495cff5e32",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/patterns/\u0414\u043e\u043a\u0441\u0442\u0440\u0438\u043d\u0433 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u0430 \u2014 \u044d\u0442\u043e \u043a\u043e\u043d\u0442\u0440\u0430\u043a\u0442 \u0434\u043b\u044f \u043c\u043e\u0434\u0435\u043b\u0438, \u0430 \u043d\u0435 \u0434\u043b\u044f \u0440\u0430\u0437\u0440\u0430\u0431\u043e\u0442\u0447\u0438\u043a\u0430.md": {
+    "mtime": 1788513064.859239,
+    "seen": 1792156149.2944024,
+    "ast_hash": "95c209fe42f4a3a8aaa8e375a4a5c3f2",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/patterns/\u041a\u043e\u0434\u044b \u0441\u0442\u0430\u0442\u0443\u0441\u043e\u0432 400, 404, 500, 503 \u043d\u0435\u0441\u0443\u0442 \u0444\u0438\u043a\u0441\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0439 \u0441\u043c\u044b\u0441\u043b.md": {
+    "mtime": 1788513016.5152137,
+    "seen": 1792156149.2944036,
+    "ast_hash": "7337088931809c39b47c1e72c2c04b2c",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/patterns/\u041c\u0435\u0434\u043b\u0435\u043d\u043d\u044b\u0439 \u0444\u0438\u043b\u044c\u0442\u0440 Revit \u0432\u0441\u0435\u0433\u0434\u0430 \u0438\u0434\u0451\u0442 \u0432 \u043f\u0430\u0440\u0435 \u0441 \u0431\u044b\u0441\u0442\u0440\u044b\u043c.md": {
+    "mtime": 1788513112.0236216,
+    "seen": 1792156149.2944047,
+    "ast_hash": "d26d71115d426a68dbca895b213513db",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/patterns/\u041f\u0430\u0442\u0442\u0435\u0440\u043d \u043a\u043e\u043d\u0432\u0435\u0440\u0442\u0430 \u043e\u0442\u0432\u0435\u0442\u0430 make_response.md": {
+    "mtime": 1788513016.4573424,
+    "seen": 1792156149.2944062,
+    "ast_hash": "796666f26c33e9f0d054e5adbf698eb7",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/patterns/\u041f\u0430\u0442\u0442\u0435\u0440\u043d \u043e\u0431\u0440\u0430\u0431\u043e\u0442\u0447\u0438\u043a\u0430 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u0430 \u2014 \u0432\u0430\u043b\u0438\u0434\u0430\u0446\u0438\u044f, \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u044f, \u0441\u0435\u0440\u0438\u0430\u043b\u0438\u0437\u0430\u0446\u0438\u044f.md": {
+    "mtime": 1788512977.392899,
+    "seen": 1792156149.2944074,
+    "ast_hash": "b25b77d4008c6f14c28dc0dd231d30d4",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/patterns/\u041f\u0430\u0442\u0442\u0435\u0440\u043d \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440\u0430 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u043e\u0432 \u0441 \u0438\u043d\u044a\u0435\u043a\u0446\u0438\u0435\u0439 \u0442\u0440\u0430\u043d\u0441\u043f\u043e\u0440\u0442\u0430.md": {
+    "mtime": 1788512977.334699,
+    "seen": 1792156149.2944088,
+    "ast_hash": "90a2e20a4ba80921d3d6deb8405139de",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/patterns/\u041f\u0430\u0442\u0442\u0435\u0440\u043d \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440\u0430 \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u043e\u0432.md": {
+    "mtime": 1788512938.5876882,
+    "seen": 1792156149.29441,
+    "ast_hash": "f1f672daba47d5d47fa2442cf0e3eeed",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/patterns/\u0421\u0442\u0440\u043e\u043a\u0438 \u0438\u0437 Revit \u043f\u0440\u043e\u0433\u043e\u043d\u044f\u044e\u0442\u0441\u044f \u0447\u0435\u0440\u0435\u0437 sanitize_string.md": {
+    "mtime": 1788522032.6571715,
+    "seen": 1792156149.2944114,
+    "ast_hash": "cbee30aa3974da48bc0ac2ef2828633b",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/patterns/\u0422\u0435\u0441\u0442 \u2014 \u044d\u0442\u043e stdio-\u0441\u043a\u0440\u0438\u043f\u0442 \u0441 \u0441\u0435\u043d\u0442\u0438\u043d\u0435\u043b\u043e\u043c \u0432 stdout.md": {
+    "mtime": 1788513138.4099462,
+    "seen": 1792156149.2944129,
+    "ast_hash": "03906076b3cbb1ea5b1a23b02fb453ba",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/patterns/\u0428\u0438\u0440\u043e\u043a\u0438\u0439 except Exception \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442\u0441\u044f \u043a\u0430\u043a \u043f\u043e\u0442\u043e\u043a \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u044f.md": {
+    "mtime": 1788513112.0792985,
+    "seen": 1792156149.2944145,
+    "ast_hash": "5e1666405701c40be454d8f16f1f4bef",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-04 \u2014 \u043a\u0430\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u043a\u043e\u0434\u043e\u0432\u043e\u0439 \u0431\u0430\u0437\u044b \u0438 \u0441\u0431\u043e\u0440\u043a\u0430 vault.md": {
+    "mtime": 1788513316.5778053,
+    "seen": 1792156149.294416,
+    "ast_hash": "cc184f6db8eddc31f57077f0f463417e",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-04 \u2014 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u043e\u043a\u0440\u0443\u0436\u0435\u043d\u0438\u044f, \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 Routes \u043f\u043e\u0441\u043b\u0435 \u0441\u0431\u043e\u044f, \u043d\u0430\u0445\u043e\u0434\u043a\u0430 \u0431\u0430\u0433\u0430 \u0441 \u043a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0435\u0439.md": {
+    "mtime": 1788512779.1631713,
+    "seen": 1792156149.2944171,
+    "ast_hash": "e4a4a86f04d27c666bf23be7abe6198d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-04 \u2014 \u0441\u0440\u0430\u0432\u043d\u0435\u043d\u0438\u0435 \u0441 \u0430\u043f\u0441\u0442\u0440\u0438\u043c\u043e\u043c revit-mcp-python \u0438 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 \u0440\u043e\u0434\u043e\u0441\u043b\u043e\u0432\u043d\u043e\u0439 \u0444\u043e\u0440\u043a\u0430.md": {
+    "mtime": 1788515362.4038467,
+    "seen": 1792156149.2944186,
+    "ast_hash": "f80403033040aa3f6709bc378782905d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-04 \u2014 \u0444\u0438\u043a\u0441 \u043a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u044b \u0438 \u043f\u0440\u0430\u0432\u0438\u043b\u044c\u043d\u044b\u0439 \u0434\u0435\u0442\u0435\u043a\u0442 \u043e\u0431\u0449\u0438\u0445 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u043e\u0432, \u043d\u043e\u0432\u044b\u0439 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442 list_project_parameters.md": {
+    "mtime": 1788521982.5849154,
+    "seen": 1792156149.2944205,
+    "ast_hash": "0d714e82d3f84984ce3893d17517582d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-06 \u2014 \u043f\u043b\u0430\u043d \u0438 \u0440\u0435\u0430\u043b\u0438\u0437\u0430\u0446\u0438\u044f \u0434\u0435\u043f\u043b\u043e\u044f \u0432 \u043a\u043e\u043d\u0442\u0443\u0440 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438, \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442 \u0437\u0430\u043f\u0443\u0441\u043a\u0430 Revit.md": {
+    "mtime": 1788723792.8819292,
+    "seen": 1792156149.2944217,
+    "ast_hash": "15d541b8c07bd7a99f2418fc1374043a",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-07 \u2014 \u0430\u0432\u0442\u043e\u043e\u0431\u043d\u0430\u0440\u0443\u0436\u0435\u043d\u0438\u0435 \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438, \u0442\u0435\u0441\u0442\u043e\u0432\u044b\u0439 \u0443\u0440\u043e\u0432\u0435\u043d\u044c, \u043f\u0440\u0438\u0451\u043c\u043a\u0430 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u043e\u0432 \u0431\u0435\u0437 \u0434\u043e\u0441\u0442\u0443\u043f\u0430 \u043a \u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u044e.md": {
+    "mtime": 1788761912.3244693,
+    "seen": 1792156149.2944233,
+    "ast_hash": "6977e11bcf8078d48d6433301903a439",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-07 \u2014 \u043f\u0438\u043b\u043e\u0442 \u0440\u0430\u0441\u043a\u0430\u0442\u043a\u0438 \u043d\u0430 \u0443\u0434\u0430\u043b\u0451\u043d\u043d\u043e\u0439 \u0441\u0442\u0430\u043d\u0446\u0438\u0438, \u043c\u0438\u0433\u0440\u0430\u0446\u0438\u044f \u043d\u0430 IronPython 3, \u0448\u0435\u0441\u0442\u044c \u043d\u0430\u0439\u0434\u0435\u043d\u043d\u044b\u0445 \u0431\u0430\u0433\u043e\u0432.md": {
+    "mtime": 1788781675.2111013,
+    "seen": 1792156149.2944245,
+    "ast_hash": "c7ef68471d0f71606f479d0ecabc003d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-07 \u2014 \u043f\u0440\u0430\u0432\u043a\u0430 \u0437\u0430\u0433\u043e\u043b\u043e\u0432\u043a\u0430 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u044b Confluence \u0447\u0435\u0440\u0435\u0437 Kiwi Web Bridge, \u0434\u0438\u0430\u0433\u043d\u043e\u0441\u0442\u0438\u043a\u0430 \u043a\u043e\u043d\u0444\u043b\u0438\u043a\u0442\u0430 \u043f\u043e\u0440\u0442\u0430 webbridge.md": {
+    "mtime": 1788794891.1839533,
+    "seen": 1792156149.2944262,
+    "ast_hash": "a263f6b2abf9ad3989409bacc3f9e53c",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-08 \u2014 \u0441\u0435\u043c\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c\u0441\u043a\u0438\u0445 \u0441\u0446\u0435\u043d\u0430\u0440\u0438\u0435\u0432 \u043d\u0430 \u0436\u0438\u0432\u043e\u0439 \u043c\u043e\u0434\u0435\u043b\u0438, \u0434\u0435\u0442\u0430\u0447-open, edit_family, \u0444\u0438\u043a\u0441 section-view \u0438 unicode-\u043f\u0440\u043e\u0431\u043d\u0438\u043a\u0430.md": {
+    "mtime": 1788823708.6759605,
+    "seen": 1792156149.2944279,
+    "ast_hash": "fc76c4e1e1f4f99a67463ce975b8a325",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-10 \u2014 \u043c\u0438\u0433\u0440\u0430\u0446\u0438\u044f \u0440\u0430\u0437\u0434\u0430\u0447\u0438 MCP \u043d\u0430 \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u0443\u044e \u0448\u0430\u0440\u0443, \u0434\u0432\u0430 \u0431\u0430\u0433\u0430 \u0432 HEAD \u0438\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u044b.md": {
+    "mtime": 1789023110.048647,
+    "seen": 1792156149.2944293,
+    "ast_hash": "84b98186d7b781ed23a4029a5888fccd",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-11 \u2014 \u0438\u043d\u0441\u0442\u0440\u0443\u043a\u0446\u0438\u044f \u043f\u043e \u0434\u0432\u0443\u043c \u0447\u0430\u0441\u0442\u044b\u043c \u043e\u0442\u043a\u0430\u0437\u0430\u043c, \u043f\u0440\u0430\u0432\u043a\u0430 Wiki, \u043f\u0435\u0440\u0435\u0441\u043c\u043e\u0442\u0440 \u0441\u0442\u0430\u0442\u0443\u0441\u0430 pyRevit 6.5.5.md": {
+    "mtime": 1789135766.6930609,
+    "seen": 1792156149.2944303,
+    "ast_hash": "16076cf962b588e3cdc696b00be935fb",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-16 \u2014 \u043f\u0443\u0442\u044c \u0441 \u043a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0435\u0439 \u043d\u0435 \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u043b\u0441\u044f \u0438\u0437-\u0437\u0430 \u0431\u044d\u043a\u0441\u043b\u0435\u0448\u0435\u0439, \u0434\u0435\u0442\u0435\u043a\u0442\u043e\u0440 \u0431\u0438\u0442\u044b\u0445 \u043f\u0443\u0442\u0435\u0439.md": {
+    "mtime": 1789572957.892043,
+    "seen": 1792156149.2944317,
+    "ast_hash": "5a1d050fdc61c3bb8bfc7a8d0f5e9fa7",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-17 \u2014 MCP Bridge \u043f\u0430\u0434\u0430\u043b \u0438\u0437-\u0437\u0430 \u043f\u0440\u043e\u043a\u0441\u0438 Windows, \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d trust_env_false.md": {
+    "mtime": 1789973723.38841,
+    "seen": 1792156149.2944334,
+    "ast_hash": "17d539b2f1afa94082991edde9d8c615",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-17 \u2014 \u0436\u0443\u0440\u043d\u0430\u043b Revit Server \u0437\u0430\u043a\u0440\u0435\u043f\u043b\u0451\u043d \u043d\u0430 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u043e\u043c UNC-\u043f\u0443\u0442\u0438.md": {
+    "mtime": 1789973723.3893745,
+    "seen": 1792156149.2944343,
+    "ast_hash": "79120d087ac709355f1cd85d46825ce2",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-17 \u2014 \u043e\u0442\u043a\u0430\u0442 \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0438 \u0431\u043e\u043b\u044c\u0448\u0435 \u043d\u0435 \u0432\u044b\u0434\u0430\u0451\u0442\u0441\u044f \u0437\u0430 \u0443\u0441\u043f\u0435\u0445.md": {
+    "mtime": 1789634411.3302903,
+    "seen": 1792156149.2944355,
+    "ast_hash": "c9e28e3f36d6bfca765590eb6073d8bb",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-09-17 \u2014 \u043e\u0442\u043a\u0440\u044b\u0442\u0438\u0435 \u0431\u0435\u0437 \u043e\u0442\u0441\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u044f \u0441\u043e\u0437\u0434\u0430\u0451\u0442 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u0443\u044e \u043a\u043e\u043f\u0438\u044e, RSN-\u043f\u0443\u0442\u044c \u0431\u043e\u043b\u044c\u0448\u0435 \u043d\u0435 \u0437\u0430\u0432\u0438\u0441\u0438\u0442 \u043e\u0442 \u0436\u0443\u0440\u043d\u0430\u043b\u0430.md": {
+    "mtime": 1789637447.8590913,
+    "seen": 1792156149.294437,
+    "ast_hash": "d424bc9f4bfe6e0a74aee5e4a38d6060",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-06-phase1-discussion-roadmap-reorder.md": {
+    "mtime": 1791321715.898559,
+    "seen": 1792156149.2944381,
+    "ast_hash": "18840915c1845ea235076c51f9d0a64d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-07 \u2014 \u0438\u0441\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 1, \u0441\u0442\u0435\u043d\u0434 \u0434\u0432\u0443\u0445 Revit \u043d\u0430\u0448\u0451\u043b \u043f\u043e\u0434\u043c\u0435\u043d\u0443 \u043e\u0442\u0432\u0435\u0442\u043e\u0432 pyRevit, \u0444\u0430\u0437\u0430 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430 \u043d\u0430 \u043f\u0435\u0440\u0435\u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435.md": {
+    "mtime": 1791366040.007818,
+    "seen": 1792156149.2944398,
+    "ast_hash": "77d07f6dd2c9762b6dd4f4747865a818",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-07 \u2014 \u043f\u0435\u0440\u0435\u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 1 \u043f\u043e\u0441\u043b\u0435 d27-b, \u0442\u0440\u0438 gap-\u043f\u043b\u0430\u043d\u0430 \u0432\u043c\u0435\u0441\u0442\u043e 01-05.md": {
+    "mtime": 1791965219.3943636,
+    "seen": 1792156149.2944407,
+    "ast_hash": "216e4e7bdf36942621daa4d44df5e3a0",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-07 \u2014 \u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 1, \u0441\u0435\u0440\u0438\u0430\u043b\u0438\u0437\u0430\u0446\u0438\u044f \u0438 REVIT_PORT \u0440\u0430\u0437\u0431\u0438\u0442\u044b \u043d\u0430 \u043f\u044f\u0442\u044c \u043f\u043b\u0430\u043d\u043e\u0432.md": {
+    "mtime": 1791355488.6886973,
+    "seen": 1792156149.2944422,
+    "ast_hash": "02de33f9054975f458ccdb970512a2ca",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-14 \u2014 \u043e\u0431\u0441\u0443\u0436\u0434\u0435\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 2 \u043f\u043e\u0441\u043b\u0435 \u0437\u0430\u043a\u0440\u044b\u0442\u0438\u044f \u0444\u0430\u0437\u044b 1.md": {
+    "mtime": 1792008530.8062162,
+    "seen": 1792156149.2944436,
+    "ast_hash": "3f5c8193a3919133cce1c6a0c829f7fa",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-15 \u2014 \u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 2, preflight \u0438 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 20 \u043f\u043b\u0430\u043d\u043e\u0432.md": {
+    "mtime": 1792062044.0130324,
+    "seen": 1792156149.2944448,
+    "ast_hash": "b2edbb40121652b0a304195716eee5b0",
+    "semantic_hash": ""
+  },
+  "deploy/check_routes_config.py": {
+    "mtime": 1792158841.0228548,
+    "seen": 1792159649.0830133,
+    "ast_hash": "ae764f492333ec8fca8533cd46e05cdc",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_parallel_installation.py": {
+    "mtime": 1792651846.5549707,
+    "seen": 1792652013.331775,
+    "ast_hash": "dd49e0741ab05d76f32683cd8f8f8253",
+    "semantic_hash": ""
+  },
+  "revit_mcp/identity.py": {
+    "mtime": 1793036671.4077394,
+    "seen": 1793036792.0446534,
+    "ast_hash": "74bdd542e1df1a4ecb89410ece653f52",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_process_identity.py": {
+    "mtime": 1792185178.9319339,
+    "seen": 1792185289.0622702,
+    "ast_hash": "b22dd526b9510f21903dd5e1e523ee4b",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_target_resolution.py": {
+    "mtime": 1792699511.2583866,
+    "seen": 1792759075.6146207,
+    "ast_hash": "b2c6d0e66114d5a7a6945dd43d5d9c97",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-20-SUMMARY.md": {
+    "mtime": 1792184648.6051257,
+    "seen": 1792185134.3811607,
+    "ast_hash": "aeaed85c63104d6b89da0eaad3a38ca0",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-01-SUMMARY.md": {
+    "mtime": 1792188752.3725758,
+    "seen": 1792652013.3319528,
+    "ast_hash": "8782cdf0501d9676d530932f1e672afb",
+    "semantic_hash": ""
+  },
+  "tests/test_phase2_live_identity.py": {
+    "mtime": 1792737783.1371357,
+    "seen": 1792759075.6145957,
+    "ast_hash": "df82f69479d306578a26a7234602a2ef",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_document_contracts.py": {
+    "mtime": 1793037020.5407827,
+    "seen": 1793037238.7932599,
+    "ast_hash": "d8182565218dc48eec8c930aad3c52fe",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase2_live_identity.py": {
+    "mtime": 1792737775.1943498,
+    "seen": 1792759075.61461,
+    "ast_hash": "e481a0259b2a5826d9159f65347c286a",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_target_locks.py": {
+    "mtime": 1792699408.172871,
+    "seen": 1792759075.61462,
+    "ast_hash": "8236280fb3baf0613398db4bf432dfb1",
+    "semantic_hash": ""
+  },
+  "tools/target_tools.py": {
+    "mtime": 1792651384.1559057,
+    "seen": 1792652013.331849,
+    "ast_hash": "f77cbd3d98fa6e7155bd617002d03955",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-02-SUMMARY.md": {
+    "mtime": 1792650762.3714905,
+    "seen": 1792652013.3319566,
+    "ast_hash": "cdd5d98c7b05824fb505587e62d8f499",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-03-SUMMARY.md": {
+    "mtime": 1792651997.0801356,
+    "seen": 1792652013.3319602,
+    "ast_hash": "8bcd6a80621d7e9fa410a210f2d33413",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-CONTEXT.md": {
+    "mtime": 1792946480.050477,
+    "seen": 1792964443.807489,
+    "ast_hash": "fc62a81f158781c0af6664a06bdcde63",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-RESEARCH-NOTES.md": {
+    "mtime": 1792189452.9939263,
+    "seen": 1792652013.3320227,
+    "ast_hash": "4329d9882a386aba1cc3025de198a6c8",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/Checkpoint 02-20 \u043f\u0440\u0438\u043d\u044f\u0442 \u0441 \u0438\u0437\u043c\u0435\u0440\u0435\u043d\u043d\u044b\u043c\u0438 \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u0438\u044f\u043c\u0438, production status \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u0435\u0442\u0441\u044f \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u043e.md": {
+    "mtime": 1792188286.9966595,
+    "seen": 1792652013.3322377,
+    "ast_hash": "826978522ef7cfe100d5fd84b4599658",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0417\u0430\u0449\u0438\u0442\u0430 \u043e\u043f\u0435\u0440\u0430\u0446\u0438\u0439 Revit \u043f\u0440\u0438\u043d\u0430\u0434\u043b\u0435\u0436\u0438\u0442 MCP-\u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u044e, \u043d\u0435 Hermes Fork.md": {
+    "mtime": 1792189266.3198411,
+    "seen": 1792652013.3322685,
+    "ast_hash": "359241e40d13f80dc5b6327a888f3a0d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-16 \u2014 \u0438\u0441\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u043d\u0438\u0435 Jev \u0438 \u0441\u0435\u0440\u0432\u0435\u0440\u043d\u043e\u0439 \u0437\u0430\u0449\u0438\u0442\u044b, \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u0430 \u0444\u0430\u0437\u0430 7.md": {
+    "mtime": 1792189476.3919098,
+    "seen": 1792652013.3324342,
+    "ast_hash": "8455e4283fa009bd025f927fde7dc977",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-16 \u2014 \u043f\u0440\u0438\u043d\u044f\u0442 checkpoint 02-20 \u0438 \u0440\u0435\u0430\u043b\u0438\u0437\u043e\u0432\u0430\u043d selected status 02-01.md": {
+    "mtime": 1792188744.4842443,
+    "seen": 1792652013.332437,
+    "ast_hash": "0e6b0c41be659370cb1bb930b4854c88",
+    "semantic_hash": ""
+  },
+  "revit_mcp/documents.py": {
+    "mtime": 1793036965.4842763,
+    "seen": 1793037238.7931783,
+    "ast_hash": "93dc45bd02830387fb094edabca30bba",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_process_tools.py": {
+    "mtime": 1792652408.9550161,
+    "seen": 1792655870.6955373,
+    "ast_hash": "4e8fb5b9e47ca9a0bbf632ab779ff5ed",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-04-SUMMARY.md": {
+    "mtime": 1792653119.0084002,
+    "seen": 1792655870.6955945,
+    "ast_hash": "565796303b8062d4454997addfdf12cf",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-05-SUMMARY.md": {
+    "mtime": 1792653721.754359,
+    "seen": 1792655870.6955967,
+    "ast_hash": "67cf34c7c7078bc896ac99823041fd85",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-06-SUMMARY.md": {
+    "mtime": 1792654279.2169683,
+    "seen": 1792655870.6955984,
+    "ast_hash": "40a58c98701f715201eab2bddbc171f6",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-19-SUMMARY.md": {
+    "mtime": 1792652485.4358213,
+    "seen": 1792655870.6956084,
+    "ast_hash": "85490435858944deb33bc4e77055cc93",
+    "semantic_hash": ""
+  },
+  "deploy/make_manifest.py": {
+    "mtime": 1792838504.4393,
+    "seen": 1792848408.9595468,
+    "ast_hash": "80109beadbbf5d4bea397cc7d592a632",
+    "semantic_hash": ""
+  },
+  "deploy/secret_tool.py": {
+    "mtime": 1792746225.6553087,
+    "seen": 1792759075.614562,
+    "ast_hash": "49129ed2b2dd69fe2c454f71535b664e",
+    "semantic_hash": ""
+  },
+  "revit_mcp/integrity.py": {
+    "mtime": 1792758499.995476,
+    "seen": 1792759075.6145763,
+    "ast_hash": "73b2a1914a86dfe53d269a9c91a7815b",
+    "semantic_hash": ""
+  },
+  "revit_mcp/trust.py": {
+    "mtime": 1792995093.4125118,
+    "seen": 1792995264.6620946,
+    "ast_hash": "3b836bb1a71f24bea1d82e109630a966",
+    "semantic_hash": ""
+  },
+  "scripts/dev_secret.py": {
+    "mtime": 1792746281.5807343,
+    "seen": 1792759075.6145897,
+    "ast_hash": "74b425d4798e427c8a682f8eeee07f05",
+    "semantic_hash": ""
+  },
+  "scripts/probe_ipy_trust.py": {
+    "mtime": 1792749288.5749469,
+    "seen": 1792759075.6145923,
+    "ast_hash": "8ec3b594ffa948d89544a496d9b0eb39",
+    "semantic_hash": ""
+  },
+  "tests/unit/inventory_support.py": {
+    "mtime": 1793036656.5783248,
+    "seen": 1793036792.0447176,
+    "ast_hash": "c67aa517f3bd727be514c7a7954567f4",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_bridge_secret_client.py": {
+    "mtime": 1792843459.8437498,
+    "seen": 1792848408.9596086,
+    "ast_hash": "995478b9e9271914e187ee8817dca4f1",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_identity_rendering.py": {
+    "mtime": 1792922468.2879834,
+    "seen": 1792926206.7898862,
+    "ast_hash": "04c63125ab594a981b5dfee3cc164101",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_integrity_e2e.py": {
+    "mtime": 1792746722.674965,
+    "seen": 1792759075.6146064,
+    "ast_hash": "454a5c23f80fe01370c92f29ad311feb",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_integrity_reader.py": {
+    "mtime": 1792758590.0975547,
+    "seen": 1792759075.6146069,
+    "ast_hash": "a6d2dcff3ec3c9f1f90e82ffc8f3a616",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_make_manifest.py": {
+    "mtime": 1792838472.6554132,
+    "seen": 1792848408.9596183,
+    "ast_hash": "a1cb660ab146ee11e9c933e3f95fe9bb",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase2_inventory.py": {
+    "mtime": 1793035610.6588047,
+    "seen": 1793036792.0447602,
+    "ast_hash": "af136b089edfa4c21e1616e8af68c839",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_probe_ipy_trust.py": {
+    "mtime": 1792749233.1482623,
+    "seen": 1792759075.6146116,
+    "ast_hash": "d0a766a69cab057402038450bc995e33",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_routes_analysis_color_identity.py": {
+    "mtime": 1793035843.1277735,
+    "seen": 1793036792.0448053,
+    "ast_hash": "c6e2b6255f84639fc48eab9d64ac8f02",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_routes_document_interop_identity.py": {
+    "mtime": 1793035610.610316,
+    "seen": 1793036792.0448067,
+    "ast_hash": "764125749e9ef35a6e82c881c5bd692e",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_routes_mep_parameter_identity.py": {
+    "mtime": 1793035610.626985,
+    "seen": 1793036792.0448077,
+    "ast_hash": "13adee569a69351a29155541f24d2c2f",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_routes_view_code_identity.py": {
+    "mtime": 1793036019.0618124,
+    "seen": 1793036792.0448086,
+    "ast_hash": "c9f166de7e48be7466a3f440ac9de90c",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_secret_gate_e2e.py": {
+    "mtime": 1792956148.136101,
+    "seen": 1792964443.8071744,
+    "ast_hash": "4d4b4d6395d0f2b197c7f80fa44c2083",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_secret_pipeline.py": {
+    "mtime": 1793030300.64247,
+    "seen": 1793030362.2967632,
+    "ast_hash": "c3887142e7c2673b5549882723cdeb3d",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_tool_forwarding_documents.py": {
+    "mtime": 1793035610.5441337,
+    "seen": 1793036792.0448246,
+    "ast_hash": "df8d8506fd3bcd35de4cb33c0c6b407d",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_tool_forwarding_model.py": {
+    "mtime": 1793035610.5592618,
+    "seen": 1793036792.0448256,
+    "ast_hash": "40cc049c6d776d1700747484d55171f4",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_tool_forwarding_views.py": {
+    "mtime": 1793035610.568965,
+    "seen": 1793036792.044827,
+    "ast_hash": "6e56952e8eec7c1117ce4ec1890aa8b9",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_trust_dialect.py": {
+    "mtime": 1792968381.8774295,
+    "seen": 1792968832.2183075,
+    "ast_hash": "1949d841cc5fd0313ca3c39681850af5",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_trust_envelope.py": {
+    "mtime": 1792745988.7155645,
+    "seen": 1792759075.614624,
+    "ast_hash": "59e7eb4d53bb8c947e2d8e1eb32b2bdf",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_trust_integrity.py": {
+    "mtime": 1792758601.536116,
+    "seen": 1792759075.6146245,
+    "ast_hash": "27e7a3276a54347b7f906c97a202e405",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_trust_listeners.py": {
+    "mtime": 1792747988.9208872,
+    "seen": 1792759075.614625,
+    "ast_hash": "4b6930db38c1350718e855352400c03f",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_trust_secret.py": {
+    "mtime": 1792843245.3789196,
+    "seen": 1792848408.9596512,
+    "ast_hash": "0b5c7525abd972a4b72954711ad09b7c",
+    "semantic_hash": ""
+  },
+  ".planning/RELEASES.md": {
+    "mtime": 1792930811.0870688,
+    "seen": 1792964443.8072264,
+    "ast_hash": "22b7f6e234f2273d587cf5f8068b22aa",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-07-SUMMARY.md": {
+    "mtime": 1792693632.800423,
+    "seen": 1792759075.6146722,
+    "ast_hash": "4a22a5626f8376ae09b7490bc507efca",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-08-SUMMARY.md": {
+    "mtime": 1792694103.1885574,
+    "seen": 1792759075.6146734,
+    "ast_hash": "86c7331d0b3de4138ad51bcf1714f5d8",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-09-SUMMARY.md": {
+    "mtime": 1792694488.3095372,
+    "seen": 1792759075.6146743,
+    "ast_hash": "97dce1ecaad820a3f05a6efa796bb143",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-10-SUMMARY.md": {
+    "mtime": 1792694819.8997087,
+    "seen": 1792759075.6146755,
+    "ast_hash": "1dcb8e502b3467a109dde91d4a3a5b2b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-11-SUMMARY.md": {
+    "mtime": 1792695196.9486587,
+    "seen": 1792759075.6146765,
+    "ast_hash": "f7f12b061111378b3b6d4d7dbf0cd599",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-12-SUMMARY.md": {
+    "mtime": 1792695915.3489356,
+    "seen": 1792759075.6146777,
+    "ast_hash": "f8715c3b802d7e4549a0fbe0c85c39a0",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-13-SUMMARY.md": {
+    "mtime": 1792696595.3300736,
+    "seen": 1792759075.6146789,
+    "ast_hash": "e7d3331e3a08d44d8aa9a916f5e89a14",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-14-SUMMARY.md": {
+    "mtime": 1792696995.1575267,
+    "seen": 1792759075.6146798,
+    "ast_hash": "defdea4d83f158981351cda22f304b0d",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-15-SUMMARY.md": {
+    "mtime": 1792697550.7171495,
+    "seen": 1792759075.6146808,
+    "ast_hash": "f8957498e027ea522a6bb696e617d049",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-16-SUMMARY.md": {
+    "mtime": 1792698491.5028784,
+    "seen": 1792759075.614682,
+    "ast_hash": "500173da2bc7610d5becfeb7fc85b3b7",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-17-SUMMARY.md": {
+    "mtime": 1792699677.8598745,
+    "seen": 1792759075.614683,
+    "ast_hash": "f4e3d4751763908f7bad24d7a73a5920",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-18-SUMMARY.md": {
+    "mtime": 1792739972.3717604,
+    "seen": 1792759075.6146839,
+    "ast_hash": "802dd7f3d14611a5a5053dbcb2d932f2",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-REVIEW.md": {
+    "mtime": 1792740331.9070647,
+    "seen": 1792759075.614689,
+    "ast_hash": "7b152be029441f83052880b1bfd5448b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/02-live-identity-ambiguity-refusal-and-multi-document-addressin/02-VERIFICATION.md": {
+    "mtime": 1792740733.2630894,
+    "seen": 1792759075.61469,
+    "ast_hash": "c712da8704a7e0232603f2fa38763988",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-01-PLAN.md": {
+    "mtime": 1792744697.072392,
+    "seen": 1792759075.6146905,
+    "ast_hash": "fa17f980364afee90d86ec9c37609c73",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-01-SUMMARY.md": {
+    "mtime": 1792746090.1128023,
+    "seen": 1792759075.614691,
+    "ast_hash": "a42c3c1603ba58782934b15f864fa526",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-02-PLAN.md": {
+    "mtime": 1792744662.9059813,
+    "seen": 1792759075.6146915,
+    "ast_hash": "c9291e8b0006e9a5ad5a8983b856a37a",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-02-SUMMARY.md": {
+    "mtime": 1792746352.101964,
+    "seen": 1792759075.6146922,
+    "ast_hash": "768427e39d12b0e9595f6365176b17d6",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-03-PLAN.md": {
+    "mtime": 1792744698.3350687,
+    "seen": 1792759075.6146924,
+    "ast_hash": "107fb9c84839694e10b94482fe95efc4",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-03-SUMMARY.md": {
+    "mtime": 1792746628.2871454,
+    "seen": 1792759075.6146932,
+    "ast_hash": "f02f02a6c0ecdc62607f9b9485a1dadd",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-04-PLAN.md": {
+    "mtime": 1792744699.9270716,
+    "seen": 1792759075.6146934,
+    "ast_hash": "82865e52ca0297d6b7f11d428d43c40b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-04-SUMMARY.md": {
+    "mtime": 1792746946.8794112,
+    "seen": 1792759075.6146939,
+    "ast_hash": "2b5b003ed5fb35f9719c4e7eabf4fb18",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-05-PLAN.md": {
+    "mtime": 1792744701.190928,
+    "seen": 1792759075.6146944,
+    "ast_hash": "70e16e7c6af118701b1491f6306876c1",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-05-SUMMARY.md": {
+    "mtime": 1792747850.5953958,
+    "seen": 1792759075.6146948,
+    "ast_hash": "df0989d0eb2a6926278bce7fdd692133",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-06-PLAN.md": {
+    "mtime": 1792744702.5078232,
+    "seen": 1792759075.6146953,
+    "ast_hash": "58ba4a87795f7d5a6eac9e4bb52e27c0",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-06-SUMMARY.md": {
+    "mtime": 1792748246.2428052,
+    "seen": 1792759075.6146958,
+    "ast_hash": "1774bdbe092e6d1bdc2c5d85dc183fa2",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-07-PLAN.md": {
+    "mtime": 1792745049.9737666,
+    "seen": 1792759075.6146963,
+    "ast_hash": "a3cc13a15bc2652590d70571b5a87a38",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-07-SUMMARY.md": {
+    "mtime": 1792749011.7097917,
+    "seen": 1792759075.6146967,
+    "ast_hash": "12e41a95df66b24ff7f0ca2161621a0c",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-08-PLAN.md": {
+    "mtime": 1792744991.8804886,
+    "seen": 1792759075.614697,
+    "ast_hash": "9379c38df834c2b33b84182cc3e62928",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-08-SUMMARY.md": {
+    "mtime": 1792749794.2768116,
+    "seen": 1792759075.6146975,
+    "ast_hash": "938f8909058255eb8126f88f5552b27f",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-09-PLAN.md": {
+    "mtime": 1792756994.6558554,
+    "seen": 1792759075.6146977,
+    "ast_hash": "197c63b525c579af24bcc5ed373e7397",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-09-SUMMARY.md": {
+    "mtime": 1792758720.0228453,
+    "seen": 1792759075.6146982,
+    "ast_hash": "c9c31274629c3a2242b02d393ef89b8f",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-PATTERNS.md": {
+    "mtime": 1792741666.4348662,
+    "seen": 1792759075.6147,
+    "ast_hash": "32865e24926197e42eaeb09819fe3389",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-RESEARCH.md": {
+    "mtime": 1792744623.2101724,
+    "seen": 1792759075.6147006,
+    "ast_hash": "ac6df7207553b8d0f55dfdac829eddcb",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-REVIEW.md": {
+    "mtime": 1792750098.5267437,
+    "seen": 1792759075.614701,
+    "ast_hash": "462b170a4d910dbb33ee1ca0552833d0",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-UAT.md": {
+    "mtime": 1792758949.2283835,
+    "seen": 1792759075.6147013,
+    "ast_hash": "aacf6fc1413d72ca77ea84d5a5c53d41",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-VALIDATION.md": {
+    "mtime": 1792749682.8037708,
+    "seen": 1792759075.6147017,
+    "ast_hash": "5d8489f6e373c79b0b298887f5bc0a05",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/03-VERIFICATION.md": {
+    "mtime": 1792759010.369314,
+    "seen": 1792759075.6147022,
+    "ast_hash": "8850b8d2d91adde0b04fd1e8c1389caf",
+    "semantic_hash": ""
+  },
+  ".planning/phases/03-secret-gate-and-payload-integrity-unit-verified/COVERAGE.md": {
+    "mtime": 1792743716.0831974,
+    "seen": 1792759075.614703,
+    "ast_hash": "10443748f770eceb4e6ead9527d2cca0",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/netstat \u043d\u0430 ru-RU Windows \u043f\u0435\u0447\u0430\u0442\u0430\u0435\u0442 \u0437\u0430\u0433\u043e\u043b\u043e\u0432\u043a\u0438 \u0432 cp866, \u0441\u0442\u0440\u043e\u0433\u0438\u0439 \u043f\u0430\u0440\u0441\u0435\u0440 \u0432\u043e\u0437\u0432\u0440\u0430\u0449\u0430\u043b None.md": {
+    "mtime": 1792703110.2921548,
+    "seen": 1792759075.6147444,
+    "ast_hash": "779f1e20aca485b80d6d8c4477a1a32e",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041a\u043b\u0430\u0441\u0441\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0442\u0440\u0435\u0431\u043e\u0432\u0430\u043b Project1, \u0430 \u0440\u0443\u0441\u0441\u043a\u0438\u0439 Revit \u043d\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u043f\u0435\u0440\u0432\u044b\u0439 \u043f\u0440\u043e\u0435\u043a\u0442 \u041f\u0440\u043e\u0435\u043a\u04421.md": {
+    "mtime": 1792740658.0261025,
+    "seen": 1792759075.6147563,
+    "ast_hash": "19345ab27f1f7fedef560b5e924a2876",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041c\u0430\u0440\u0448\u0440\u0443\u0442\u044b pyRevit \u0431\u0435\u0437 \u0430\u0440\u0433\u0443\u043c\u0435\u043d\u0442\u043e\u0432 uiapp, uidoc, doc \u0432\u044b\u043f\u043e\u043b\u043d\u044f\u044e\u0442\u0441\u044f \u0432\u043d\u0435 \u043a\u043e\u043d\u0442\u0435\u043a\u0441\u0442\u0430 Revit API.md": {
+    "mtime": 1792703109.050691,
+    "seen": 1792759075.614757,
+    "ast_hash": "b63175f152aa42b4bb4102e36df25b26",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041f\u0435\u0440\u0435\u043a\u0440\u044b\u0432\u0430\u044e\u0449\u0438\u0435\u0441\u044f \u0437\u0430\u043f\u0438\u0441\u0438 \u0432 \u043e\u0434\u0438\u043d Revit \u043f\u043e\u043b\u0443\u0447\u0430\u044e\u0442 \u0447\u0443\u0436\u043e\u0439 \u043e\u0442\u0432\u0435\u0442 \u0438 \u0442\u0435\u0440\u044f\u044e\u0442 \u0437\u0430\u043f\u0438\u0441\u044c, G6 \u0432\u043e\u0441\u043f\u0440\u043e\u0438\u0437\u0432\u0435\u0434\u0451\u043d.md": {
+    "mtime": 1792740760.5606017,
+    "seen": 1792759075.614762,
+    "ast_hash": "49c26cff950916a7ac53f1f09ccbd973",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/G3 \u0438 G4 production \u043f\u0440\u0438\u043d\u044f\u0442\u044b \u043f\u043e\u0441\u043b\u0435 \u0438\u0441\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u044f \u043a\u043e\u043d\u0442\u0435\u043a\u0441\u0442\u0430 API, \u0436\u0438\u0432\u0430\u044f \u043f\u0440\u0438\u0451\u043c\u043a\u0430 \u0438\u0434\u0451\u0442 \u0441\u0435\u043a\u0446\u0438\u044f\u043c\u0438 \u043f\u043e \u0440\u0438\u0441\u043a\u0443.md": {
+    "mtime": 1792703112.7528224,
+    "seen": 1792759075.6147668,
+    "ast_hash": "096ed58eb3f7da0003652a96037c43d0",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0418\u0441\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u0438 \u0444\u0430\u0437\u044b 2 \u0438\u0434\u0443\u0442 \u043f\u043e\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u0442\u0435\u043b\u044c\u043d\u043e \u0432 \u043e\u0441\u043d\u043e\u0432\u043d\u043e\u043c \u0434\u0435\u0440\u0435\u0432\u0435, \u043a\u043e\u043c\u043c\u0438\u0442\u044b \u043f\u043e \u043f\u0443\u0442\u044f\u043c.md": {
+    "mtime": 1792703111.5236166,
+    "seen": 1792759075.6147752,
+    "ast_hash": "dab73f34f67894d26ba372baed9bba45",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0420\u0435\u043b\u0438\u0437 \u043f\u0440\u0435\u0434\u043b\u0430\u0433\u0430\u0435\u0442\u0441\u044f \u043d\u0430 \u0433\u0440\u0430\u043d\u0438\u0446\u0435 \u0444\u0430\u0437\u044b \u043f\u043e RELEASES.md, \u0430 \u043d\u0435 \u0433\u043e\u0442\u043e\u0432\u0438\u0442\u0441\u044f \u043f\u0430\u0440\u0430\u043b\u043b\u0435\u043b\u044c\u043d\u043e.md": {
+    "mtime": 1792749715.7575047,
+    "seen": 1792759075.6147852,
+    "ast_hash": "db4f763f5e19fc6f520020727428f675",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0421\u0445\u0435\u043c\u0430 \u0432\u0435\u0440\u0441\u0438\u0439 \u2014 \u043c\u0435\u0442\u043a\u0430 \u0441\u0431\u043e\u0440\u043a\u0438 \u0441 \u0438\u043c\u0435\u043d\u0435\u043c \u0440\u0435\u043b\u0438\u0437\u0430, rc-\u0442\u0435\u0433\u0438 \u0438 \u043f\u0438\u043b\u043e\u0442\u043d\u044b\u0439 share.md": {
+    "mtime": 1792749717.0578501,
+    "seen": 1792759075.614786,
+    "ast_hash": "7f9659c9c07e67d4fb62ba513f9924af",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 2 \u043f\u0440\u0438\u043d\u044f\u0442\u0430 \u043a\u0430\u043a \u0435\u0441\u0442\u044c \u0441 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u043c \u0440\u0438\u0441\u043a\u043e\u043c AMBIG-04, override \u043e\u0444\u043e\u0440\u043c\u043b\u0435\u043d.md": {
+    "mtime": 1792740760.5427904,
+    "seen": 1792759075.6147888,
+    "ast_hash": "a8d01ec77937e623f1a8099da9d785df",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 3 \u2014 \u043a\u043e\u043d\u0432\u0435\u0440\u0442 _mcp \u043d\u0435\u0441\u0451\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u0441\u0435\u043a\u0440\u0435\u0442, \u0441\u0440\u0430\u0432\u043d\u0435\u043d\u0438\u0435 \u0440\u0443\u0447\u043d\u043e\u0435 SHA-256 \u0441 XOR.md": {
+    "mtime": 1792745778.390375,
+    "seen": 1792759075.6147895,
+    "ast_hash": "3e5e4dae6bd5155784fd08a114a480c3",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-22 \u2014 \u0438\u0441\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 2 \u0434\u043e \u043f\u043b\u0430\u043d\u0430 02-18, \u0436\u0438\u0432\u0430\u044f \u043f\u0440\u0438\u0451\u043c\u043a\u0430 G3 \u0438 G4 \u043d\u0430\u0448\u043b\u0430 \u043e\u0448\u0438\u0431\u043a\u0443 \u043a\u043e\u043d\u0442\u0435\u043a\u0441\u0442\u0430 API \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u043e\u0432.md": {
+    "mtime": 1792703107.8071575,
+    "seen": 1792759075.614823,
+    "ast_hash": "dbb48ee7c0676d174d59aa74308d8f57",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-23 \u2014 \u0436\u0438\u0432\u0430\u044f \u043f\u0440\u0438\u0451\u043c\u043a\u0430 \u0444\u0430\u0437\u044b 2, 8 \u0438\u0437 9 \u043a\u0440\u0438\u0442\u0435\u0440\u0438\u0435\u0432, G6 \u043e\u0441\u0442\u0430\u043b\u0441\u044f stop, \u0432\u0435\u0440\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044f gaps_found.md": {
+    "mtime": 1792740791.8895862,
+    "seen": 1792759075.6148236,
+    "ast_hash": "5539cd84d3997d4a78f871d6238fd68d",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-23 \u2014 \u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 3, \u0432\u043e\u0441\u0435\u043c\u044c \u043f\u043b\u0430\u043d\u043e\u0432 \u0441\u0435\u043a\u0440\u0435\u0442\u0430 \u0438 \u0446\u0435\u043b\u043e\u0441\u0442\u043d\u043e\u0441\u0442\u0438, \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043f\u0440\u043e\u0448\u043b\u0430 \u0441\u043e \u0432\u0442\u043e\u0440\u043e\u0433\u043e \u0440\u0430\u0443\u043d\u0434\u0430.md": {
+    "mtime": 1792745777.1623914,
+    "seen": 1792759075.6148245,
+    "ast_hash": "a13cc33a76c7135546bf0a890f180d5a",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-23 \u2014 \u0440\u0435\u043b\u0438\u0437\u043d\u044b\u0439 \u043f\u043b\u0430\u043d milestone v0.1, \u0441\u0445\u0435\u043c\u0430 \u0432\u0435\u0440\u0441\u0438\u0439 \u0438 \u0442\u0435\u0433\u043e\u0432, \u043a\u043e\u043c\u043c\u0438\u0442 \u0437\u0430\u043a\u0440\u044b\u0442\u0438\u044f \u0444\u0430\u0437\u044b 2.md": {
+    "mtime": 1792749714.4489017,
+    "seen": 1792759075.6148252,
+    "ast_hash": "e553db4f7417396ec3009c25fa5490c5",
+    "semantic_hash": ""
+  },
+  "revit_mcp/security.py": {
+    "mtime": 1792968567.3975499,
+    "seen": 1792968832.218169,
+    "ast_hash": "3c32c430dfc5a783ef344c17941f3dea",
+    "semantic_hash": ""
+  },
+  "scripts/scan_envelope_tolerance.py": {
+    "mtime": 1792839169.88215,
+    "seen": 1792848408.9595966,
+    "ast_hash": "b4923a90766d6b9099eb90b7b722cf54",
+    "semantic_hash": ""
+  },
+  "tests/test_phase4_live_outcomes.py": {
+    "mtime": 1792780643.5447383,
+    "seen": 1792848408.9596033,
+    "ast_hash": "a7d883f63fda083729e135ec1043391f",
+    "semantic_hash": ""
+  },
+  "tests/test_phase5_live_gate.py": {
+    "mtime": 1792867918.8625073,
+    "seen": 1792926206.789862,
+    "ast_hash": "1dea45b67764f4bea5f1c1e1434c4f36",
+    "semantic_hash": ""
+  },
+  "tests/unit/gate_support.py": {
+    "mtime": 1792954471.3070054,
+    "seen": 1792964443.8071077,
+    "ast_hash": "29dcba1dc44e45ec5c741bc54faee42a",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_outcome_docstrings.py": {
+    "mtime": 1792782374.6226432,
+    "seen": 1792848408.9596195,
+    "ast_hash": "84ce76a289faba75c20e88084a430fb7",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase4_live_outcomes.py": {
+    "mtime": 1792780655.138372,
+    "seen": 1792848408.959625,
+    "ast_hash": "90e95d4ecaa1fc40de3fabaeec4c4fc7",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase5_gate_e2e.py": {
+    "mtime": 1792954719.426715,
+    "seen": 1792964443.8071477,
+    "ast_hash": "f29cdd9592454cb6b0276e7e53e6accd",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase5_gate_wiring.py": {
+    "mtime": 1792995183.1592789,
+    "seen": 1792995264.662168,
+    "ast_hash": "e255c89bb8afcec4b84855003c5b7fc5",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase5_live_gate.py": {
+    "mtime": 1792867950.7248745,
+    "seen": 1792926206.789903,
+    "ast_hash": "19755b829d0689cf304846446e94c188",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase5_status_diagnostics.py": {
+    "mtime": 1792843489.8845005,
+    "seen": 1792848408.959628,
+    "ast_hash": "c9446b571abd7af3f4925fd080464b88",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_scan_envelope_tolerance.py": {
+    "mtime": 1792839151.2383358,
+    "seen": 1792848408.9596372,
+    "ast_hash": "e20579c1123d64d52b3e728e9dd9d4b1",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_security_state.py": {
+    "mtime": 1792968338.4960046,
+    "seen": 1792968832.218297,
+    "ast_hash": "842942aa8967b86fdbb751b3557e4b06",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-01-PLAN.md": {
+    "mtime": 1792770409.6039295,
+    "seen": 1792848408.9597588,
+    "ast_hash": "7c87641ab0388f2ae2d1813e790e46ad",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-01-SUMMARY.md": {
+    "mtime": 1792776500.9810517,
+    "seen": 1792848408.9597597,
+    "ast_hash": "f6f6f3442f38e4d9f9bbbefeab0e795e",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-02-PLAN.md": {
+    "mtime": 1792770424.6139922,
+    "seen": 1792848408.9597602,
+    "ast_hash": "6fefa1bebe5a59c01e636a83d8416d3b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-02-SUMMARY.md": {
+    "mtime": 1792777246.9598885,
+    "seen": 1792848408.959761,
+    "ast_hash": "1e0a15e2305a2b83cdd92090fe006580",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-03-PLAN.md": {
+    "mtime": 1792770426.8150134,
+    "seen": 1792848408.9597614,
+    "ast_hash": "066902e3ed628e39f831e6c957750ecf",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-03-SUMMARY.md": {
+    "mtime": 1792777935.268266,
+    "seen": 1792848408.9597619,
+    "ast_hash": "932affe972dbf6de92281ccd58368bf3",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-04-PLAN.md": {
+    "mtime": 1792769015.2931135,
+    "seen": 1792848408.9597626,
+    "ast_hash": "815499cbb072cc17aa0e83e36003ee1c",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-04-SUMMARY.md": {
+    "mtime": 1792778462.5868652,
+    "seen": 1792848408.9597633,
+    "ast_hash": "bab62804b9d742cba66a742e88b2798a",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-05-PLAN.md": {
+    "mtime": 1792769083.2661097,
+    "seen": 1792848408.9597638,
+    "ast_hash": "5c494e02cd95249048328a19fad577b7",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-05-SUMMARY.md": {
+    "mtime": 1792778907.3806925,
+    "seen": 1792848408.9597642,
+    "ast_hash": "323855a3fc119211434a448d58b2f764",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-06-PLAN.md": {
+    "mtime": 1792770429.2420924,
+    "seen": 1792848408.9597647,
+    "ast_hash": "30d0b38aff626437f346943946cf1630",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-06-SUMMARY.md": {
+    "mtime": 1792779749.5709114,
+    "seen": 1792848408.9597652,
+    "ast_hash": "eb89015ffe4cb07f79981bc9a190fdea",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-07-PLAN.md": {
+    "mtime": 1792770431.3353064,
+    "seen": 1792848408.959766,
+    "ast_hash": "7d0fca4f29a6d0d1d8b80763c968ea4d",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-07-SUMMARY.md": {
+    "mtime": 1792780127.123605,
+    "seen": 1792848408.9597666,
+    "ast_hash": "f88e20e5f8378d699d3258dc835dd5a6",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-08-PLAN.md": {
+    "mtime": 1792769370.3000865,
+    "seen": 1792848408.959767,
+    "ast_hash": "3b617c3f0c5814204867f0682bb34010",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-08-SUMMARY.md": {
+    "mtime": 1792781198.0598514,
+    "seen": 1792848408.9597678,
+    "ast_hash": "da60ffbffd51e89e6fa3c2f9d8585806",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-09-PLAN.md": {
+    "mtime": 1792770493.0063446,
+    "seen": 1792848408.959768,
+    "ast_hash": "353bbb33dd569f05cec0ed3140f35793",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-09-SUMMARY.md": {
+    "mtime": 1792782488.6664557,
+    "seen": 1792848408.9597685,
+    "ast_hash": "acf62c75ce005a8a99d814222d732eb5",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-10-PLAN.md": {
+    "mtime": 1792770371.99333,
+    "seen": 1792848408.959769,
+    "ast_hash": "382672b83be7ffe5dc53ca8dbcc04d46",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-10-SUMMARY.md": {
+    "mtime": 1792780769.033504,
+    "seen": 1792848408.9597695,
+    "ast_hash": "5e838d270ce13e8c62285e85ade74b32",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-11-PLAN.md": {
+    "mtime": 1792770401.6887107,
+    "seen": 1792848408.9597707,
+    "ast_hash": "4ec72c0c1e57e356b0fba57150534e04",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-11-SUMMARY.md": {
+    "mtime": 1792785629.8240395,
+    "seen": 1792848408.959771,
+    "ast_hash": "833bf3e438722852eb7c41f767c4513b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-PATTERNS.md": {
+    "mtime": 1792767562.8133323,
+    "seen": 1792848408.9597726,
+    "ast_hash": "7de3a68ae32791fa43420ba06862849c",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-RESEARCH.md": {
+    "mtime": 1792767079.8860922,
+    "seen": 1792848408.9597735,
+    "ast_hash": "9044f4223477140290f112c5ea553d31",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-REVIEW.md": {
+    "mtime": 1792786119.3256547,
+    "seen": 1792848408.9597743,
+    "ast_hash": "12ff663b81dedbce6e019d2550bb4dc6",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-VALIDATION.md": {
+    "mtime": 1792785614.7287297,
+    "seen": 1792848408.9597747,
+    "ast_hash": "8cb28d22b5508abde6af87263a6b7aed",
+    "semantic_hash": ""
+  },
+  ".planning/phases/04-honest-outcomes-on-every-mutating-route/04-VERIFICATION.md": {
+    "mtime": 1792786389.2904918,
+    "seen": 1792848408.9597752,
+    "ast_hash": "cbd7599740688d4086f2bb6424d19a53",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-01-PLAN.md": {
+    "mtime": 1792834521.566121,
+    "seen": 1792848408.9597757,
+    "ast_hash": "cbbe5dd684b9477fd8fae81507ecb946",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-01-SUMMARY.md": {
+    "mtime": 1792837435.4245205,
+    "seen": 1792848408.9597762,
+    "ast_hash": "a1706bad96b06baa6dbc7c71dcebec68",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-02-PLAN.md": {
+    "mtime": 1792832118.6699276,
+    "seen": 1792848408.9597769,
+    "ast_hash": "2dd919533aed5c6d7fc90799cf501f57",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-02-SUMMARY.md": {
+    "mtime": 1792840050.5509222,
+    "seen": 1792848408.9597774,
+    "ast_hash": "70f5b62c9f559365c71e45e2911491cf",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-03-PLAN.md": {
+    "mtime": 1792832181.6242652,
+    "seen": 1792848408.9597778,
+    "ast_hash": "890b91ca13893839fa92dce7473c7267",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-03-SUMMARY.md": {
+    "mtime": 1792840631.987208,
+    "seen": 1792848408.9597783,
+    "ast_hash": "9255f5c6a5aa5dac0c0f2d31a33d76c9",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-04-PLAN.md": {
+    "mtime": 1792832219.3613384,
+    "seen": 1792848408.959779,
+    "ast_hash": "9fbdb6b7b82cfcf68ce01b96ff92194d",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-04-SUMMARY.md": {
+    "mtime": 1792841211.7464697,
+    "seen": 1792848408.9597795,
+    "ast_hash": "b6f51356f0a3a9f875dd285d7331fe89",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-05-PLAN.md": {
+    "mtime": 1792832296.9677532,
+    "seen": 1792848408.95978,
+    "ast_hash": "bf098d4a78865501267866a79491b977",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-05-SUMMARY.md": {
+    "mtime": 1792842000.4390213,
+    "seen": 1792848408.959781,
+    "ast_hash": "ed09b08464352d1b340698cdada597ce",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-06-PLAN.md": {
+    "mtime": 1792834399.8522832,
+    "seen": 1792848408.9597814,
+    "ast_hash": "55bbff2c0c44ec851da6e28342202912",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-06-SUMMARY.md": {
+    "mtime": 1792846618.2490873,
+    "seen": 1792848408.959782,
+    "ast_hash": "1c0f194701833cf7e5751caad2267525",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-07-PLAN.md": {
+    "mtime": 1792834391.8730984,
+    "seen": 1792848408.9597824,
+    "ast_hash": "0e1352c97bcb064de0268594ba30eb96",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-07-SUMMARY.md": {
+    "mtime": 1792843659.177777,
+    "seen": 1792848408.9597828,
+    "ast_hash": "8c43ea400b418dd31baffaf4cb3e6456",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-08-PLAN.md": {
+    "mtime": 1792832630.6588857,
+    "seen": 1792848408.9597838,
+    "ast_hash": "674eec6cc9ab3281dd7a6a49858fe804",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-08-SUMMARY.md": {
+    "mtime": 1792838649.62342,
+    "seen": 1792848408.959784,
+    "ast_hash": "69e50cf2e65c065e9400adc80932b9bd",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-09-PLAN.md": {
+    "mtime": 1792832702.9006364,
+    "seen": 1792848408.9597847,
+    "ast_hash": "f6c41b37d61a70cf11c0ba4360d70e5e",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-09-SUMMARY.md": {
+    "mtime": 1792839357.320413,
+    "seen": 1792848408.9597852,
+    "ast_hash": "f267ee3e62338cb9a18b36da3bd91115",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-10-PLAN.md": {
+    "mtime": 1792834399.8542824,
+    "seen": 1792848408.9597857,
+    "ast_hash": "45aa131c5edca2a59899746b6d9821ee",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-10-SUMMARY.md": {
+    "mtime": 1792848527.7388957,
+    "seen": 1792851491.7244747,
+    "ast_hash": "42168a9e57db5f58d2086726d9e39b9c",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-11-PLAN.md": {
+    "mtime": 1792834399.8532827,
+    "seen": 1792848408.959787,
+    "ast_hash": "d9f7a3c0245fcf8b3b083920d7b0d388",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-11-SUMMARY.md": {
+    "mtime": 1792847456.4771004,
+    "seen": 1792848408.9597874,
+    "ast_hash": "eb362b73b8372ef0650327cc119f422f",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-12-PLAN.md": {
+    "mtime": 1792834408.1898825,
+    "seen": 1792848408.959788,
+    "ast_hash": "727605ee02973922d0c9122b30784a88",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-13-PLAN.md": {
+    "mtime": 1792834408.190882,
+    "seen": 1792848408.9597886,
+    "ast_hash": "35b003feca99bcc3c4ffc81459742bba",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-14-PLAN.md": {
+    "mtime": 1792834399.8562825,
+    "seen": 1792848408.959789,
+    "ast_hash": "bba3c6adebf37ea6078a771cc48edf30",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-15-PLAN.md": {
+    "mtime": 1792834399.8575492,
+    "seen": 1792848408.9597895,
+    "ast_hash": "37b24c2934f816c2ab5ee65de2dc9b76",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-16-PLAN.md": {
+    "mtime": 1792834373.0316298,
+    "seen": 1792848408.95979,
+    "ast_hash": "62b7d07d066a53cf2f0c820fdac14289",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-16-SUMMARY.md": {
+    "mtime": 1792842644.6500466,
+    "seen": 1792848408.9597907,
+    "ast_hash": "71d68bbbba927fbc10748e562e427463",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-CONTEXT.md": {
+    "mtime": 1792828257.5162313,
+    "seen": 1792848408.9597912,
+    "ast_hash": "4b2182b5a1aa2ae10e02f635468f1837",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-DISCUSSION-LOG.md": {
+    "mtime": 1792828260.4306283,
+    "seen": 1792848408.9597917,
+    "ast_hash": "e5ef7d1c73b63bb2b171a9526a567bbd",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-PATTERNS.md": {
+    "mtime": 1792830536.5081675,
+    "seen": 1792848408.9597921,
+    "ast_hash": "b12b4490e716506c44e71972f3915a07",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-RESEARCH.md": {
+    "mtime": 1792830386.8434014,
+    "seen": 1792848408.9597926,
+    "ast_hash": "6151cce34a75654d0dcdb6dc9e09a4d7",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-VALIDATION.md": {
+    "mtime": 1792874127.961478,
+    "seen": 1792926206.790176,
+    "ast_hash": "d784842a5c5f5468707ae3ee291a24be",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/COVERAGE.md": {
+    "mtime": 1792833234.1718676,
+    "seen": 1792848408.9597938,
+    "ast_hash": "da27ecd690d0348c619dc6831e1544fa",
+    "semantic_hash": ""
+  },
+  "deploy/RELEASE-RUNBOOK.md": {
+    "mtime": 1793002984.0421202,
+    "seen": 1793004495.8687117,
+    "ast_hash": "adb4271a515472d140b25f5bce9b3bcb",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 4 \u0437\u0430\u043a\u0440\u044b\u0442\u0430 \u0431\u0435\u0437 \u0440\u0435\u043b\u0438\u0437\u0430 R2, \u0436\u0438\u0432\u043e\u0439 \u0448\u043b\u044e\u0437 \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d \u043a\u043e\u043d\u0442\u0440\u043e\u043b\u043b\u0435\u0440\u043e\u043c \u043f\u043e \u043f\u0440\u044f\u043c\u043e\u0439 \u043f\u0440\u043e\u0441\u044c\u0431\u0435.md": {
+    "mtime": 1792788023.8951173,
+    "seen": 1792848408.9599006,
+    "ast_hash": "7e35b4af9cd3902b06ca20b7751a9cd9",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 4 \u2014 \u0432\u0442\u043e\u0440\u0438\u0447\u043d\u044b\u0439 \u0441\u0431\u043e\u0439 \u0434\u0430\u0451\u0442 partial, outcome \u0435\u0441\u0442\u044c \u0438 \u0432 execute_code, \u0438 \u0432 \u043e\u0442\u0432\u0435\u0442\u0430\u0445 500.md": {
+    "mtime": 1792775972.2642083,
+    "seen": 1792848408.9599018,
+    "ast_hash": "d3ab9e3dfbb9eca039200a9d8c04da7b",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 5 \u2014 dev-\u043c\u0430\u043d\u0438\u0444\u0435\u0441\u0442 \u0447\u0435\u0440\u0435\u0437 --allow-repo-dest, unverifiable \u043d\u0435 \u0434\u0435\u0433\u0440\u0430\u0434\u0438\u0440\u0443\u0435\u0442 health, \u0442\u0440\u0438 \u0436\u0438\u0432\u044b\u0445 \u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0441\u043a\u0430.md": {
+    "mtime": 1792836478.3101914,
+    "seen": 1792848408.9599025,
+    "ast_hash": "446777a3e398a8667b22ce4db30b04b1",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 5 \u2014 \u043e\u0442\u043a\u0440\u044b\u0442\u044b \u0442\u043e\u043b\u044c\u043a\u043e \u0447\u0442\u0435\u043d\u0438\u044f, payload \u0432\u044b\u043a\u043b\u0430\u0434\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0440\u0430\u043d\u044c\u0448\u0435 ext, \u043e\u0442\u043a\u0430\u0442 \u0447\u0435\u0440\u0435\u0437 ext-previous.md": {
+    "mtime": 1792828299.353168,
+    "seen": 1792848408.9599032,
+    "ast_hash": "b7feb861d55296875d036246a6beadcc",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-23 \u2014 \u0438\u0441\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 4, \u0436\u0438\u0432\u043e\u0439 \u0448\u043b\u044e\u0437 PHASE4_OUTCOMES_OK, \u0444\u0430\u0437\u0430 \u0437\u0430\u043a\u0440\u044b\u0442\u0430, R2 \u043f\u0440\u043e\u043f\u0443\u0449\u0435\u043d.md": {
+    "mtime": 1792788035.764309,
+    "seen": 1792848408.9599392,
+    "ast_hash": "090324d88bc57fb182e40e43b7b19a9e",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-23 \u2014 \u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 4, \u043e\u0434\u0438\u043d\u043d\u0430\u0434\u0446\u0430\u0442\u044c \u043f\u043b\u0430\u043d\u043e\u0432 \u0447\u0435\u0441\u0442\u043d\u044b\u0445 \u0438\u0441\u0445\u043e\u0434\u043e\u0432 \u043c\u0443\u0442\u0430\u0446\u0438\u0439, \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043f\u0440\u043e\u0448\u043b\u0430 \u0441\u043e \u0432\u0442\u043e\u0440\u043e\u0433\u043e \u0440\u0430\u0443\u043d\u0434\u0430.md": {
+    "mtime": 1792775970.8905957,
+    "seen": 1792848408.9599411,
+    "ast_hash": "102ebe9b09e285ef5f9967eaa8773701",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-24 \u2014 \u043e\u0431\u0441\u0443\u0436\u0434\u0435\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 5, \u0448\u043b\u044e\u0437 \u0441\u0435\u043a\u0440\u0435\u0442\u0430 \u0432 \u043a\u0430\u0436\u0434\u043e\u043c \u043c\u0430\u0440\u0448\u0440\u0443\u0442\u0435, payload \u0440\u0430\u043d\u044c\u0448\u0435 ext, \u043e\u0442\u043a\u0430\u0442 \u0447\u0435\u0440\u0435\u0437 ext-previous.md": {
+    "mtime": 1792828297.8736322,
+    "seen": 1792848408.9599426,
+    "ast_hash": "0aa0034443e4825cbe5aa2098afc9213",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-24 \u2014 \u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 5, \u0448\u0435\u0441\u0442\u043d\u0430\u0434\u0446\u0430\u0442\u044c \u043f\u043b\u0430\u043d\u043e\u0432 \u0448\u043b\u044e\u0437\u0430 \u0441\u0435\u043a\u0440\u0435\u0442\u0430 \u0438 \u0446\u0435\u043b\u043e\u0441\u0442\u043d\u043e\u0441\u0442\u0438, \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043f\u0440\u043e\u0448\u043b\u0430 \u0441\u043e \u0432\u0442\u043e\u0440\u043e\u0433\u043e \u0440\u0430\u0443\u043d\u0434\u0430.md": {
+    "mtime": 1792836477.1910157,
+    "seen": 1792848408.959944,
+    "ast_hash": "376391a0d2b921c9e2522ad8a189fa46",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-12-SUMMARY.md": {
+    "mtime": 1792851461.356565,
+    "seen": 1792851491.7244773,
+    "ast_hash": "7b1f9e6b29dc07f5fe522d5e8d3815a9",
+    "semantic_hash": ""
+  },
+  "audit.py": {
+    "mtime": 1793001729.0893538,
+    "seen": 1793004495.8678334,
+    "ast_hash": "18446d29a8e3c8772ce7e8c5d69cd954",
+    "semantic_hash": ""
+  },
+  "tests/test_phase6_live_audit.py": {
+    "mtime": 1792926165.4707966,
+    "seen": 1792926206.789863,
+    "ast_hash": "ebba965f62456e7e5fcfbcaacfb73a71",
+    "semantic_hash": ""
+  },
+  "tests/unit/audit_support.py": {
+    "mtime": 1792997264.7574587,
+    "seen": 1792998145.8342352,
+    "ast_hash": "b2e9e4efd463c3a37ce521229599b694",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_audit_bridge_hook.py": {
+    "mtime": 1793036511.5356958,
+    "seen": 1793036792.0447192,
+    "ast_hash": "9d41af86b5012930f3cfd7525a5ec605",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_audit_correlation.py": {
+    "mtime": 1792954771.021678,
+    "seen": 1792964443.807112,
+    "ast_hash": "81ce5c8e45263b7b4627aa2342a88955",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_audit_entry.py": {
+    "mtime": 1792972750.307611,
+    "seen": 1792973094.6444912,
+    "ast_hash": "9a27717069481902a6131185f7c382ee",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_audit_registration.py": {
+    "mtime": 1793001637.3209307,
+    "seen": 1793004495.8680003,
+    "ast_hash": "d87c37ceed35c920a0a130847b774f0b",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_audit_secret.py": {
+    "mtime": 1792923168.3673882,
+    "seen": 1792926206.7898748,
+    "ast_hash": "0db50204969ab826220474b144463bb9",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_audit_stdio.py": {
+    "mtime": 1792952142.8230708,
+    "seen": 1792964443.8071175,
+    "ast_hash": "e039cb89075eda3bf60ddc699a5952d0",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_audit_tracer.py": {
+    "mtime": 1792921408.276789,
+    "seen": 1792926206.789877,
+    "ast_hash": "260a6f1364319e190934f491043ca4ed",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_audit_writer.py": {
+    "mtime": 1792924220.877022,
+    "seen": 1792926206.7898784,
+    "ast_hash": "9ecccb5a9e6c971510e6ffe65023f07c",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase6_live_audit.py": {
+    "mtime": 1792926036.007725,
+    "seen": 1792926206.789905,
+    "ast_hash": "096798e78095811f3180438ec9a8a97b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-13-SUMMARY.md": {
+    "mtime": 1792868222.2100718,
+    "seen": 1792926206.79016,
+    "ast_hash": "210ced14a7ef5ed53370895fa58187b6",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-14-SUMMARY.md": {
+    "mtime": 1792869039.1714716,
+    "seen": 1792926206.790162,
+    "ast_hash": "7fe39a800bea5051f89685282ae33720",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-15-SUMMARY.md": {
+    "mtime": 1792874155.317109,
+    "seen": 1792926206.7901642,
+    "ast_hash": "9f89ccb02ab5f8a6f53fa25ddd9d197e",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-REVIEW.md": {
+    "mtime": 1792874784.1775076,
+    "seen": 1792926206.7901723,
+    "ast_hash": "0283b97e0f113922952c2ac6688319c8",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-SECURITY.md": {
+    "mtime": 1792885067.5963778,
+    "seen": 1792926206.7901738,
+    "ast_hash": "6d0bd7a260ea78bd8752bc89944ca0b6",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-UAT.md": {
+    "mtime": 1792884558.8030007,
+    "seen": 1792926206.7901747,
+    "ast_hash": "2122edbb8d175e83abf98067e5fe3818",
+    "semantic_hash": ""
+  },
+  ".planning/phases/05-live-secret-gate-and-integrity-enforcement/05-VERIFICATION.md": {
+    "mtime": 1792885085.6280334,
+    "seen": 1792926206.790177,
+    "ast_hash": "263ccb05bf7e4488475696e55d4344d4",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-01-PLAN.md": {
+    "mtime": 1792920596.725986,
+    "seen": 1792926206.7901793,
+    "ast_hash": "84b51d9d7c510864dde26dbb80745c51",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-01-SUMMARY.md": {
+    "mtime": 1792921777.204352,
+    "seen": 1792926206.7901804,
+    "ast_hash": "42075e819421dbfaeb865148c056854b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-02-PLAN.md": {
+    "mtime": 1792919881.6229756,
+    "seen": 1792926206.7901814,
+    "ast_hash": "0cdef8621681c22334e07ece71341c80",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-02-SUMMARY.md": {
+    "mtime": 1792922612.5980093,
+    "seen": 1792926206.7901824,
+    "ast_hash": "65c28f73642f58960c59b43631f391fd",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-03-PLAN.md": {
+    "mtime": 1792920002.5897698,
+    "seen": 1792926206.7901833,
+    "ast_hash": "28f9c7f3e2b40051482203712a935b1a",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-03-SUMMARY.md": {
+    "mtime": 1792923314.2600935,
+    "seen": 1792926206.7901843,
+    "ast_hash": "263c86507856adddac66a8591d2e6477",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-04-PLAN.md": {
+    "mtime": 1792920088.7619996,
+    "seen": 1792926206.7901852,
+    "ast_hash": "dcb8e8736b79a9696aaeba74cc3c258b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-04-SUMMARY.md": {
+    "mtime": 1792923852.8883505,
+    "seen": 1792926206.7901862,
+    "ast_hash": "912cf3177ca6ca7c166c97feddfac1ee",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-05-PLAN.md": {
+    "mtime": 1792920226.5998626,
+    "seen": 1792926206.7901874,
+    "ast_hash": "d9212be7a87bb5ac172af7b9d449908a",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-05-SUMMARY.md": {
+    "mtime": 1792924714.241416,
+    "seen": 1792926206.7901883,
+    "ast_hash": "dd26bddb33d3b1ef5b954afe5762729d",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-06-PLAN.md": {
+    "mtime": 1792920369.8033202,
+    "seen": 1792926206.7901893,
+    "ast_hash": "89442015bea19746185a53265aa36a0d",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-07-PLAN.md": {
+    "mtime": 1792920468.0928607,
+    "seen": 1792926206.79019,
+    "ast_hash": "8b488400dd723213a7c9e019965b53af",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-PATTERNS.md": {
+    "mtime": 1792918792.1841824,
+    "seen": 1792926206.7901936,
+    "ast_hash": "44a597a85062a2ba01bbc67f44075ce9",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-RESEARCH.md": {
+    "mtime": 1792918646.259012,
+    "seen": 1792926206.7901947,
+    "ast_hash": "213c7089a77284f63538722666e2c54a",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-VALIDATION.md": {
+    "mtime": 1792929434.4791222,
+    "seen": 1792964443.8074658,
+    "ast_hash": "f4126e1add3a658bde8148cd78351b80",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u0420\u0430\u043d\u043d\u0435\u0440 \u0436\u0438\u0432\u043e\u0433\u043e \u0448\u043b\u044e\u0437\u0430 \u0444\u0430\u0437\u044b 5 \u0441\u043b\u0430\u043b \u043f\u0443\u0441\u0442\u043e\u0435 \u0442\u0435\u043b\u043e \u0438 \u043f\u0430\u0434\u0430\u043b \u043d\u0430 \u0445\u0432\u043e\u0441\u0442\u043e\u0432\u043e\u0439 \u0441\u0442\u0440\u043e\u043a\u0435 \u043c\u043e\u0441\u0442\u0430.md": {
+    "mtime": 1792875180.2892184,
+    "seen": 1792926206.7903135,
+    "ast_hash": "27e21216bb509af5175db1586fc000ff",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 5 \u0437\u0430\u043a\u0440\u044b\u0442\u0430 \u0431\u0435\u0437 \u0440\u0435\u043b\u0438\u0437\u0430 R3, WR-01 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u043c \u0441\u043e\u0432\u0435\u0442\u043e\u043c.md": {
+    "mtime": 1792885233.8826315,
+    "seen": 1792926206.7903683,
+    "ast_hash": "e66bed0790e1c24e01dba8b000c35173",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 5 \u2014 \u043f\u043e\u0432\u0442\u043e\u0440 \u0441\u0442\u0430\u0434\u0438\u0438 match \u043e\u0434\u0438\u043d \u0440\u0430\u0437 \u043f\u043e \u044f\u0432\u043d\u043e\u043c\u0443 \u0440\u0435\u0448\u0435\u043d\u0438\u044e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f.md": {
+    "mtime": 1792875179.1482599,
+    "seen": 1792926206.790373,
+    "ast_hash": "f33304410a9a09cd379b4ff95659bfa3",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 6 \u2014 \u0436\u0443\u0440\u043d\u0430\u043b \u043f\u0438\u0448\u0435\u0442 \u0432\u0441\u0435 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u043d\u044b\u0435 \u043e\u043f\u0435\u0440\u0430\u0446\u0438\u0438 \u0441 \u0430\u0440\u0433\u0443\u043c\u0435\u043d\u0442\u0430\u043c\u0438 \u0438 \u043f\u0440\u043e\u043c\u043f\u0442\u043e\u043c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f.md": {
+    "mtime": 1792917449.376045,
+    "seen": 1792926206.7903745,
+    "ast_hash": "53882c3db5ee77aafde4a54301674bd9",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 6 \u2014 \u043e\u0431\u0451\u0440\u0442\u043a\u0430 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u043e\u0432 \u0432 main.py, \u0441\u0435\u0433\u043c\u0435\u043d\u0442\u044b \u0431\u0435\u0437 \u043f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u044f, call_id \u0442\u043e\u043b\u044c\u043a\u043e \u043f\u0440\u0438 \u0441\u0435\u043a\u0440\u0435\u0442\u0435.md": {
+    "mtime": 1792921110.967832,
+    "seen": 1792926206.7903757,
+    "ast_hash": "2bf481037747ba68e430d6a946f70c93",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-24 \u2014 \u0438\u0441\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 5, \u0442\u0440\u0438 \u0436\u0438\u0432\u044b\u0445 \u0441\u0442\u0430\u0434\u0438\u0438 PHASE5_GATE_OK, \u0432\u0435\u0440\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044f human_needed.md": {
+    "mtime": 1792875177.9995303,
+    "seen": 1792926206.790448,
+    "ast_hash": "baae06fab8dd278ca2a606dc7ced846c",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-25 \u2014 \u043e\u0431\u0441\u0443\u0436\u0434\u0435\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 6, \u0436\u0443\u0440\u043d\u0430\u043b \u0432\u0441\u0435\u0445 \u043e\u043f\u0435\u0440\u0430\u0446\u0438\u0439 \u0441 \u043f\u0440\u043e\u043c\u043f\u0442\u043e\u043c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f, call_id \u0432 \u043a\u043e\u043d\u0432\u0435\u0440\u0442\u0435, 180 \u0434\u043d\u0435\u0439.md": {
+    "mtime": 1792917448.189256,
+    "seen": 1792926206.7904525,
+    "ast_hash": "6c9af29d817195ad634b4c0001c0b544",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-25 \u2014 \u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 6, \u0441\u0435\u043c\u044c \u043f\u043b\u0430\u043d\u043e\u0432 \u0436\u0443\u0440\u043d\u0430\u043b\u0430 \u0430\u0443\u0434\u0438\u0442\u0430 \u0432 \u0441\u0435\u043c\u044c \u0432\u043e\u043b\u043d, \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043f\u0440\u043e\u0448\u043b\u0430 \u0441 \u043f\u0435\u0440\u0432\u043e\u0433\u043e \u0440\u0430\u0443\u043d\u0434\u0430.md": {
+    "mtime": 1792921109.7850642,
+    "seen": 1792926206.7904537,
+    "ast_hash": "e980da8e048144798161d78e3a1b7899",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-25 \u2014 \u043f\u0440\u0438\u0451\u043c\u043a\u0430 \u0444\u0430\u0437\u044b 5, \u043f\u044f\u0442\u044c \u043f\u0443\u043d\u043a\u0442\u043e\u0432 UAT \u043f\u0440\u043e\u0439\u0434\u0435\u043d\u044b, SECURITY.md 65 \u0438\u0437 65, \u0444\u0430\u0437\u0430 \u0437\u0430\u043a\u0440\u044b\u0442\u0430, R3 \u043f\u0440\u043e\u043f\u0443\u0449\u0435\u043d.md": {
+    "mtime": 1792885233.8820982,
+    "seen": 1792926206.7904556,
+    "ast_hash": "b0c15f5c115f224ee6fbee43b03de23d",
+    "semantic_hash": ""
+  },
+  "approval.py": {
+    "mtime": 1793029606.7336085,
+    "seen": 1793030362.2965617,
+    "ast_hash": "9e193132635cf1cbe291d66b5d54732b",
+    "semantic_hash": ""
+  },
+  "deploy/policy_tool.py": {
+    "mtime": 1792953715.580303,
+    "seen": 1792964443.8070252,
+    "ast_hash": "ab3a18a3f52add819c1746f275589645",
+    "semantic_hash": ""
+  },
+  "permit.py": {
+    "mtime": 1792951608.5523257,
+    "seen": 1792964443.807035,
+    "ast_hash": "4ce5ebb38e3915df35ae99fe20bf8e43",
+    "semantic_hash": ""
+  },
+  "policy.py": {
+    "mtime": 1792997379.5130818,
+    "seen": 1792998145.8341131,
+    "ast_hash": "d35b0f6d7a08df7900e4ac0b213f52e5",
+    "semantic_hash": ""
+  },
+  "revit_mcp/permits.py": {
+    "mtime": 1792954196.3384929,
+    "seen": 1792964443.8070614,
+    "ast_hash": "44298d80d5722f56151169d0f100ad27",
+    "semantic_hash": ""
+  },
+  "scripts/scratch_payload_gate.py": {
+    "mtime": 1792952649.0789087,
+    "seen": 1792964443.8070898,
+    "ast_hash": "0f8bc155096ceff4f49861dd0c0cb8dd",
+    "semantic_hash": ""
+  },
+  "tests/test_transports_smoke.py": {
+    "mtime": 1792952698.1188793,
+    "seen": 1792964443.807102,
+    "ast_hash": "3969cbc3427de9bc8ca73faa4134debc",
+    "semantic_hash": ""
+  },
+  "tests/unit/elicitation_support.py": {
+    "mtime": 1792951179.779121,
+    "seen": 1792964443.8071065,
+    "ast_hash": "8741b5d4992c172c4ef9438224664975",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_deploy_libpaths.py": {
+    "mtime": 1792952443.0199437,
+    "seen": 1792964443.807126,
+    "ast_hash": "00cb8f7e6a809a5a28d8eaff64e742e4",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_open_model_local_copy.py": {
+    "mtime": 1792942420.3807275,
+    "seen": 1792964443.8071358,
+    "ast_hash": "adf201517bc32f71151ac6f905eabb27",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_permit_concurrency.py": {
+    "mtime": 1792954168.9138923,
+    "seen": 1792964443.8071406,
+    "ast_hash": "3cf38b0eed11c74e8bd00d2ee3637028",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_permit_protocol.py": {
+    "mtime": 1792954167.671689,
+    "seen": 1792964443.8071418,
+    "ast_hash": "b7097c3e8f4f72b3d3ffc900c28f3c46",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase7_tracer.py": {
+    "mtime": 1792995492.7436936,
+    "seen": 1792995672.9823527,
+    "ast_hash": "8a6a9845aee6aafafb75d6af5ecda5b7",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_policy_decisions.py": {
+    "mtime": 1792972945.276412,
+    "seen": 1792973094.6445463,
+    "ast_hash": "b2279986f6b6022b8035bdbb1a1c67b1",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_policy_inventory.py": {
+    "mtime": 1792995229.2230284,
+    "seen": 1792995264.6621845,
+    "ast_hash": "d9fc6247fcb7c85ad5790372c002fb6e",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_policy_loader.py": {
+    "mtime": 1792953245.9449787,
+    "seen": 1792964443.8071578,
+    "ast_hash": "98c98d1dd3d7bef4b1687e005bbff5c8",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_policy_reload.py": {
+    "mtime": 1792953469.2926786,
+    "seen": 1792964443.8071587,
+    "ast_hash": "2b321d7a647b67c8703056a5f8fd3417",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_policy_tool.py": {
+    "mtime": 1792953773.8897147,
+    "seen": 1792964443.80716,
+    "ast_hash": "9458c91d4d7358b1f02f550a4910eac2",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_sdk_upgrade.py": {
+    "mtime": 1792951198.155141,
+    "seen": 1792964443.8071735,
+    "ast_hash": "1bb83f9291029aeaeda4e77b84ff3ce3",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-06-SUMMARY.md": {
+    "mtime": 1792926342.4230099,
+    "seen": 1792964443.8074543,
+    "ast_hash": "e7a11818bd1494ae5d57025fdc233560",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-07-SUMMARY.md": {
+    "mtime": 1792928111.7032819,
+    "seen": 1792964443.8074567,
+    "ast_hash": "619e09190ff116711febb40ca777e11f",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-REVIEW.md": {
+    "mtime": 1792928398.1549022,
+    "seen": 1792964443.8074627,
+    "ast_hash": "81fdd0cd84b447c8230d02f1b67506ff",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-SECURITY.md": {
+    "mtime": 1792929869.501024,
+    "seen": 1792964443.8074636,
+    "ast_hash": "3facc0486bed326322a9966945e312f0",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-UAT.md": {
+    "mtime": 1792929278.6917553,
+    "seen": 1792964443.8074646,
+    "ast_hash": "c26ca3f36a27835e8cb414a06370e7f7",
+    "semantic_hash": ""
+  },
+  ".planning/phases/06-structured-audit-log-of-true-outcomes/06-VERIFICATION.md": {
+    "mtime": 1792929900.8142734,
+    "seen": 1792964443.807467,
+    "ast_hash": "1a76bc31461f1d3b407dd7d407c4cb07",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-01-PLAN.md": {
+    "mtime": 1792949875.899164,
+    "seen": 1792964443.8074677,
+    "ast_hash": "3d86ef1452bc070ea27f78b004f832c8",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-01-SUMMARY.md": {
+    "mtime": 1792951353.4163167,
+    "seen": 1792964443.8074691,
+    "ast_hash": "17e4465207a86242bd017fcd6c6417e4",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-02-PLAN.md": {
+    "mtime": 1792949875.900664,
+    "seen": 1792964443.80747,
+    "ast_hash": "f6ce7165bed644398be73b1aa2ce433c",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-02-SUMMARY.md": {
+    "mtime": 1792952344.9713287,
+    "seen": 1792964443.8074713,
+    "ast_hash": "c7bdd60cf4b45951c98710f0f82fa931",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-03-PLAN.md": {
+    "mtime": 1792948337.0999458,
+    "seen": 1792964443.8074725,
+    "ast_hash": "f7383f7aa2bd38e0a4cdd7aa5ad1f68c",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-03-SUMMARY.md": {
+    "mtime": 1792952847.3273175,
+    "seen": 1792964443.8074734,
+    "ast_hash": "86ba8130015a8404626da287ba53ddd8",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-04-PLAN.md": {
+    "mtime": 1792949875.9021645,
+    "seen": 1792964443.8074744,
+    "ast_hash": "013f6c6f9c2b59968c9b61cd91b89877",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-04-SUMMARY.md": {
+    "mtime": 1792953962.978392,
+    "seen": 1792964443.8074756,
+    "ast_hash": "c37e555aac4bbe21e032a3a0d6ba17c7",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-05-PLAN.md": {
+    "mtime": 1792949875.9031634,
+    "seen": 1792964443.8074765,
+    "ast_hash": "c65ccf7cf336f459ec4cc1e2e32638aa",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-05-SUMMARY.md": {
+    "mtime": 1792954372.874572,
+    "seen": 1792964443.8074777,
+    "ast_hash": "df0b714ab8a8729911e75dc7dc09aeea",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-06-PLAN.md": {
+    "mtime": 1792949875.9041648,
+    "seen": 1792964443.8074784,
+    "ast_hash": "61587b27540dd27363a8156f75341bd1",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-07-PLAN.md": {
+    "mtime": 1792948735.1376512,
+    "seen": 1792964443.8074799,
+    "ast_hash": "616848c020b614ba1566aa013328b270",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-07-SUMMARY.md": {
+    "mtime": 1792956439.1635802,
+    "seen": 1792964443.8074806,
+    "ast_hash": "b95559d1176a2328ae39ea0ae92523eb",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-08-PLAN.md": {
+    "mtime": 1792948862.13935,
+    "seen": 1792964443.8074815,
+    "ast_hash": "d7991bca51e4cf9b80b234585cf0e121",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-09-PLAN.md": {
+    "mtime": 1792949875.9046645,
+    "seen": 1792964443.8074827,
+    "ast_hash": "3e2c9a6c057b1c867f6c8e93540d4431",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-10-PLAN.md": {
+    "mtime": 1792949939.4745104,
+    "seen": 1792964443.8074837,
+    "ast_hash": "b8f461f10bc5f7a6df51524a5a4fb29a",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-11-PLAN.md": {
+    "mtime": 1792949628.2335243,
+    "seen": 1792964443.8074846,
+    "ast_hash": "cff233a3a1e15737efb478032fffa819",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-12-PLAN.md": {
+    "mtime": 1792949875.907164,
+    "seen": 1792964443.8074856,
+    "ast_hash": "ecb03510213b026389d5b26ddbbfffa3",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-13-PLAN.md": {
+    "mtime": 1792949905.7514858,
+    "seen": 1792964443.8074868,
+    "ast_hash": "cc7c97b3fea7618b8e8cc891511995bb",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-14-PLAN.md": {
+    "mtime": 1792949905.7509847,
+    "seen": 1792964443.8074877,
+    "ast_hash": "751831380d3d64928e6c5beeac4ce40f",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-DISCUSSION-LOG.md": {
+    "mtime": 1792941322.477242,
+    "seen": 1792964443.8074903,
+    "ast_hash": "86c324fc40bcf0142bdc5a4d67fea73b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-PATTERNS.md": {
+    "mtime": 1792946637.1157024,
+    "seen": 1792964443.8074913,
+    "ast_hash": "d84ed5f1af0cc14ac8cc4f95f57ba3e3",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-RESEARCH.md": {
+    "mtime": 1792946211.9406638,
+    "seen": 1792964443.807494,
+    "ast_hash": "5732c0c2dd8759ebd54ad6f266125651",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-VALIDATION.md": {
+    "mtime": 1793025592.4702942,
+    "seen": 1793030362.297095,
+    "ast_hash": "1f1348cc20055abe3738ee6b3dd0ef1c",
+    "semantic_hash": ""
+  },
+  ".planning/quick/261025-ld5-open-model-umolchanie-lokalnaya-kopiya-d/261025-ld5-PLAN.md": {
+    "mtime": 1792942348.3956025,
+    "seen": 1792964443.8074958,
+    "ast_hash": "7016d57ecb55f06f8d525df51a8fbcea",
+    "semantic_hash": ""
+  },
+  ".planning/quick/261025-ld5-open-model-umolchanie-lokalnaya-kopiya-d/261025-ld5-SUMMARY.md": {
+    "mtime": 1792942965.9090052,
+    "seen": 1792964443.8074973,
+    "ast_hash": "8e490010b88a2b6de0f650ec908b0b1e",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/mcp 1.11+ \u0438\u043c\u043f\u043e\u0440\u0442\u0438\u0440\u0443\u0435\u0442 pywin32, \u0430 embeddable CPython payload \u0435\u0433\u043e \u043d\u0435 \u043d\u0430\u0445\u043e\u0434\u0438\u0442.md": {
+    "mtime": 1792950804.6991527,
+    "seen": 1792964443.8075743,
+    "ast_hash": "3ea64f9de146044020bf6d0d21708935",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/open_model \u0441 overwrite_local \u0443\u0434\u0430\u043b\u044f\u0435\u0442 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0443\u044e \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u0443\u044e \u043a\u043e\u043f\u0438\u044e \u0432\u043c\u0435\u0441\u0442\u0435 \u0441 \u043d\u0435\u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u043e\u0439 \u0440\u0430\u0431\u043e\u0442\u043e\u0439.md": {
+    "mtime": 1792943410.9300706,
+    "seen": 1792964443.8075776,
+    "ast_hash": "b66652933b4b741ba6dd6ed0e727abd9",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u0416\u0438\u0432\u043e\u0439 \u0448\u043b\u044e\u0437 \u0441 \u0434\u0432\u0443\u043c\u044f Revit \u2014 \u0437\u0430\u043f\u0443\u0441\u043a \u0432\u0442\u043e\u0440\u043e\u0433\u043e \u044d\u043a\u0437\u0435\u043c\u043f\u043b\u044f\u0440\u0430 \u0438 \u0442\u0440\u0438\u0433\u0433\u0435\u0440 \u043e\u0442\u043a\u0430\u0442\u0430.md": {
+    "mtime": 1792929219.9760656,
+    "seen": 1792964443.8076005,
+    "ast_hash": "47df03455993baad48b95d76f55e0486",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/\u041e\u0431\u0449\u0430\u044f venv \u043f\u043e\u0432\u0440\u0435\u0436\u0434\u0435\u043d\u0430 \u043f\u0440\u0438 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0438 SDK \u0438\u0437-\u0437\u0430 \u0440\u0430\u0431\u043e\u0442\u0430\u044e\u0449\u0438\u0445 MCP-\u0441\u0435\u0441\u0441\u0438\u0439.md": {
+    "mtime": 1792960215.340135,
+    "seen": 1792964443.8076081,
+    "ast_hash": "feaaa6381d87d396f3ba6d38f48c87df",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/open_model \u043f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e \u0441\u043e\u0437\u0434\u0430\u0451\u0442 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u0443\u044e \u043a\u043e\u043f\u0438\u044e, \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0443\u044e \u043f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u043e\u0432\u044b\u0432\u0430\u0435\u0442 \u0441\u043e \u0448\u0442\u0430\u043c\u043f\u043e\u043c.md": {
+    "mtime": 1792943401.0030897,
+    "seen": 1792964443.8076386,
+    "ast_hash": "18db3939ae7ed244294c41ff64c87c3f",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 6 \u0437\u0430\u043a\u0440\u044b\u0442\u0430, \u0440\u0435\u043b\u0438\u0437 R4 \u043e\u0442\u043b\u043e\u0436\u0435\u043d, WR-01..WR-03 \u043f\u0440\u0438\u043d\u044f\u0442\u044b \u043a\u0430\u043a \u0438\u0437\u0432\u0435\u0441\u0442\u043d\u044b\u0435 \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u0438\u044f.md": {
+    "mtime": 1792931914.0429547,
+    "seen": 1792964443.807688,
+    "ast_hash": "4ecce8e7d877599c64dc2dd83d0d4c94",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 6 \u2014 \u0436\u0438\u0432\u043e\u0439 \u0448\u043b\u044e\u0437 \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d \u043a\u043e\u043d\u0442\u0440\u043e\u043b\u043b\u0435\u0440\u043e\u043c \u043f\u043e \u043f\u0440\u043e\u0441\u044c\u0431\u0435, \u0444\u0430\u0437\u0430 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u043d\u0430 human_needed.md": {
+    "mtime": 1792929231.7800064,
+    "seen": 1792964443.8076894,
+    "ast_hash": "d4afd8c8525c3bb7d7b07b0c4833e4db",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 7 \u2014 SDK 1.30 \u0432\u043c\u0435\u0441\u0442\u043e 2.x, load_family \u0441 \u043f\u0440\u0435\u0434\u0443\u043f\u0440\u0435\u0436\u0434\u0435\u043d\u0438\u0435\u043c, \u0431\u0435\u0437 \u043f\u0430\u043c\u044f\u0442\u0438 \u043f\u043e\u0432\u0442\u043e\u0440\u043e\u0432, \u0444\u0430\u0439\u043b \u043e\u043f\u0435\u0440\u0430\u0442\u043e\u0440\u0430 \u0440\u044f\u0434\u043e\u043c \u0441 \u0441\u0435\u043a\u0440\u0435\u0442\u043e\u043c.md": {
+    "mtime": 1792950803.524413,
+    "seen": 1792964443.8076937,
+    "ast_hash": "b592839c09f455f85cc3fa7f6cd523a0",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 7 \u2014 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 \u0447\u0435\u0440\u0435\u0437 elicitation Hermes, \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u0438\u0435 \u043d\u0430 \u043a\u0430\u0436\u0434\u0443\u044e \u043c\u0443\u0442\u0430\u0446\u0438\u044e \u0432 Revit, \u043f\u043e\u043b\u0438\u0442\u0438\u043a\u0443 \u043e\u043f\u0435\u0440\u0430\u0442\u043e\u0440 \u043c\u0435\u043d\u044f\u0435\u0442 \u0446\u0435\u043b\u0438\u043a\u043e\u043c.md": {
+    "mtime": 1792941626.640484,
+    "seen": 1792964443.8076952,
+    "ast_hash": "433da2b9cec46f918fbd75f8eaa1b4f8",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-25 \u2014 \u0431\u044b\u0441\u0442\u0440\u0430\u044f \u0437\u0430\u0434\u0430\u0447\u0430 open_model, \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u0430\u044f \u043a\u043e\u043f\u0438\u044f \u043f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e, \u0448\u0442\u0430\u043c\u043f \u0432\u043c\u0435\u0441\u0442\u043e \u0443\u0434\u0430\u043b\u0435\u043d\u0438\u044f, \u0437\u0430\u043f\u0430\u0441\u043d\u043e\u0439 \u043d\u0430\u0431\u043e\u0440 \u041e\u0441\u0438 \u0438 \u0443\u0440\u043e\u0432\u043d\u0438.md": {
+    "mtime": 1792943399.8332436,
+    "seen": 1792964443.8077765,
+    "ast_hash": "b607fb0a41d111e9cda5af459ac620c2",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-25 \u2014 \u0438\u0441\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 6, \u0441\u0435\u043c\u044c \u043f\u043b\u0430\u043d\u043e\u0432, \u0436\u0438\u0432\u043e\u0439 \u0448\u043b\u044e\u0437 PHASE6_AUDIT_OK, \u0432\u0435\u0440\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u044f human_needed.md": {
+    "mtime": 1792929217.678995,
+    "seen": 1792964443.807778,
+    "ast_hash": "b3b95ccc3235ff534d22696acadc18a7",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-25 \u2014 \u0438\u0441\u043f\u043e\u043b\u043d\u0435\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 7, \u0448\u0435\u0441\u0442\u044c \u043f\u043b\u0430\u043d\u043e\u0432 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u044b, \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c \u0441 07-06.md": {
+    "mtime": 1792960347.4784188,
+    "seen": 1792964443.8077793,
+    "ast_hash": "78f363dfe3c781e7cdf396c2127f0597",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-25 \u2014 \u043e\u0431\u0441\u0443\u0436\u0434\u0435\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 7, \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 \u0447\u0435\u0440\u0435\u0437 elicitation Hermes, \u043e\u0434\u043d\u043e \u0414\u0430 \u043d\u0430 \u043e\u0434\u043d\u0443 \u043e\u043f\u0435\u0440\u0430\u0446\u0438\u044e, \u0424\u041e\u041f \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438.md": {
+    "mtime": 1792941625.50649,
+    "seen": 1792964443.8077824,
+    "ast_hash": "6068ca0748e8af5ff20198107a2829cf",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-25 \u2014 \u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435 \u0444\u0430\u0437\u044b 7, \u0447\u0435\u0442\u044b\u0440\u043d\u0430\u0434\u0446\u0430\u0442\u044c \u043f\u043b\u0430\u043d\u043e\u0432 \u0432 \u0434\u0435\u0432\u044f\u0442\u044c \u0432\u043e\u043b\u043d, SDK 1.30, \u0442\u0440\u0435\u0431\u043e\u0432\u0430\u043d\u0438\u044f SAFE-01..21.md": {
+    "mtime": 1792950770.6812706,
+    "seen": 1792964443.8077855,
+    "ast_hash": "b6b666e9fdd247543b2e2fa8542b0616",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-25 \u2014 \u043f\u0440\u0438\u0451\u043c\u043a\u0430 \u0444\u0430\u0437\u044b 6, UAT 4 \u0438\u0437 4, SECURITY.md 38 \u0438\u0437 38, \u0444\u0430\u0437\u0430 \u0437\u0430\u043a\u0440\u044b\u0442\u0430, R4 \u043e\u0442\u043b\u043e\u0436\u0435\u043d.md": {
+    "mtime": 1792931912.8678994,
+    "seen": 1792964443.8077884,
+    "ast_hash": "817543737fc216d0d4b31af57d7a4be6",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase7_gate_wiring.py": {
+    "mtime": 1792967711.8843806,
+    "seen": 1792968832.218267,
+    "ast_hash": "799ab1d709f3e025fcececf73a6c94a6",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase7_rollout.py": {
+    "mtime": 1792968887.711565,
+    "seen": 1792972476.7813013,
+    "ast_hash": "2931dbe90aafc92554a7f09b497ef8f2",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-06-SUMMARY.md": {
+    "mtime": 1792964501.5976944,
+    "seen": 1792968832.2186043,
+    "ast_hash": "95f962a9fb0ae5e90919715918142165",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase7_channel.py": {
+    "mtime": 1792997275.116215,
+    "seen": 1792998145.8343208,
+    "ast_hash": "68758e53cf863347a4d5840f6197d6d7",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase7_wait_unlocked.py": {
+    "mtime": 1792972418.12327,
+    "seen": 1792972476.781304,
+    "ast_hash": "ea7500217c00b89ac753ab791782bc2a",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-08-SUMMARY.md": {
+    "mtime": 1792968847.2644513,
+    "seen": 1792972476.7816381,
+    "ast_hash": "1d4697801cde7c1c11daae03c3f0b661",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase7_audit.py": {
+    "mtime": 1792997283.3408873,
+    "seen": 1792998145.8343184,
+    "ast_hash": "a27fd729b5a115f50be2ece2035af957",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-09-SUMMARY.md": {
+    "mtime": 1792973171.8008263,
+    "seen": 1792973204.2462428,
+    "ast_hash": "1e1d65435302ddd579078e6a938ede8a",
+    "semantic_hash": ""
+  },
+  "revit_mcp/lookup.py": {
+    "mtime": 1792994892.4528923,
+    "seen": 1792995264.6620753,
+    "ast_hash": "38575fddf8bbec2ee908b60bc44a1541",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_revit_lookup.py": {
+    "mtime": 1792994906.645624,
+    "seen": 1792995264.6621952,
+    "ast_hash": "6c1e12ab0838c64ef9b1a4526cb70ff7",
+    "semantic_hash": ""
+  },
+  "revit_mcp/preflight.py": {
+    "mtime": 1792995986.2889307,
+    "seen": 1792996178.261356,
+    "ast_hash": "6e865b6effb1ee73049674f89aa02f95",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase7_preflight_route.py": {
+    "mtime": 1792995939.7382283,
+    "seen": 1792996178.261459,
+    "ast_hash": "f3472b68748c797f7c67f93c50347e24",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase7_facts.py": {
+    "mtime": 1792997485.1322176,
+    "seen": 1792998145.8343248,
+    "ast_hash": "93a697a01cc7fa4ed0b0efeea06a2057",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_policy_fop.py": {
+    "mtime": 1792996491.9741216,
+    "seen": 1792998145.8343415,
+    "ast_hash": "ca24574768ed11a8dac5ae8d240a1063",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_policy_messages.py": {
+    "mtime": 1793029624.3380153,
+    "seen": 1793030362.2967436,
+    "ast_hash": "b864a911ce5b29783e7f64d79c3b5f6f",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-10-SUMMARY.md": {
+    "mtime": 1792996233.369227,
+    "seen": 1792998145.8349104,
+    "ast_hash": "5b9c77df11d8b5e7d0c109b6c460322b",
+    "semantic_hash": ""
+  },
+  "tests/test_phase7_live_bench.py": {
+    "mtime": 1793030437.0043266,
+    "seen": 1793030913.7288713,
+    "ast_hash": "2fd6af581c53d54b6c480ab1f3d22561",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase7_docstrings.py": {
+    "mtime": 1793001709.097561,
+    "seen": 1793004495.8680694,
+    "ast_hash": "784d1fac2b29711dfb26e0e23d02308f",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase7_live_bench.py": {
+    "mtime": 1793030186.644325,
+    "seen": 1793030362.2967317,
+    "ast_hash": "2b80da23653d56f1d0e1b017de851d94",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_phase7_scope_docs.py": {
+    "mtime": 1793003011.6898584,
+    "seen": 1793004495.8680823,
+    "ast_hash": "112c99015b407a020ec802df80a484af",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-11-SUMMARY.md": {
+    "mtime": 1792998243.593042,
+    "seen": 1793004495.8686492,
+    "ast_hash": "d17fe2bf269f5a3c8a81d11c9937c916",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-12-SUMMARY.md": {
+    "mtime": 1793003456.9046774,
+    "seen": 1793004495.8686535,
+    "ast_hash": "f5e28e989ebf3e43ea753a1d3d4e180e",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/decisions/\u0424\u0430\u0437\u0430 7 \u2014 preflight \u0437\u0430\u043a\u0440\u0435\u043f\u043b\u044f\u0435\u0442 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442, \u043f\u043e\u0432\u0442\u043e\u0440\u043d\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0444\u0430\u043a\u0442\u043e\u0432 \u0438 \u0424\u041e\u041f \u043e\u0442\u043c\u0435\u043d\u044f\u0435\u0442 \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0435\u0435 \u0441\u043e\u0433\u043b\u0430\u0441\u0438\u0435.md": {
+    "mtime": 1792999290.7061765,
+    "seen": 1793004495.8689868,
+    "ast_hash": "581071056b93d77f70cefc7146051f6b",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-26 \u2014 \u0444\u0430\u0437\u0430 7, preflight \u0438 \u0424\u041e\u041f \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u044b, \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c \u0441 07-12.md": {
+    "mtime": 1792999266.8187308,
+    "seen": 1793004495.8691459,
+    "ast_hash": "9d990affeeaa3cd140a3f933a9ed5942",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-13-SUMMARY.md": {
+    "mtime": 1793009292.3986442,
+    "seen": 1793030362.2970872,
+    "ast_hash": "fcf4a4d7b7b3b4a88c9f62018bc1a665",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_batch_config_encoding.py": {
+    "mtime": 1793625036.9366896,
+    "seen": 1793626083.1403315,
+    "ast_hash": "d90d44c2f4299abc8a7a5c89aa57a32e",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_selected_elements_output.py": {
+    "mtime": 1793030481.6048756,
+    "seen": 1793030913.72897,
+    "ast_hash": "701ea00e29aed14e3a484ca39505b2a3",
+    "semantic_hash": ""
+  },
+  "deploy/START-HERE.txt": {
+    "mtime": 1793622299.544298,
+    "seen": 1793626083.141114,
+    "ast_hash": "9ffa7d9493a7843ed7f1be6fe9008e61",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/Bench \u0444\u0430\u0437\u044b 7 \u2014 preflight \u0438 \u0438\u0442\u043e\u0433 \u043e\u043f\u0435\u0440\u0430\u0446\u0438\u0438 \u0438\u043c\u0435\u044e\u0442 \u043e\u0431\u0449\u0438\u0439 call_id.md": {
+    "mtime": 1793025187.3900323,
+    "seen": 1793030362.2971597,
+    "ast_hash": "217f4d3c25fba47a52569c2ec87d4977",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/knowledge/debugging/Bench \u0444\u0430\u0437\u044b 7 \u2014 \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0438\u0435 audit \u0438 \u043d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043e\u0442\u0432\u0435\u0442 \u0443\u0440\u043e\u0432\u043d\u0435\u0439 \u0434\u0430\u0432\u0430\u043b\u0438 \u043b\u043e\u0436\u043d\u043e\u0435 \u0434\u043e\u043a\u0430\u0437\u0430\u0442\u0435\u043b\u044c\u0441\u0442\u0432\u043e.md": {
+    "mtime": 1793009544.7017734,
+    "seen": 1793030362.2971616,
+    "ast_hash": "fe9105e25bee05ff2406946d015f39ee",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-26 \u2014 07-13 bench \u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d \u043e\u0444\u043b\u0430\u0439\u043d, \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c \u0441 07-14.md": {
+    "mtime": 1793010017.766672,
+    "seen": 1793030362.29741,
+    "ast_hash": "fc7a27dd8f32103ceef4759cf71ca46b",
+    "semantic_hash": ""
+  },
+  "rvt-mcp_Obsidian/sessions/2026-10-26 \u2014 \u043f\u0438\u043b\u043e\u0442 Phase 7, live STOP \u0438\u0437-\u0437\u0430 \u0430\u0443\u0434\u0438\u0442\u0430.md": {
+    "mtime": 1793025877.4846637,
+    "seen": 1793030362.2974117,
+    "ast_hash": "d0ee9fb47a7094c4a3a4e89c7bbc3c9b",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_inactive_document_reads.py": {
+    "mtime": 1793036627.9418707,
+    "seen": 1793036792.044744,
+    "ast_hash": "126f624b66f2dcff99be0facbc070d39",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_view_export_isolation.py": {
+    "mtime": 1793036538.458797,
+    "seen": 1793036792.0448349,
+    "ast_hash": "0c7ef0d6e713cbed321e67f1a8657c9b",
+    "semantic_hash": ""
+  },
+  ".planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-PILOT-FIXES-OFFLINE.md": {
+    "mtime": 1793030978.1433673,
+    "seen": 1793036792.0451488,
+    "ast_hash": "e31148f1b778a063f639a3bc98503b03",
+    "semantic_hash": ""
+  },
+  "deploy/diag-secret.ps1": {
+    "mtime": 1793622032.2616272,
+    "seen": 1793626083.1401513,
+    "ast_hash": "30f3f082f5aa6330d7c23c909cf24292",
+    "semantic_hash": ""
+  },
+  "revit_mcp/runtime_info.py": {
+    "mtime": 1793624916.754838,
+    "seen": 1793626083.140233,
+    "ast_hash": "74b93cb1e5958b1bc05c336f30ac59e9",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_runtime_info.py": {
+    "mtime": 1793624911.88298,
+    "seen": 1793626083.1404543,
+    "ast_hash": "e6125623f08a4593a9efbfcb405a1940",
     "semantic_hash": ""
   }
 }

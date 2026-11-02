@@ -30,13 +30,17 @@ Close the disposable model without saving. No Telegram/gateway acceptance is cla
 
 POSTS_SENT=0 means no write was handed to transport. POSTS_SENT>=1 consumes the direct
 run and it must never be repeated. ``classify`` sends nothing and prints a Phase 7
-sentinel plus POSTS_SENT and SECRET_OCCURRENCES. Exit statuses: 0 OK, 1 STOP, 2 refusal
+sentinel plus POSTS_SENT and SECRET_OCCURRENCES. ``classify RECORD --out NEW_REPORT``
+also saves a versioned offline verdict with source/classifier hashes; it never overwrites
+inputs or an existing report, and leaves unrecorded UI evidence explicitly unverified.
+Exit statuses: 0 OK, 1 STOP, 2 refusal
 before a write. A failure after a post still prints STOP and the nonzero count.
 """
 
 import argparse
 import asyncio
 import ctypes
+import hashlib
 import json
 import os
 import re
@@ -46,6 +50,7 @@ import uuid
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SENTINEL_OK = "PHASE7_BENCH_OK"
 SENTINEL_STOP = "PHASE7_BENCH_STOP"
+CLASSIFIER_VERSION = "2-tool-route"
 LEVEL_PREFIX = "phase7-bench-"
 VERDICT_OK = "ok"
 VERDICT_STOP = "stop"
@@ -272,16 +277,22 @@ def _scenario_entry(key, call_id, by_id, used, reasons):
     if not _text(call_id) or call_id in used:
         _add(reasons, "hermes.{}.call_id".format(key), "missing or reused")
         return None
-    found = by_id.get(call_id, [])
-    if len(found) != 1:
-        _add(reasons, "hermes.{}.audit".format(key), "expected one audit entry")
-        return None
-    entry = found[0]
-    if entry.get("tool") != tool or entry.get("route") != route:
-        _add(reasons, "hermes.{}.audit".format(key), "wrong tool or route")
-        return None
     used.add(call_id)
-    return entry
+    found = by_id.get(call_id, [])
+    targets = [entry for entry in found
+               if entry.get("tool") == tool and entry.get("route") == route]
+    # Preflight and post-accept recheck are audited under the original tool's
+    # call_id. Only those rows may accompany the unique final operation.
+    unexpected = [entry for entry in found
+                  if entry.get("tool") != tool or
+                  entry.get("route") not in (route, "/mutation_preflight/")]
+    if unexpected:
+        _add(reasons, "hermes.{}.audit".format(key), "wrong tool or route for call_id")
+        return None
+    if len(targets) != 1:
+        _add(reasons, "hermes.{}.audit".format(key), "expected one final tool/route audit entry")
+        return None
+    return targets[0]
 
 
 def judge_hermes(hermes, audit_files):
@@ -293,10 +304,12 @@ def judge_hermes(hermes, audit_files):
             a1.get("outcome") == "success" and h1.get("element_gone") is True):
         _add(reasons, "hermes.h1", "expected accepted confirmed delete")
     h2 = _dict(values.get("h2")); a2 = _scenario_entry("h2", h2.get("call_id"), by_id, used, reasons)
-    if not (a2 and a2.get("approval") == "declined" and a2.get("outcome") == "denied" and h2.get("element_present") is True):
+    if not (a2 and a2.get("decision") == "confirm" and a2.get("approval") == "declined" and
+            a2.get("outcome") == "denied" and h2.get("element_present") is True):
         _add(reasons, "hermes.h2", "expected declined delete without effect")
     h3 = _dict(values.get("h3")); a3 = _scenario_entry("h3", h3.get("call_id"), by_id, used, reasons)
-    if not (a3 and a3.get("outcome") == "expired"):
+    if not (a3 and a3.get("decision") == "confirm" and a3.get("approval") == "expired" and
+            a3.get("outcome") == "expired"):
         _add(reasons, "hermes.h3", "expected expired")
     h4 = _dict(values.get("h4")); call_ids = _list(h4.get("call_ids"))
     if len(call_ids) != 2 or len(set(call_ids)) != 2:
@@ -304,6 +317,8 @@ def judge_hermes(hermes, audit_files):
     else:
         entries = [_scenario_entry("h4", value, by_id, used, reasons) for value in call_ids]
         if any(not entry or entry.get("decision") != "confirm" or
+               entry.get("outcome") != {"accepted": "success", "declined": "denied",
+                                        "cancelled": "denied", "expired": "expired"}.get(entry.get("approval")) or
                entry.get("approval") not in ("accepted", "declined", "cancelled", "expired")
                for entry in entries):
             _add(reasons, "hermes.h4", "each same-request audit entry needs approval")
@@ -649,6 +664,35 @@ def _cmd_ingest(args):
     handle = _reserve(args.out, record); handle.close(); return record
 
 
+def _cmd_classify(args):
+    path = _local_path(args.record)
+    if path is None or not os.path.isfile(path):
+        raise _UsageError("record is missing or non-local")
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    record = json.loads(raw.decode("utf-8"))
+    secret = _load_secret()
+    verdict, reasons = classify(record, secret)
+    if args.out:
+        with open(__file__, "rb") as handle:
+            classifier_hash = hashlib.sha256(handle.read()).hexdigest()
+        report = {
+            "classifier_version": CLASSIFIER_VERSION,
+            "classifier_sha256": classifier_hash,
+            "source_sha256": hashlib.sha256(raw).hexdigest(),
+            "offline_only": True, "verdict": verdict, "reasons": reasons,
+            "posts_sent": _dict(record).get("posts_sent"),
+            "secret_occurrences": secret_occurrences(raw, secret),
+            "secret_scan_available": bool(secret),
+            "manual_limits": ["H4 operation code difference not verified",
+                              "gateway not verified", "company FOP not verified",
+                              "card contents and exact cascade prediction not captured"],
+        }
+        handle = _reserve(args.out, report)
+        handle.close()
+    return _print_result(record, secret)
+
+
 def _print_result(record, secret):
     verdict, reasons = classify(record, secret)
     print(SENTINEL_OK if verdict == VERDICT_OK else SENTINEL_STOP)
@@ -668,9 +712,10 @@ def main(argv=None):
             if name == "direct": command.add_argument("--level-name", required=True)
         ingest = commands.add_parser("ingest"); ingest.add_argument("--record", required=True); ingest.add_argument("--audit-dir", required=True); ingest.add_argument("--replies", required=True); ingest.add_argument("--out", required=True)
         classify_cmd = commands.add_parser("classify"); classify_cmd.add_argument("record")
+        classify_cmd.add_argument("--out", help="new local offline report; never overwrites evidence")
         args = parser.parse_args(argv)
         if args.command == "template": print(json.dumps(evidence_template(), indent=2, sort_keys=True)); return 0
-        if args.command == "classify": return _print_result(_load_checked(args.record, "record"), _load_secret())
+        if args.command == "classify": return _cmd_classify(args)
         if args.command == "preflight": record, _ = asyncio.run(_cmd_preflight(args)); return _print_result(record, _load_secret())
         if args.command == "direct": record, _ = asyncio.run(_cmd_direct(args)); return _print_result(record, _load_secret())
         if args.command == "ingest": return _print_result(_cmd_ingest(args), _load_secret())

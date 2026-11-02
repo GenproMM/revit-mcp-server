@@ -586,6 +586,8 @@ def call(world, fn, body=None, **extra):
                  "request": request_of(body, route=route_of(world, fn))}
     available.update(extra)
     parameters = inspect.signature(fn).parameters
+    if "document" in parameters:
+        available["uiapp"] = None
     return fn(**dict((name, available[name]) for name in parameters if name in available))
 
 

@@ -658,6 +658,9 @@ def test_publish_smoke_scratch_share(tmp_path):
     assert not os.path.exists(stage), "the staged tree was not moved into place"
     assert not os.path.exists(prev), "a first publish has no previous version"
     assert [os.path.exists(path) for path in guarded] == existed
+    # Packaging must not silently transcode or normalize batch line endings.
+    for name in ("install.cmd", "update.cmd", "find-python.cmd", "check_routes_config.py"):
+        assert _read(os.path.join(env["MCP_SHARE_ROOT"], "install", name)) == _read(os.path.join(REPO, "deploy", name))
 
 
 @needs_windows_publish

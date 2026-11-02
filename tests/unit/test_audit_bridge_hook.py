@@ -234,6 +234,19 @@ async def test_image_carries_provenance_and_writes_one_entry(machine):
     assert entry["outcome"] == "success" and entry["process"]["pid"] == PID_A
 
 
+@pytest.mark.anyio
+async def test_image_forwards_document_query_to_selected_process(machine):
+    image = await bridge.revit_image(
+        "/get_view/Level 1", target=SEL_A, params={"document": "doc1.test.2"})
+
+    assert not isinstance(image, str), image
+    requests = [r for r in machine.requests if "/get_view/" in r.url.path]
+    assert len(requests) == 1
+    assert requests[0].url.params["document"] == "doc1.test.2"
+    assert requests[0].url.port == PORT_A
+    assert len(read_entries()) == 1
+
+
 # ---------------------------------------------------------------- /status/
 
 @pytest.mark.anyio

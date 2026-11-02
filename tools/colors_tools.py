@@ -168,6 +168,7 @@ def register_colors_tools(mcp, revit_get, revit_post, revit_image=None):
     async def list_category_parameters(
         category_name: str,
         target: str = None,
+        document: str = None,
         ctx: Context = None,
     ) -> str:
         """
@@ -185,11 +186,14 @@ def register_colors_tools(mcp, revit_get, revit_post, revit_image=None):
             category_name: Name of the category to check parameters for (e.g., "Walls", "Doors")
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
 
         Returns:
             List of available parameters with their types and sample values
         """
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
         try:
             data = {"category_name": category_name}
 
@@ -197,6 +201,8 @@ def register_colors_tools(mcp, revit_get, revit_post, revit_image=None):
                 await ctx.info(
                     "Getting available parameters for {} category".format(category_name)
                 )
+            if document is not None:
+                data["document"] = document
             response = await revit_post(
                 "/list_category_parameters/", data, ctx, **_target_options(target))
             return format_response(response)

@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Editing tools — delete, modify, and select elements"""
 
+import copy
+
 from mcp.server.fastmcp import Context
-from .utils import format_response
+from .utils import read_options, format_response
 
 
 def _target_options(target):
@@ -131,6 +133,7 @@ def register_editing_tools(mcp, revit_get, revit_post, revit_image=None):
     @mcp.tool()
     async def get_selected_elements(
         target: str = None,
+        document: str = None,
         ctx: Context = None,
     ) -> str:
         """Get details of elements currently selected in the Revit UI.
@@ -139,15 +142,26 @@ def register_editing_tools(mcp, revit_get, revit_post, revit_image=None):
         the user has selected in Revit. Returns an empty list if nothing
         is selected (not an error).
 
-        This is a read. The selection belongs to the active document of the
-        selected Revit process; it has no document argument, because reading an
-        inactive document is supported only by read_document_summary and
-        read_document_levels.
+        This is a read of document (an opaque selector from list_documents),
+        which must be active: UI selection/current-view state is not model-wide
+        data. An inactive selector is refused with HTTP 412; nothing is activated.
+        Without document, reads the active document. Invalid/closed tokens never fall back.
 
         Args:
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
-        response = await revit_get("/selected_elements/", ctx, **_target_options(target))
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
+        response = await revit_get("/selected_elements/", ctx, **read_options(target, document))
+        if (isinstance(response, dict) and isinstance(response.get("elements"), list)
+                and not response.get("error")
+                and response.get("status", "").lower() not in
+                ("error", "failed", "failure", "exception")):
+            # Keep the structured selection visible, rather than only its summary.
+            # A shallow copy preserves bridge provenance without changing its reply.
+            response = copy.copy(response)
+            response.pop("message", None)
         return format_response(response)

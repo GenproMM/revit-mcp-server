@@ -247,26 +247,22 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
         """Make one already-open Revit document the active one, as an explicit action.
 
         This is the only way to switch the document shown in the Revit window.
-        Reads and mutations never activate a document implicitly: a call that
-        names a document that is open but not active is refused (HTTP 412), and
-        you then use this tool and retry. Get the "document" value from
+        Reads and mutations never activate a document implicitly. Model reads can
+        inspect an inactive document directly; mutations still refuse it (HTTP 412). Get the "document" value from
         list_documents.
 
-        Supported: a document that is already open, has been saved, is not
-        workshared and whose file exists on disk. It is activated using its own
-        file path, and nothing is saved, reopened or opened from another path.
-        If it is already the active document the call succeeds without doing
-        anything.
+        Eligible: an already-open saved project with its own existing file path,
+        including workshared models and saved detached copies. Uses that exact path
+        once, with no save, sync, central-path substitution or retry. Workshared
+        activation has offline coverage, not a live acceptance measurement. Revit
+        may still refuse the API call; its diagnostics and observed active model
+        are reported. An already-active document needs no API call.
 
-        Everything else is refused before Revit is touched, with one of these
-        reasons: unsaved (never saved, no path), detached (a detached copy),
-        no-usable-file-path (the path is not an existing file, e.g. a cloud
-        path), linked-unsupported, family-unmeasured, cloud-unmeasured,
-        workshared-unmeasured (any workshared model, even a saved one) and
-        eligibility-unreadable (a needed property could not be read). The
-        "unmeasured" classes have not been verified safe, so they are refused,
-        not tried. A selector that is closed, stale, unknown, ambiguous or
-        missing is also refused; no other document is ever activated instead.
+        Refusal codes: unsaved, no-usable-file-path, linked-unsupported,
+        family-unmeasured, cloud-unmeasured and eligibility-unreadable.
+        Unsaved/no-file, link, family and cloud models are refused before the API.
+        Closed, stale, unknown, ambiguous or missing selectors never choose another
+        document. No model is closed and reopened as a workaround.
 
         Returns the activated document and, from a fresh read of Revit, the
         document that is active now, plus a final line naming the Revit process
@@ -307,13 +303,9 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
     async def read_document_summary(document: str, target: str = None, ctx: Context = None) -> str:
         """Read a summary of one open Revit document, even if it is not the active one.
 
-        This is one of exactly two reads that may inspect a document that is open
-        but not active (the other is read_document_levels). Every other tool still
-        acts on the active document only, and a mutation addressed to an inactive
-        document is refused. The summary is read only through the document you
-        name; this tool does not activate it, so you can compare two models
-        without switching the Revit window. Get the "document" value from
-        list_documents.
+        Reads only the document named by its opaque selector from list_documents,
+        without activating it. Other model-data reads also accept document; UI
+        selection/current-view reads and mutations still require the active model.
 
         Returned fields, all read from the named document and nothing else:
         title, path, non_type_element_count (all elements that are not types),
@@ -359,13 +351,9 @@ def register_document_tools(mcp, revit_get, revit_post, revit_image=None):
     async def read_document_levels(document: str, target: str = None, ctx: Context = None) -> str:
         """Read the levels of one open Revit document, even if it is not the active one.
 
-        This is one of exactly two reads that may inspect a document that is open
-        but not active (the other is read_document_summary). Every other tool still
-        acts on the active document only, and a mutation addressed to an inactive
-        document is refused. The levels come only from the document you name; this
-        tool does not activate it, so you can compare the levels of two models
-        without switching the Revit window. list_levels, by contrast, always reads
-        the active document. Get the "document" value from list_documents.
+        Reads only the document named by its opaque selector from list_documents,
+        without activating it. list_levels also accepts an optional document selector;
+        this tool additionally reports active-before/after observations.
 
         Returns one entry per level, sorted by elevation: name, elevation_mm
         (millimeters, rounded to a whole millimeter), elevation_feet (Revit's

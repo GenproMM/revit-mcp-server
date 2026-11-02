@@ -8,6 +8,7 @@ from .utils import get_element_name, make_element_id, get_element_id_value, supp
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from .lookup import resolve_instance_parameter
 from .security import gate_or_response
+from .identity import read_document_or_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -335,8 +336,7 @@ def register_editing_routes(api):
             return refusal
         return attribute_response(_modify_element(document, request), descriptor, uiapp=uiapp)
 
-    @api.route("/selected_elements/", methods=["GET"])
-    def get_selected_elements_handler(doc, uidoc):
+    def _get_selected_elements_handler(doc, uidoc):
         """Get details of elements currently selected in Revit UI."""
         try:
             if not doc:
@@ -420,5 +420,15 @@ def register_editing_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+
+    @api.route("/selected_elements/", methods=["GET"])
+    def get_selected_elements_handler(doc, uidoc, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=True)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_get_selected_elements_handler(selected, uidoc), descriptor, uiapp=uiapp)
 
     logger.info("Editing routes registered successfully")

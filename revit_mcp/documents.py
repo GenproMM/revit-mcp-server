@@ -26,7 +26,7 @@ pyrevit.HOST_APP. pyRevit passes only the arguments a handler declares
 one of uiapp/uidoc/doc, or it silently runs off the API thread.
 
 Activation (plan 02-05, D-12, the accepted G4 policy): /activate_document/ is a
-separate explicit action that makes one already-open, saved, non-workshared
+separate explicit action that makes one already-open, saved
 document with an existing file path the active one, by handing that document's
 own PathName to UIApplication.OpenAndActivateDocument(string). Every other class
 is refused with a named reason BEFORE any API call; nothing here saves, reopens,
@@ -40,16 +40,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# Refusal reasons of the G4 gate, in the order they are evaluated. Everything but
-# the measured class (saved, non-workshared, existing file path) is refused before
-# any API call; "unmeasured" means refused, not tried.
+# Saved workshared/detached copies are eligible only through their own existing
+# file path. Offline coverage is not a live activation measurement.
 ACTIVATION_REFUSALS = {
     "unsaved": (
         "The document has never been saved (its path is empty), so there is no file to "
         "activate from. Activation was refused; nothing was saved, opened or changed."),
-    "detached": (
-        "The document is a detached copy and has no usable source file. Activation was "
-        "refused; nothing was saved, reopened or changed, and no other path was tried."),
     "no-usable-file-path": (
         "The document path is not an existing file on this machine (a cloud or other "
         "non-file path, or a file that has moved). Activation was refused; no other path "
@@ -62,9 +58,6 @@ ACTIVATION_REFUSALS = {
     "cloud-unmeasured": (
         "Cloud models are an unmeasured class: activation was refused, not tried. "
         "Nothing was changed."),
-    "workshared-unmeasured": (
-        "Workshared models, even a saved one with an existing path, are an unmeasured "
-        "class: activation was refused, not tried. Nothing was saved, reopened or changed."),
     "eligibility-unreadable": (
         "A property needed to decide whether this document may be activated could not be "
         "read, so activation was refused, not tried. Nothing was changed."),
@@ -94,10 +87,11 @@ def _read_flag(document, name):
 
 
 def activation_refusal_reason(document, file_exists=None):
-    """Why this document may not be activated, or None when it is the measured class.
+    """Why this document may not be activated, or None when it has an eligible saved file.
 
-    Fixed order: unsaved, detached, no-usable-file-path, linked-unsupported,
-    family-unmeasured, cloud-unmeasured, workshared-unmeasured. A property that
+    Fixed order: unsaved, no-usable-file-path, linked-unsupported,
+    family-unmeasured, cloud-unmeasured. Saved workshared and detached copies
+    use their own existing path; no central-path substitution or save is attempted. A property that
     cannot be read refuses as eligibility-unreadable: the gate fails closed. Pure
     over a duck-typed Document; it calls no activation API.
     """
@@ -108,11 +102,6 @@ def activation_refusal_reason(document, file_exists=None):
         return "eligibility-unreadable"
     if not path or not str(path).strip():
         return "unsaved"
-    detached = _read_flag(document, "IsDetached")
-    if detached is None:
-        return "eligibility-unreadable"
-    if detached:
-        return "detached"
     try:
         found = bool(exists(path))
     except Exception:
@@ -121,8 +110,7 @@ def activation_refusal_reason(document, file_exists=None):
         return "no-usable-file-path"
     for name, reason in (("IsLinked", "linked-unsupported"),
                          ("IsFamilyDocument", "family-unmeasured"),
-                         ("IsModelInCloud", "cloud-unmeasured"),
-                         ("IsWorkshared", "workshared-unmeasured")):
+                         ("IsModelInCloud", "cloud-unmeasured")):
         value = _read_flag(document, name)
         if value is None:
             return "eligibility-unreadable"
@@ -304,8 +292,8 @@ def run_activation(selector, uiapp, read_snapshot=None, registry=None, file_exis
 
 # ------------------------------------------------ addressed reads (plan 02-06, D-11)
 #
-# Exactly two reads may inspect a document that is open but not active: the summary
-# and the levels. Each is read ONLY through the Document the registry just resolved
+# These two required-selector reads additionally report active-before/after state.
+# Other model-data reads use identity.read_document_or_response. Each uses the Document resolved
 # from the request's token (never the UI's active document, never a retained
 # reference, never a global). The UI document is read for nothing here except the
 # before/after diagnostics, which go through the same registry snapshot as every
@@ -660,10 +648,10 @@ def register_documents_routes(api):
         Declares ``uiapp`` so pyRevit runs it in the Revit API context; the injected
         uiapp makes the activation call (never HOST_APP.uiapp).
 
-        Payload: {"document": "<selector from /documents/>"}. Only a saved,
-        non-workshared document with an existing file path is activated; every
-        other class is refused with a named reason and HTTP 422 before any API
-        call. Success (200) means the re-read active document Equals the target.
+        Payload: {"document": "<selector from /documents/>"}. A saved project with
+        its own existing file path is eligible, including workshared/detached copies.
+        Unsupported classes are refused with a named reason and HTTP 422 before any
+        API call. Success (200) means the re-read active document Equals the target.
         Every reply carries process_identity and observed_active_document.
         """
         # Phase 5 gate (D-01): shared secret and integrity, before anything else.

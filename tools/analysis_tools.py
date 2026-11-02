@@ -2,7 +2,7 @@
 """Analysis tools — element filtering, rooms, materials, and statistics"""
 
 from mcp.server.fastmcp import Context
-from .utils import format_response
+from .utils import read_options, format_response
 
 
 def _target_options(target):
@@ -23,6 +23,7 @@ def register_analysis_tools(mcp, revit_get, revit_post, revit_image=None):
         bounding_box_max: dict = None,
         max_elements: int = 50,
         target: str = None,
+        document: str = None,
         ctx: Context = None,
     ) -> str:
         """Filter and find Revit elements by category, type, visibility, and spatial bounds.
@@ -31,10 +32,10 @@ def register_analysis_tools(mcp, revit_get, revit_post, revit_image=None):
         filters for precise results — e.g., find all exterior walls on Level 1
         visible in the current view.
 
-        This is a read. It reads the document that is active in the selected Revit
-        process; it has no document argument, because reading an inactive document
-        is supported only by read_document_summary and read_document_levels, and
-        this tool never reads an inactive document or changes anything.
+        This is a read of document (an opaque selector from list_documents),
+        active or inactive. Without document, reads the active document. Never
+        activates a document. Invalid or closed selectors never fall back.
+        UI selection/current-view reads and visible_in_view require the active document.
 
         Args:
             category: BuiltInCategory name, e.g. "OST_Walls", "OST_Doors" (optional)
@@ -45,8 +46,11 @@ def register_analysis_tools(mcp, revit_get, revit_post, revit_image=None):
             max_elements: Maximum results to return (defaults to 50)
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
         data = {
             "category": category,
             "type_name": type_name,
@@ -55,12 +59,15 @@ def register_analysis_tools(mcp, revit_get, revit_post, revit_image=None):
             "bounding_box_max": bounding_box_max,
             "max_elements": max_elements,
         }
+        if document is not None:
+            data["document"] = document
         response = await revit_post("/ai_filter/", data, ctx, **_target_options(target))
         return format_response(response)
 
     @mcp.tool()
     async def export_room_data(
         target: str = None,
+        document: str = None,
         ctx: Context = None,
     ) -> str:
         """Export data for all rooms defined in the Revit model.
@@ -68,22 +75,27 @@ def register_analysis_tools(mcp, revit_get, revit_post, revit_image=None):
         Returns room names, numbers, levels, areas, perimeters, and departments
         in a structured format suitable for analysis and reporting.
 
-        This is a read. It reads the document that is active in the selected Revit
-        process; it has no document argument, because reading an inactive document
-        is supported only by read_document_summary and read_document_levels.
+        This is a read of document (an opaque selector from list_documents),
+        active or inactive. Without document, reads the active document. Never
+        activates a document. Invalid or closed selectors never fall back.
+        UI selection/current-view reads and visible_in_view require the active document.
 
         Args:
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
-        response = await revit_get("/room_data/", ctx, **_target_options(target))
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
+        response = await revit_get("/room_data/", ctx, **read_options(target, document))
         return format_response(response)
 
     @mcp.tool()
     async def get_material_quantities(
         categories: list[str] = None,
         target: str = None,
+        document: str = None,
         ctx: Context = None,
     ) -> str:
         """Get material quantities (areas and volumes) from the Revit model.
@@ -91,24 +103,31 @@ def register_analysis_tools(mcp, revit_get, revit_post, revit_image=None):
         Returns aggregated material data across all elements, optionally filtered
         by category. Useful for quantity takeoffs and cost estimation.
 
-        This is a read. It reads the document that is active in the selected Revit
-        process; it has no document argument, because reading an inactive document
-        is supported only by read_document_summary and read_document_levels.
+        This is a read of document (an opaque selector from list_documents),
+        active or inactive. Without document, reads the active document. Never
+        activates a document. Invalid or closed selectors never fall back.
+        UI selection/current-view reads and visible_in_view require the active document.
 
         Args:
             categories: List of categories to include, e.g. ["OST_Walls", "OST_Floors"]
                 (optional, defaults to all categories)
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
         data = {"categories": categories}
+        if document is not None:
+            data["document"] = document
         response = await revit_post("/material_quantities/", data, ctx, **_target_options(target))
         return format_response(response)
 
     @mcp.tool()
     async def analyze_model_statistics(
         target: str = None,
+        document: str = None,
         ctx: Context = None,
     ) -> str:
         """Analyze the Revit model and return element counts grouped by category.
@@ -116,14 +135,18 @@ def register_analysis_tools(mcp, revit_get, revit_post, revit_image=None):
         Provides a high-level overview of what's in the model — how many walls,
         doors, windows, floors, etc. Useful for progress tracking and model health checks.
 
-        This is a read. It reads the document that is active in the selected Revit
-        process; it has no document argument, because reading an inactive document
-        is supported only by read_document_summary and read_document_levels.
+        This is a read of document (an opaque selector from list_documents),
+        active or inactive. Without document, reads the active document. Never
+        activates a document. Invalid or closed selectors never fall back.
+        UI selection/current-view reads and visible_in_view require the active document.
 
         Args:
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
-        response = await revit_get("/model_statistics/", ctx, **_target_options(target))
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
+        response = await revit_get("/model_statistics/", ctx, **read_options(target, document))
         return format_response(response)

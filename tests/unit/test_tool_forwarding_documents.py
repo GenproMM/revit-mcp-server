@@ -197,8 +197,8 @@ def test_signatures_carry_target_and_only_actual_mutations_carry_an_optional_doc
         assert names == row["legacy"] + ["target", "document", "ctx"], names
         assert parameters["document"].default is None
     elif row["kind"] == "read":
-        assert names == row["legacy"] + ["target", "ctx"], names
-        assert "document" not in names
+        expected = ["target", "ctx"] if name == "list_documents" else ["target", "document", "ctx"]
+        assert names == row["legacy"] + expected, names
     else:
         # 02-04..02-06 contract: required document first, then target, then ctx.
         assert names == ["document", "target", "ctx"], names
@@ -221,10 +221,9 @@ def test_docstrings_name_every_argument_and_state_the_scope_rule(name):
                        "several", "nothing is activated"):
             assert phrase in lowered, (name, phrase)
     elif row["kind"] == "read":
-        assert not re.search(r"^\s+document:", args_block, re.M)
         if name != "list_documents":
-            assert "active document" in lowered
-            assert "read_document_summary" in doc and "read_document_levels" in doc
+            assert re.search(r"^\s+document:", args_block, re.M)
+            assert "active document" in lowered and "list_documents" in doc
             assert "inactive" in lowered
 
 
@@ -302,12 +301,17 @@ def test_mutations_refuse_a_blank_document_without_sending(name, blank):
 
 
 @pytest.mark.parametrize("name", READS)
-def test_reads_offer_no_way_to_name_a_document_and_never_dispatch_when_asked(name):
+def test_reads_forward_document_or_reject_process_level_selection(name):
     row = TOOLS[name]
     tools, calls = register_module(row["module"])
-    with pytest.raises(TypeError):
-        asyncio.run(tools[name](document=DOCUMENT_SELECTOR))
-    assert calls == []
+    if row["kind"] != "read" or name == "list_documents":
+        with pytest.raises(TypeError):
+            asyncio.run(tools[name](**dict(row["minimal"], document=DOCUMENT_SELECTOR)))
+        assert calls == []
+    else:
+        asyncio.run(tools[name](**dict(row["minimal"], document=DOCUMENT_SELECTOR)))
+        assert len(calls) == 1
+        assert calls[0][3]["params"]["document"] == DOCUMENT_SELECTOR
 
 
 # ------------------------------------------------- route-specific behaviour

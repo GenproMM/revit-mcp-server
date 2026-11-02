@@ -3,7 +3,7 @@
 
 from mcp.server.fastmcp import Context
 from typing import Dict, Any
-from .utils import describe_broken_path, format_response
+from .utils import read_options, describe_broken_path, format_response
 
 
 def _target_options(target):
@@ -117,6 +117,7 @@ def register_family_tools(mcp, revit_get, revit_post, revit_image=None):
         contains: str = None,
         limit: int = 50,
         target: str = None,
+        document: str = None,
         ctx: Context = None,
     ) -> str:
         """List loadable family types present in the current Revit model.
@@ -124,10 +125,10 @@ def register_family_tools(mcp, revit_get, revit_post, revit_image=None):
         Returns a flat list of family_name / type_name / category / is_active,
         which is how you find the exact pair place_family needs.
 
-        This is a read. It reads the active document of the selected Revit
-        process; it has no document argument, because reading an inactive
-        document is supported only by read_document_summary and
-        read_document_levels.
+        This is a read of document (an opaque selector from list_documents),
+        active or inactive. Without document, reads the active document. Never
+        activates a document. Invalid or closed selectors never fall back.
+        UI selection/current-view reads and visible_in_view require the active document.
 
         Known limitation: the route currently ignores both arguments. It always
         returns the first 50 family types it encounters, unfiltered and in no
@@ -143,9 +144,14 @@ def register_family_tools(mcp, revit_get, revit_post, revit_image=None):
                 the route, which caps at 50 regardless.
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
         params = {}
+        if document is not None:
+            params["document"] = document
         if contains:
             params["contains"] = contains
         if limit != 50:
@@ -155,7 +161,7 @@ def register_family_tools(mcp, revit_get, revit_post, revit_image=None):
         return format_response(result)
 
     @mcp.tool()
-    async def list_family_categories(target: str = None, ctx: Context = None) -> str:
+    async def list_family_categories(target: str = None, document: str = None, ctx: Context = None) -> str:
         """List the family categories present in the current Revit model.
 
         Cheaper and more complete than list_families when you only need to know
@@ -163,17 +169,20 @@ def register_family_tools(mcp, revit_get, revit_post, revit_image=None):
         Scope: categories of loadable families in this document — not every
         Revit BuiltInCategory, and not system families such as walls or floors.
 
-        This is a read. It reads the active document of the selected Revit
-        process; it has no document argument, because reading an inactive
-        document is supported only by read_document_summary and
-        read_document_levels.
+        This is a read of document (an opaque selector from list_documents),
+        active or inactive. Without document, reads the active document. Never
+        activates a document. Invalid or closed selectors never fall back.
+        UI selection/current-view reads and visible_in_view require the active document.
 
         Args:
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
-        response = await revit_get("/list_family_categories/", ctx, **_target_options(target))
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
+        response = await revit_get("/list_family_categories/", ctx, **read_options(target, document))
         return format_response(response)
 
     @mcp.tool()

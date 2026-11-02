@@ -221,7 +221,7 @@ def _report_phase(phase, observations, markers, runs):
 async def _run(host, port, sleep_s):
     import httpx
 
-    base = "http://{}:{}/revit_mcp".format(host, port)
+    base = "http://{}:{}/genpro_revit_mcp".format(host, port)
     target = "{}:{}".format(host, port)
     per_request = sleep_s + 60
 

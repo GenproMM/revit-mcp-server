@@ -567,6 +567,8 @@ def call(world, fn, body=None, **extra):
     available = {"uiapp": world.uiapp, "doc": world.injected, "request": request_of(body, route=route_of(world, fn))}
     available.update(extra)
     parameters = inspect.signature(fn).parameters
+    if "document" in parameters:
+        available["uiapp"] = None
     return fn(**dict((name, available[name]) for name in parameters if name in available))
 
 
@@ -694,7 +696,7 @@ def test_mutation_handler_declares_the_api_context_arguments(world, key):
 def test_reads_keep_their_signature_and_are_not_guarded(world, key):
     module_name, route, method = key
     fn = handler_of(world, module_name, route, method)
-    assert list(inspect.signature(fn).parameters) == READS[key]
+    assert list(inspect.signature(fn).parameters) == READS[key] + ["uiapp", "document"]
     if route == "/project_parameters/":
         def bindings():
             world.record("attr", world.injected, "ParameterBindings")

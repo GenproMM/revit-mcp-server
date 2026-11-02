@@ -36,7 +36,7 @@ API_CONTEXT_ARGUMENTS = frozenset({"uiapp", "uidoc", "doc"})
 
 # ---------------------------------------------------------------- tool classes
 MUTATION = "mutation"          # target, document, ctx; POST body carries the document
-READ = "read"                  # target, ctx; no way to name a document
+READ = "read"                  # target, optional document, ctx; model data or explicit UI guard
 STATUS = "status"              # target, ctx; process liveness, no document
 ADDRESSED_READ = "addressed-read"  # (document, target, ctx): the two inactive-document reads
 ACTIVATION = "activation"      # (document, target, ctx): explicit G4 activation
@@ -132,7 +132,7 @@ for _route in (
 ):
     ROUTE_CLASSES[_route] = ACTIVE_READ
 ROUTE_CLASSES.update({
-    "/model_info/": HTTP_THREAD,
+    "/model_info/": ACTIVE_READ,
     "/status/": HTTP_THREAD,
     "/documents/": REGISTRY_LIST,
     "/document_summary/": REGISTRY_READ,
@@ -144,12 +144,10 @@ ROUTE_CLASSES.update({
     "/mutation_preflight/": PREFLIGHT_READ,
 })
 
-# The two handlers that pyRevit runs on its HTTP thread because they declare none of
-# uiapp, uidoc or doc (found in 02-04, recorded as follow-up concerns, deliberately not
-# changed in 02-17). The allow-list is exact: a third such handler fails, and so does a
-# stale entry once one of the two is fixed, so the exception cannot outlive its reason.
+# Only status still runs on pyRevit's HTTP thread (no uiapp, uidoc or doc).
+# Model info now declares API-context arguments and resolves its selected Document.
+# The exact allow-list prevents another handler from silently running off-thread.
 HTTP_THREAD_ALLOWLIST = {
-    "/model_info/": ("model_info", "get_model_info", ()),
     "/status/": ("status", "revit_status", ("verbose",)),
 }
 

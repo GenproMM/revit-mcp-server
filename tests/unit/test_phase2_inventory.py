@@ -203,7 +203,7 @@ def test_tool_signature_matches_its_class(name):
         assert "target" not in names and "document" not in names, names
         return
     assert "target" in names and params["target"].default is None
-    if kind == MUTATION:
+    if kind == MUTATION or (kind == READ and name != "list_documents"):
         assert names[-3:] == ["target", "document", "ctx"], names
         assert params["document"].default is None
     elif kind in (ADDRESSED_READ, ACTIVATION):
@@ -225,7 +225,7 @@ def test_the_exact_set_of_tools_without_a_target_is_the_named_local_process_tool
 def test_the_exact_set_of_tools_that_accept_a_document_is_mutations_plus_the_addressed_ones():
     with_document = {name for name in TOOLS if "document" in _params(name)}
     expected = {name for name, kind in TOOL_CLASSES.items()
-                if kind in (MUTATION, ADDRESSED_READ, ACTIVATION)}
+                if kind in (MUTATION, ADDRESSED_READ, ACTIVATION) or (kind == READ and name != "list_documents")}
     assert with_document == expected
 
 
@@ -302,7 +302,7 @@ def test_a_mutation_refuses_a_blank_or_non_string_document_without_sending(name,
 
 
 @pytest.mark.parametrize("name", sorted(n for n, k in TOOL_CLASSES.items()
-                                        if k in (READ, STATUS, FILE_READ, PROCESS_OPEN, D15)))
+                                        if k in (STATUS, FILE_READ, PROCESS_OPEN, D15) or n == "list_documents"))
 def test_no_read_or_process_level_tool_offers_a_way_to_name_a_document(name):
     """A document cannot be expressed on them: a TypeError before any dispatch."""
     tools, calls = register_everything()
@@ -421,7 +421,7 @@ def test_every_route_handler_declares_uiapp_uidoc_or_doc_except_the_two_known_ht
 
 def test_the_http_thread_allow_list_is_recorded_not_fixed_here():
     """02-17 must not change these two handlers; the declared signatures are pinned verbatim."""
-    assert ROUTE_BY_KEY["/model_info/"].args == []
+    assert ROUTE_BY_KEY["/model_info/"].args == ["doc", "uiapp", "document"]
     assert ROUTE_BY_KEY["/status/"].args == ["verbose"]
     for key in ("/model_info/", "/status/"):
         assert ROUTE_BY_KEY[key].methods == ["GET"]
@@ -614,7 +614,7 @@ def test_the_activation_allow_branch_is_gated_by_the_saved_non_workshared_file_c
     refusal = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
                and n.name == "activation_refusal_reason"][0]
     text = ast.dump(refusal)
-    for flag in ("IsDetached", "IsLinked", "IsFamilyDocument", "IsModelInCloud", "IsWorkshared"):
+    for flag in ("IsLinked", "IsFamilyDocument", "IsModelInCloud"):
         assert flag in text, flag
 
 

@@ -13,6 +13,14 @@ PROVENANCE_ATTR = "revit_provenance"
 _HTTP_ERROR_TEXT = re.compile(r"Error: \d{3} - ")
 
 
+def read_options(target=None, document=None):
+    """GET options for independent process and document selection."""
+    options = {} if target is None else {"target": target}
+    if document is not None:
+        options["params"] = {"document": document}
+    return options
+
+
 def format_response(response):
     """Format an API response for an MCP tool and append its provenance.
 

@@ -1039,12 +1039,12 @@ def test_a_saved_non_workshared_project_with_an_existing_file_has_no_refusal():
 
 @pytest.mark.parametrize("flags,expected", [
     (dict(path=""), "unsaved"),
-    (dict(IsDetached=True), "detached"),
+    (dict(IsDetached=True), None),
     (dict(path="BIM360://Acme/Project.rvt", exists=False), "no-usable-file-path"),
     (dict(IsLinked=True), "linked-unsupported"),
     (dict(IsFamilyDocument=True), "family-unmeasured"),
     (dict(IsModelInCloud=True), "cloud-unmeasured"),
-    (dict(IsWorkshared=True), "workshared-unmeasured"),
+    (dict(IsWorkshared=True), None),
 ])
 def test_each_unsupported_class_has_its_own_named_reason(flags, expected):
     assert reason_of(**flags) == expected
@@ -1054,24 +1054,23 @@ def test_refusal_order_is_fixed_when_several_things_are_true():
     everything = dict(IsDetached=True, IsLinked=True, IsFamilyDocument=True,
                       IsModelInCloud=True, IsWorkshared=True)
     assert reason_of(path="", exists=False, **everything) == "unsaved"
-    assert reason_of(exists=False, **everything) == "detached"
+    assert reason_of(exists=False, **everything) == "no-usable-file-path"
     remaining = dict(everything)
     del remaining["IsDetached"]
     assert reason_of(exists=False, **remaining) == "no-usable-file-path"
     for expected, flag in (("linked-unsupported", "IsLinked"),
                            ("family-unmeasured", "IsFamilyDocument"),
-                           ("cloud-unmeasured", "IsModelInCloud"),
-                           ("workshared-unmeasured", "IsWorkshared")):
+                           ("cloud-unmeasured", "IsModelInCloud")):
         assert reason_of(**remaining) == expected
         del remaining[flag]
     assert reason_of(**remaining) is None
 
 
-def test_saved_workshared_model_with_an_existing_path_is_still_refused():
-    assert reason_of(IsWorkshared=True, path="C:/Models/Central.rvt", exists=True) == "workshared-unmeasured"
+def test_saved_workshared_model_with_an_existing_path_is_eligible():
+    assert reason_of(IsWorkshared=True, path="C:/Models/Central.rvt", exists=True) is None
 
 
-@pytest.mark.parametrize("flag", ACTIVATION_FLAGS)
+@pytest.mark.parametrize("flag", ("IsLinked", "IsFamilyDocument", "IsModelInCloud"))
 def test_an_unreadable_flag_fails_closed(flag):
     assert reason_of(**{flag: RuntimeError("cannot read")}) == "eligibility-unreadable"
 
@@ -1088,10 +1087,10 @@ def test_a_file_existence_check_that_raises_is_not_a_usable_path():
 
 @pytest.mark.parametrize("flags,file_exists,reason", [
     (dict(), exists_everywhere, None),    # control: the same rig activates
-    (dict(IsDetached=True), exists_everywhere, "detached"),
+    (dict(IsDetached=True), exists_everywhere, None),
     (dict(IsFamilyDocument=True), exists_everywhere, "family-unmeasured"),
     (dict(IsModelInCloud=True), exists_everywhere, "cloud-unmeasured"),
-    (dict(IsWorkshared=True), exists_everywhere, "workshared-unmeasured"),
+    (dict(IsWorkshared=True), exists_everywhere, None),
     (dict(), exists_nowhere, "no-usable-file-path"),
 ])
 def test_ineligible_documents_answer_422_with_zero_api_calls(flags, file_exists, reason):
@@ -1106,12 +1105,12 @@ def test_ineligible_documents_answer_422_with_zero_api_calls(flags, file_exists,
     assert uiapp.active.Equals(docs["other"])
 
 
-def test_activation_is_reachable_only_for_the_saved_non_workshared_existing_path_class():
-    """02-17, D-12/G4, exhaustive: every flag combination x saved x file-exists is tried.
+def test_activation_allows_saved_file_backed_projects_including_workshared_and_detached():
+    """Exhaustive offline contract: every flag combination x saved x file-exists.
 
-    The allow branch (one OpenAndActivateDocument call, HTTP 200) exists for exactly one cell
-    of the 2**5 * 2 * 2 table; every other cell answers 422 with zero API calls and leaves the
-    other document active.
+    The allow branch (one OpenAndActivateDocument call, HTTP 200) has four cells:
+    detached/workshared flags are independent. Unsupported cells make zero calls
+    and leave the other document active. This is not a live Revit measurement.
     """
     allowed = 0
     for values in itertools.product([False, True], repeat=len(ACTIVATION_FLAGS)):
@@ -1131,7 +1130,7 @@ def test_activation_is_reachable_only_for_the_saved_non_workshared_existing_path
                 status, payload = activate(uiapp, reg, tokens[1],
                                            exists_everywhere if exists else exists_nowhere)
                 cell = (flags, saved, exists)
-                if not any(values) and saved and exists:
+                if not any(flags[k] for k in ("IsLinked", "IsFamilyDocument", "IsModelInCloud")) and saved and exists:
                     allowed += 1
                     assert status == 200 and uiapp.calls == [("C:/Models/COORD.rvt",)], cell
                     assert uiapp.active.Equals(coord), cell
@@ -1139,7 +1138,7 @@ def test_activation_is_reachable_only_for_the_saved_non_workshared_existing_path
                     assert status == 422 and uiapp.calls == [], cell
                     assert payload["reason"] in documents.ACTIVATION_REFUSALS, cell
                     assert uiapp.active.Equals(other), cell
-    assert allowed == 1
+    assert allowed == 4
 
 
 def test_unsaved_document_answers_422_unsaved_with_zero_api_calls():
@@ -1157,8 +1156,8 @@ def test_every_refusal_reason_has_a_message():
     for code in documents.ACTIVATION_REFUSALS:
         assert documents.ACTIVATION_REFUSALS[code].strip()
     assert set(documents.ACTIVATION_REFUSALS) == {
-        "unsaved", "detached", "no-usable-file-path", "linked-unsupported", "family-unmeasured",
-        "cloud-unmeasured", "workshared-unmeasured", "eligibility-unreadable"}
+        "unsaved", "no-usable-file-path", "linked-unsupported", "family-unmeasured",
+        "cloud-unmeasured", "eligibility-unreadable"}
 
 
 # ---------------------------------------------------------- token refusals
@@ -1328,14 +1327,15 @@ def test_route_activates_from_a_text_plain_bytes_body_and_names_the_process(monk
 
 
 def test_route_refusal_keeps_process_and_observed_active_identity(monkeypatch, fake_routes):
-    app, uiapp, reg, tokens, docs = rig(IsWorkshared=True)
+    app, uiapp, reg, tokens, docs = rig(IsModelInCloud=True)
     handler = activate_handlers(monkeypatch, fake_routes, uiapp, reg)[("/activate_document/", ("POST",))]
     handler(uiapp, activate_request({"document": tokens["coord"]}))
     payload, status = fake_routes[-1]
-    assert status == 422 and payload["reason"] == "workshared-unmeasured" and payload["error"]
+    assert status == 422 and payload["reason"] == "cloud-unmeasured" and payload["error"]
     assert payload["process_identity"] == IDENT
     assert payload["observed_active_document"]["document"] == tokens["other"]
     assert uiapp.calls == []
+
 
 
 def test_route_without_a_document_is_a_400_not_an_exception(monkeypatch, fake_routes):
@@ -2223,8 +2223,8 @@ def test_read_document_summary_signature_and_docstring_are_the_api_contract():
                   "name", "number", "client", "status", "unreadable_fields", "ui_switched"):
         assert field in doc, "docstring must list returned field {}".format(field)
     lowered = doc.lower()
-    assert "exactly two" in lowered and "02-07" in doc and "list_documents" in doc
-    assert "does not activate" in lowered or "never activate" in lowered
+    assert "without activating" in lowered and "02-07" in doc and "list_documents" in doc
+    assert "does not activate" in lowered or "never activate" in lowered or "without activating" in lowered
     assert "closed" in lowered and "refused" in lowered
     assert "model_info" in doc and "OpenAndActivateDocument" not in doc
 
@@ -2522,8 +2522,8 @@ def test_read_document_levels_signature_and_docstring_are_the_api_contract():
                   "ui_switched"):
         assert field in doc, "docstring must list returned field {}".format(field)
     lowered = doc.lower()
-    assert "exactly two" in lowered and "02-07" in doc and "list_documents" in doc
-    assert "does not activate" in lowered or "never activate" in lowered
+    assert "without activating" in lowered and "02-07" in doc and "list_documents" in doc
+    assert "does not activate" in lowered or "never activate" in lowered or "without activating" in lowered
     assert "millimeter" in lowered and "closed" in lowered and "refused" in lowered
     assert "OpenAndActivateDocument" not in doc
 
@@ -2701,9 +2701,10 @@ def test_other_activation_replies_do_not_carry_an_exception_key():
     app, uiapp, reg, tokens, docs = rig(mode="noop")
     status, payload = activate(uiapp, reg, tokens["coord"])
     assert status == 409 and "exception" not in payload
-    app, uiapp, reg, tokens, docs = rig(IsWorkshared=True)
+    app, uiapp, reg, tokens, docs = rig(IsModelInCloud=True)
     status, payload = activate(uiapp, reg, tokens["coord"])
     assert status == 422 and "exception" not in payload
+
 
 
 FAILED_BODY = {
@@ -3044,15 +3045,9 @@ def test_addressing_signatures_carry_target_and_only_mutations_carry_document(na
     entry = ALL_ADDRESSING_TOOLS[name]
     tools, _ = register_addressing_module(entry["module"])
     names = list(inspect.signature(tools[name]).parameters)
-    if entry["kind"] == "mutation":
-        assert names == entry["legacy"] + ["target", "document", "ctx"], names
-    else:
-        assert names == entry["legacy"] + ["target", "ctx"], names
-        assert "document" not in names
+    assert names == entry["legacy"] + ["target", "document", "ctx"], names
     parameters = inspect.signature(tools[name]).parameters
-    assert parameters["target"].default is None and parameters["ctx"].default is None
-    if entry["kind"] == "mutation":
-        assert parameters["document"].default is None
+    assert all(parameters[k].default is None for k in ("target", "document", "ctx"))
 
 
 @pytest.mark.parametrize("name", sorted(ALL_ADDRESSING_TOOLS))
@@ -3070,9 +3065,9 @@ def test_addressing_docstrings_name_every_argument_and_state_the_scope_rule(name
                        "several"):
             assert phrase in lowered, (name, phrase)
     else:
-        assert not re.search(r"^\s+document:", args_block, re.M)
+        assert re.search(r"^\s+document:", args_block, re.M)
         assert "active document" in lowered
-        assert "read_document_summary" in doc and "read_document_levels" in doc
+        assert "list_documents" in doc
         assert "inactive" in lowered
 
 
@@ -3125,12 +3120,14 @@ def test_addressing_mutations_refuse_a_blank_document_without_sending(name, blan
 
 
 @pytest.mark.parametrize("name", sorted(n for n, e in ALL_ADDRESSING_TOOLS.items() if e["kind"] == "read"))
-def test_addressing_reads_offer_no_way_to_name_a_document(name):
+def test_addressing_reads_forward_document_without_activation(name):
     entry = ALL_ADDRESSING_TOOLS[name]
-    tools, calls = register_addressing_module(entry["module"])
-    with pytest.raises(TypeError):
-        asyncio.run(tools[name](document=DOCUMENT_SELECTOR))
-    assert calls == []
+    text, calls = run_addressing_tool(name, entry, document=DOCUMENT_SELECTOR)
+    assert len(calls) == 1
+    if entry["method"] == "POST":
+        assert calls[0][2]["document"] == DOCUMENT_SELECTOR
+    else:
+        assert calls[0][3]["params"]["document"] == DOCUMENT_SELECTOR
 
 
 @pytest.mark.parametrize("module", ADDRESSING_MODULES)
@@ -3163,7 +3160,7 @@ def test_document_is_attached_exactly_once_per_mutation_in_the_module_source(mod
     """The inventory and the source agree: one forwarding site per mutation, none for a read."""
     with open(os.path.join(REPO_ROOT, "tools", "{}_tools.py".format(module)), encoding="utf-8") as handle:
         source = handle.read()
-    mutations = [n for n, e in ALL_ADDRESSING_TOOLS.items() if e["module"] == module and e["kind"] == "mutation"]
+    mutations = [n for n, e in ALL_ADDRESSING_TOOLS.items() if e["module"] == module and e["method"] == "POST"]
     assert source.count('data["document"] = document') == len(mutations)
 
 
@@ -3208,8 +3205,8 @@ def test_list_category_parameters_is_a_read_even_though_it_posts():
     assert calls == [("POST", "/list_category_parameters/", {"category_name": "Walls"},
                       {"target": PROCESS_SELECTOR})]
     tools, _ = register_addressing_module("colors")
-    assert "document" not in inspect.signature(tools["list_category_parameters"]).parameters
-    assert "document" not in tools["list_category_parameters"].__doc__.split("Args:", 1)[1]
+    assert "document" in inspect.signature(tools["list_category_parameters"]).parameters
+    assert "document:" in tools["list_category_parameters"].__doc__.split("Args:", 1)[1]
 
 
 @pytest.mark.parametrize("name", ["color_splash", "clear_colors"])

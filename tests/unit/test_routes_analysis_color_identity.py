@@ -498,7 +498,9 @@ def call(world, fn, body=None, request=None):
         request = request_of(body, route=route_of(world, fn))
     available = {"uiapp": world.uiapp, "doc": world.injected, "request": request}
     parameters = inspect.signature(fn).parameters
-    return fn(**dict((name, available[name]) for name in parameters))
+    if "document" in parameters:
+        available["uiapp"] = None
+    return fn(**dict((name, available[name]) for name in parameters if name in available))
 
 
 def two_documents(world, active="beta"):
@@ -847,7 +849,7 @@ def test_reads_keep_their_signature_and_are_not_guarded(world, key):
     body = READS[key]
     fn = handler_of(world, module_name, route, method)
     expected = ["doc"] if body is None else ["doc", "request"]
-    assert list(inspect.signature(fn).parameters) == expected
+    assert list(inspect.signature(fn).parameters) == expected + ["uiapp", "document"]
     reply = call(world, fn, body)
     assert world.guard_calls == []
     assert world.events_on("INJECTED"), "a read still works on the injected doc"
@@ -988,13 +990,16 @@ def test_color_mutations_never_reach_a_style_or_transaction_on_a_refused_documen
     assert world.kinds("transaction") == [] and world.kinds("collector") == []
 
 
-def test_list_category_parameters_stays_a_read_and_reads_the_active_document(world):
+def test_list_category_parameters_refuses_a_stale_selector_without_active_fallback(world, monkeypatch):
+    monkeypatch.setattr(identity, "read_live_snapshot", lambda uiapp=None: (
+        world.app.Documents, world.uiapp.active))
     world.open("Only", "C:/Models/Only.rvt", active=True)
     world.tokens()
     reply = call(world, handler_of(world, "colors", "/list_category_parameters/"),
                  {"category_name": "Walls", "document": "doc1.000000000000.9"})
     assert world.guard_calls == []
-    assert world.events_on("INJECTED") and "document" not in reply.data
+    assert reply.status == 404 and reply.data["error_code"] == "document-token-stale"
+    assert world.events == [], "an invalid selector never falls back to the active document"
 
 
 @pytest.mark.parametrize("key", list(MUTATIONS), ids=MUTATION_IDS)

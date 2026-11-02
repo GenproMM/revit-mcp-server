@@ -292,27 +292,28 @@ def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
         return text
 
     @mcp.tool()
-    async def get_revit_model_info(target: str = None, ctx: Context = None) -> str:
+    async def get_revit_model_info(target: str = None, document: str = None, ctx: Context = None) -> str:
         """Summarise the currently open Revit model.
 
         Use this to orient yourself before doing anything else: it reports the
         document title and path, the element and family counts, the levels, and
         the project information fields.
 
-        Scope: the active document only. Linked models are not traversed.
-
-        The reply names the Revit process that answered (a final verified-process
-        line). The route does not report a document selector, so the text does
-        not attribute the answer to one document: to name and compare documents
-        use list_documents, read_document_summary and read_document_levels. If
-        the request could not be sent or timed out, the text says so and no
-        process is named.
+        Reads the selected open document, active or inactive. Without document,
+        reads the active document. Linked models are not traversed and no document
+        is activated. Invalid or closed selectors never fall back to another model.
+        The reply names the actual document and the verified responding process.
 
         Args:
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
         options = {} if target is None else {"target": target}
+        if document is not None:
+            options["params"] = {"document": document}
         response = await revit_get("/model_info/", ctx, **options)
         return format_response(response)

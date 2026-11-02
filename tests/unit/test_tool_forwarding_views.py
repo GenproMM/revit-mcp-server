@@ -191,8 +191,8 @@ def test_signatures_carry_target_and_only_actual_mutations_carry_an_optional_doc
         assert names == row["legacy"] + ["target", "document", "ctx"], names
         assert parameters["document"].default is None
     else:
-        assert names == row["legacy"] + ["target", "ctx"], names
-        assert "document" not in names
+        expected = ["target", "document", "ctx"] if row["kind"] == "read" else ["target", "ctx"]
+        assert names == row["legacy"] + expected, names
     assert parameters["target"].default is None and parameters["ctx"].default is None
 
 
@@ -211,11 +211,10 @@ def test_docstrings_name_every_argument_and_state_the_scope_rule(tool_name):
                        "several", "nothing is activated"):
             assert phrase in lowered, (tool_name, phrase)
     elif row["kind"] == "read":
-        assert not re.search(r"^\s+document:", args_block, re.M)
-        assert "active document" in lowered
-        assert "no document argument" in lowered
-        assert "read_document_summary" in doc and "read_document_levels" in doc
-        assert "inactive" in lowered
+        if tool_name != "list_documents":
+            assert re.search(r"^\s+document:", args_block, re.M)
+            assert "active document" in lowered and "list_documents" in doc
+            assert "inactive" in lowered
     elif row["kind"] == "file_read":
         assert not re.search(r"^\s+document:", args_block, re.M)
         assert "no document argument" in lowered
@@ -294,14 +293,17 @@ def test_mutations_refuse_a_blank_document_without_sending(tool_name, blank):
 
 
 @pytest.mark.parametrize("tool_name", NO_DOCUMENT_ARGUMENT)
-def test_reads_offer_no_way_to_name_a_document_and_never_dispatch_when_asked(tool_name):
-    """An explicitly selected inactive document cannot be expressed on a read: it refuses
-    (TypeError) before any dispatch, so no read can silently answer for the wrong document."""
+def test_reads_forward_document_or_reject_process_level_selection(tool_name):
     row = TOOLS[tool_name]
     tools, calls = register_module(row["module"])
-    with pytest.raises(TypeError):
-        asyncio.run(tools[tool_name](document=DOCUMENT_SELECTOR))
-    assert calls == []
+    if row["kind"] != "read" or tool_name == "list_documents":
+        with pytest.raises(TypeError):
+            asyncio.run(tools[tool_name](**dict(row["minimal"], document=DOCUMENT_SELECTOR)))
+        assert calls == []
+    else:
+        asyncio.run(tools[tool_name](**dict(row["minimal"], document=DOCUMENT_SELECTOR)))
+        assert len(calls) == 1
+        assert calls[0][3]["params"]["document"] == DOCUMENT_SELECTOR
 
 
 # ------------------------------------------------- route-specific behaviour
@@ -392,7 +394,7 @@ def test_get_revit_view_fetches_the_image_with_the_target_and_keeps_the_view_nam
 def test_view_reads_say_they_never_activate_a_document_or_switch_views(tool_name):
     tools, _ = register_module(TOOLS[tool_name]["module"])
     lowered = normalized(tools[tool_name].__doc__)
-    assert "never activates a document" in lowered, tool_name
+    assert "never activates a document" in lowered or "nothing is activated" in lowered, tool_name
 
 
 @pytest.mark.parametrize("tool_name", ["get_current_view_info", "get_current_view_elements"])

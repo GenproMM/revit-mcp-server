@@ -965,7 +965,7 @@ def _refuse(call, endpoint, resolved, refusal):
 
 
 async def revit_image(endpoint: str, ctx: Any = None, timeout: float = 60.0,
-                      target: Optional[str] = None) -> Union[Any, str]:
+                      target: Optional[str] = None, params: Optional[Dict] = None) -> Union[Any, str]:
     """GET request that returns an Image object.
 
     Runs through the same bounded-wait, per-incarnation lock path as every other
@@ -975,7 +975,10 @@ async def revit_image(endpoint: str, ctx: Any = None, timeout: float = 60.0,
     async def fetch(client) -> Union[Any, str]:
         from mcp.server.fastmcp import Image  # inside: keeps cold start cheap (D-24)
 
-        response = await client.get(endpoint, timeout=timeout)
+        options = {"timeout": timeout}
+        if params is not None:
+            options["params"] = params
+        response = await client.get(endpoint, **options)
 
         if response.status_code == 200:
             data = response.json()

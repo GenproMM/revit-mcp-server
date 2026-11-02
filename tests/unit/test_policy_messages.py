@@ -58,6 +58,15 @@ def test_delete_counts_categories_and_unknown_cascade():
         assert value in text
 
 
+@pytest.mark.parametrize("facts", [None, {"available": True, "requested": 1, "found": 1,
+    "categories": {"Стены" * 1000: 1}, "missing": list(range(1000))}])
+def test_delete_dependency_warning_survives_unknown_facts_and_large_details(facts):
+    text = message("/delete_elements/", {"element_ids": list(range(2000))}, facts=facts)
+    assert "Будут удалены также зависимые элементы; точный каскад удаления: неизвестно." in text
+    assert len(text) <= 1500 and "Ответьте «Да»" in text
+    assert "13 зависимых" not in text
+
+
 def test_parameter_definition_delete_warns_about_values():
     text = message("/delete_elements/", facts={"available": True, "kinds": {"parameter_definition": 1}})
     assert "определение параметра проекта и его значения" in text

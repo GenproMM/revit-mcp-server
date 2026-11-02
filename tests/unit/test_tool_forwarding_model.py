@@ -190,8 +190,7 @@ def test_signatures_carry_target_and_only_actual_mutations_carry_an_optional_doc
         assert names == row["legacy"] + ["target", "document", "ctx"], names
         assert parameters["document"].default is None
     else:
-        assert names == row["legacy"] + ["target", "ctx"], names
-        assert "document" not in names
+        assert names == row["legacy"] + ["target", "document", "ctx"], names
     assert parameters["target"].default is None and parameters["ctx"].default is None
 
 
@@ -210,10 +209,10 @@ def test_docstrings_name_every_argument_and_state_the_scope_rule(name):
                        "several", "nothing is activated"):
             assert phrase in lowered, (name, phrase)
     else:
-        assert not re.search(r"^\s+document:", args_block, re.M)
-        assert "active document" in lowered
-        assert "read_document_summary" in doc and "read_document_levels" in doc
-        assert "inactive" in lowered
+        if name != "list_documents":
+            assert re.search(r"^\s+document:", args_block, re.M)
+            assert "active document" in lowered and "list_documents" in doc
+            assert "inactive" in lowered
 
 
 @pytest.mark.parametrize("name", MUTATIONS)
@@ -277,12 +276,17 @@ def test_mutations_refuse_a_blank_document_without_sending(name, blank):
 
 
 @pytest.mark.parametrize("name", READS)
-def test_reads_offer_no_way_to_name_a_document_and_never_dispatch_when_asked(name):
+def test_reads_forward_document_or_reject_process_level_selection(name):
     row = TOOLS[name]
     tools, calls = register_module(row["module"])
-    with pytest.raises(TypeError):
-        asyncio.run(tools[name](document=DOCUMENT_SELECTOR))
-    assert calls == []
+    if row["kind"] != "read" or name == "list_documents":
+        with pytest.raises(TypeError):
+            asyncio.run(tools[name](**dict(row["minimal"], document=DOCUMENT_SELECTOR)))
+        assert calls == []
+    else:
+        asyncio.run(tools[name](**dict(row["minimal"], document=DOCUMENT_SELECTOR)))
+        assert len(calls) == 1
+        assert calls[0][3]["params"]["document"] == DOCUMENT_SELECTOR
 
 
 # ------------------------------------------------- route-specific behaviour
@@ -345,12 +349,9 @@ def test_create_mep_system_keeps_element_ids_out_of_the_body_unless_given():
                            "element_ids": [5, 6], "document": DOCUMENT_SELECTOR}
 
 
-def test_list_levels_is_an_active_only_read_and_points_to_the_addressed_levels_tool():
-    tools, _ = register_module("model")
-    lowered = " ".join(tools["list_levels"].__doc__.lower().split())
-    assert "active document" in lowered
-    assert "read_document_levels" in lowered
-    assert "no document argument" in lowered
+def test_list_levels_can_read_an_inactive_document():
+    text, calls = run_tool("list_levels", document=DOCUMENT_SELECTOR)
+    assert calls == [("GET", "/list_levels/", None, {"params": {"document": DOCUMENT_SELECTOR}})]
 
 
 def test_list_project_parameters_forwards_its_filter_params_and_the_target_together():
@@ -368,12 +369,11 @@ def test_get_element_properties_keeps_the_element_id_in_the_path_and_adds_only_t
     assert calls == [("GET", "/element_properties/42", None, {"target": PROCESS_SELECTOR})]
 
 
-def test_parameter_reads_state_that_they_read_the_active_document_only():
+def test_parameter_reads_offer_explicit_document_selection():
     for name in ("list_project_parameters", "get_element_properties"):
         tools, _ = register_module("parameter")
-        lowered = " ".join(tools[name].__doc__.lower().split())
-        assert "no document argument" in lowered, name
-        assert "active document" in lowered, name
+        assert "document" in inspect.signature(tools[name]).parameters
+        assert "inactive" in tools[name].__doc__
 
 
 def test_set_parameter_keeps_its_legacy_body_and_adds_only_the_document():

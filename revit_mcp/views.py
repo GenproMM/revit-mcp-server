@@ -5,6 +5,7 @@ Handles view export and image generation functionality
 """
 
 from .utils import get_element_id_value
+from .identity import read_document_or_response, attribute_response
 from pyrevit import routes, revit, DB
 import tempfile
 import os
@@ -24,8 +25,7 @@ logger = logging.getLogger(__name__)
 def register_views_routes(api):
     """Register all view-related routes with the API"""
 
-    @api.route("/get_view/<view_name>", methods=["GET"])
-    def get_view(doc, view_name):
+    def _get_view(doc, view_name):
         """
         Export a named Revit view as a PNG image and return the image data
 
@@ -36,6 +36,7 @@ def register_views_routes(api):
         Returns:
             dict: Contains base64 encoded image data and content type, or error message
         """
+        output_folder = None
         try:
             if not doc:
                 return routes.make_response(
@@ -53,12 +54,8 @@ def register_views_routes(api):
             view_name = normalize_string(view_name)
             logger.info("Exporting view: {}".format(view_name))
 
-            # Define output folder in temp directory
-            output_folder = os.path.join(tempfile.gettempdir(), "RevitMCPExports")
-
-            # Create output folder if it doesn't exist
-            if not os.path.exists(output_folder):
-                os.makedirs(output_folder)
+            # Each request owns its output; never pick another document's old PNG.
+            output_folder = tempfile.mkdtemp(prefix="RevitMCPExport-")
 
             # Create filename prefix
             file_path_prefix = os.path.join(output_folder, "export")
@@ -139,7 +136,7 @@ def register_views_routes(api):
             logger.info("Starting image export for view: {}".format(view_name))
             doc.ExportImage(ieo)
 
-            # Find the exported file (most recent PNG in folder)
+            # Find the PNG produced in this request's private folder.
             matching_files = []
             try:
                 matching_files = [
@@ -154,9 +151,10 @@ def register_views_routes(api):
                     data={"error": "Could not access export folder"}, status=500
                 )
 
-            if not matching_files:
+            if len(matching_files) != 1:
                 return routes.make_response(
-                    data={"error": "Export failed - no image file was created"},
+                    data={"error": "Export failed - expected exactly one image file, got {}".format(
+                        len(matching_files))},
                     status=500,
                 )
 
@@ -207,9 +205,23 @@ def register_views_routes(api):
             return routes.make_response(
                 data={"error": "Failed to export view: {}".format(str(e))}, status=500
             )
+        finally:
+            if output_folder is not None:
+                try:
+                    os.rmdir(output_folder)
+                except OSError as exc:
+                    logger.warning("Could not remove export folder: {}".format(str(exc)))
 
-    @api.route("/list_views/", methods=["GET"])
-    def list_views(doc):
+    @api.route("/get_view/<view_name>", methods=["GET"])
+    def get_view(doc, view_name, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_get_view(selected, view_name), descriptor, uiapp=uiapp)
+
+    def _list_views(doc):
         """
         Get a list of all exportable views in the current Revit model
 
@@ -296,8 +308,17 @@ def register_views_routes(api):
                 data={"error": "Failed to list views: {}".format(str(e))}, status=500
             )
 
-    @api.route("/current_view_info/", methods=["GET"])
-    def get_current_view_info(uidoc):
+
+    @api.route("/list_views/", methods=["GET"])
+    def list_views(doc, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_list_views(selected), descriptor, uiapp=uiapp)
+
+    def _get_current_view_info(uidoc):
         """
         Get detailed information about the currently active view.
 
@@ -380,8 +401,17 @@ def register_views_routes(api):
                 status=500,
             )
 
-    @api.route("/current_view_elements/", methods=["GET"])
-    def get_current_view_elements(doc, uidoc):
+
+    @api.route("/current_view_info/", methods=["GET"])
+    def get_current_view_info(uidoc, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            (uidoc.Document if uidoc is not None else None), document, uiapp=uiapp, active_only=True)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_get_current_view_info(uidoc), descriptor, uiapp=uiapp)
+
+    def _get_current_view_elements(doc, uidoc):
         """
         Get all elements visible in the current view.
 
@@ -519,5 +549,15 @@ def register_views_routes(api):
                 },
                 status=500,
             )
+
+
+    @api.route("/current_view_elements/", methods=["GET"])
+    def get_current_view_elements(doc, uidoc, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=True)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_get_current_view_elements(selected, uidoc), descriptor, uiapp=uiapp)
 
     logger.info("Views routes registered successfully")

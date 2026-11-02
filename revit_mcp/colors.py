@@ -18,6 +18,7 @@ from .utils import (
 )
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from .security import gate_or_response, strip_envelope
+from .identity import read_document_or_response
 from pyrevit import routes, DB
 import logging
 import random
@@ -1216,8 +1217,7 @@ def register_color_routes(api):
             return refusal
         return attribute_response(_clear_colors(document, request), descriptor, uiapp=uiapp)
 
-    @api.route("/list_category_parameters/", methods=["POST"])
-    def list_parameters(doc, request):
+    def _list_parameters(doc, request):
         """
         Get available parameters for elements in a category
 
@@ -1226,7 +1226,6 @@ def register_color_routes(api):
             "category_name": "Walls"
         }
         """
-        strip_envelope(request)
         try:
             data = parse_request_data(request.data)
 
@@ -1244,6 +1243,17 @@ def register_color_routes(api):
         except Exception as e:
             logger.error("Error in list_category_parameters route: %s", e)
             return routes.make_response(data={"error": str(e)}, status=500)
+
+
+    @api.route("/list_category_parameters/", methods=["POST"])
+    def list_parameters(doc, request, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        strip_envelope(request)
+        selected, descriptor, refusal = read_document_or_response(
+            doc, request_document_selector(request), uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_list_parameters(selected, request), descriptor, uiapp=uiapp)
 
 
 def get_numeric_parameter_raw_value(param):

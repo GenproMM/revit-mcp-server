@@ -67,6 +67,95 @@ def _passing_record():
     return record
 
 
+def _with_preflights():
+    record = _passing_record()
+    rows = []
+    for raw in record["audit_files"]["audit-test.jsonl"]:
+        target = json.loads(raw)
+        if target["call_id"] in ("h4a", "h4b"):
+            target.update(approval="declined", outcome="denied")
+            raw = json.dumps(target)
+        preflight = dict(target, route="/mutation_preflight/", decision=None,
+                         approval=None, outcome="success",
+                         args={"tool": target["tool"], "args": target["args"]})
+        rows.append(json.dumps(preflight))
+        if target["approval"] == "accepted":
+            rows.append(json.dumps(preflight))
+        rows.append(raw)
+    record["audit_files"]["audit-test.jsonl"] = rows
+    return record
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_realistic_preflight_recheck_target_and_refusal_sequences_pass(reverse):
+    record = _with_preflights()
+    if reverse:
+        record["audit_files"]["audit-test.jsonl"].reverse()
+    assert bench.classify(record, "unrelated-secret") == ("ok", [])
+
+
+@pytest.mark.parametrize("kind", ["duplicate", "wrong_tool", "wrong_route", "foreign_preflight", "missing"])
+def test_preflights_do_not_hide_invalid_final_rows(kind):
+    record = _with_preflights()
+    rows = record["audit_files"]["audit-test.jsonl"]
+    target = json.loads(next(raw for raw in rows if json.loads(raw)["call_id"] == "h1"
+                             and json.loads(raw)["route"] == "/delete_elements/"))
+    if kind == "duplicate":
+        record["audit_files"]["audit-second.jsonl"] = [json.dumps(target)]
+    elif kind == "missing":
+        rows[:] = [raw for raw in rows if json.loads(raw) != target]
+    else:
+        if kind == "wrong_tool": target["tool"] = "transform_elements"
+        if kind == "wrong_route": target["route"] = "/transform_elements/"
+        if kind == "foreign_preflight":
+            target.update(tool="transform_elements", route="/mutation_preflight/")
+        rows.append(json.dumps(target))
+    verdict, reasons = bench.classify(record, "unrelated-secret")
+    assert verdict == "stop" and any("hermes.h1.audit" in reason for reason in reasons)
+
+
+@pytest.mark.parametrize("call_id,field,value", [
+    ("h1", "decision", "allow"), ("h1", "approval", "declined"),
+    ("h1", "outcome", "rolled_back"), ("h2", "decision", "allow"),
+    ("h2", "approval", "accepted"), ("h2", "outcome", "success"),
+    ("h3", "decision", "allow"), ("h3", "approval", "accepted"),
+    ("h3", "outcome", "success"), ("h4a", "decision", "allow"),
+    ("h4a", "approval", None), ("h4a", "outcome", "success"),
+    ("h5", "approval", "declined"), ("h5", "outcome", "unknown"),
+])
+def test_preflight_success_does_not_mask_final_decision_approval_or_outcome(call_id, field, value):
+    record = _with_preflights()
+    rows = record["audit_files"]["audit-test.jsonl"]
+    for index, raw in enumerate(rows):
+        row = json.loads(raw)
+        if row["call_id"] == call_id and row["route"] != "/mutation_preflight/":
+            row[field] = value
+            rows[index] = json.dumps(row)
+    assert bench.classify(record, "unrelated-secret")[0] == "stop"
+
+
+def test_h4_identical_requests_and_distinct_call_ids_remain_required_with_preflights():
+    record = _with_preflights()
+    rows = record["audit_files"]["audit-test.jsonl"]
+    for index, raw in enumerate(rows):
+        row = json.loads(raw)
+        if row["call_id"] == "h4b" and row["route"] == "/delete_elements/":
+            row["args"] = {"element_ids": [456]}
+            rows[index] = json.dumps(row)
+    verdict, reasons = bench.classify(record, "unrelated-secret")
+    assert verdict == "stop" and any("h4.args" in reason for reason in reasons)
+    record = _with_preflights()
+    record["hermes"]["h4"]["call_ids"] = ["h1", "h4b"]
+    assert any("reused" in reason for reason in bench.classify(record, "unrelated-secret")[1])
+
+
+@pytest.mark.parametrize("raw", ["not json", "[]", "{}"])
+def test_malformed_audit_rows_still_stop_with_valid_target_rows(raw):
+    record = _with_preflights()
+    record["audit_files"]["audit-test.jsonl"].append(raw)
+    assert bench.classify(record, "unrelated-secret")[0] == "stop"
+
+
 def test_template_has_all_phase7_evidence_sections():
     record = bench.evidence_template()
     assert set(("preflight", "direct", "hermes", "audit_files", "posts_sent", "revit_version", "policy")) <= set(record)
@@ -210,6 +299,37 @@ def test_classify_cli_uses_only_synthetic_secret(monkeypatch, tmp_path, capsys, 
     output = capsys.readouterr().out
     assert (bench.SENTINEL_OK if passing else bench.SENTINEL_STOP) in output
     assert "SECRET_OCCURRENCES=0" in output and "POSTS_SENT=" in output
+
+
+def test_offline_report_is_versioned_immutable_and_never_uses_transport(monkeypatch, tmp_path):
+    import hashlib
+    source = tmp_path / "final.json"
+    raw = json.dumps(_with_preflights()).encode("utf-8")
+    source.write_bytes(raw)
+    out = tmp_path / "reclassified.json"
+    monkeypatch.setattr(bench, "_load_secret", lambda: "unrelated-secret")
+    monkeypatch.setattr(bench, "_direct_client", lambda *a: pytest.fail("transport used"))
+    assert bench.main(["classify", str(source), "--out", str(out)]) == 0
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["classifier_version"] == bench.CLASSIFIER_VERSION
+    assert report["source_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert report["offline_only"] is True and report["secret_scan_available"] is True
+    assert report["manual_limits"] and source.read_bytes() == raw
+    saved = out.read_bytes()
+    assert bench.main(["classify", str(source), "--out", str(out)]) == 2
+    assert out.read_bytes() == saved and source.read_bytes() == raw
+    assert bench.main(["classify", str(source), "--out", str(source)]) == 2
+    assert source.read_bytes() == raw
+
+
+def test_offline_report_without_configured_secret_is_stop(monkeypatch, tmp_path):
+    source = tmp_path / "final.json"
+    source.write_text(json.dumps(_with_preflights()), encoding="utf-8")
+    out = tmp_path / "report.json"
+    monkeypatch.setattr(bench, "_load_secret", lambda: None)
+    assert bench.main(["classify", str(source), "--out", str(out)]) == 1
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["secret_scan_available"] is False and report["verdict"] == "stop"
 
 
 def test_missing_audit_directory_refuses_without_reads(tmp_path):

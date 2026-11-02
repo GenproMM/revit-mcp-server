@@ -6,6 +6,7 @@ Handles element filtering, room data, material quantities, and model statistics
 
 from .utils import get_element_name, normalize_string, get_element_id_value, parse_request_data
 from .security import strip_envelope
+from .identity import read_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -20,10 +21,8 @@ CUFT_TO_CUM = 0.0283168
 def register_analysis_routes(api):
     """Register all analysis routes with the API"""
 
-    @api.route("/ai_filter/", methods=["POST"])
-    def ai_element_filter_handler(doc, request):
+    def _ai_element_filter_handler(doc, request):
         """Filter and find Revit elements by various criteria."""
-        strip_envelope(request)
         try:
             if not doc:
                 return routes.make_response(
@@ -181,8 +180,28 @@ def register_analysis_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/room_data/", methods=["GET"])
-    def export_room_data_handler(doc):
+
+    @api.route("/ai_filter/", methods=["POST"])
+    def ai_element_filter_handler(doc, request, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        strip_envelope(request)
+        selected, descriptor, refusal = read_document_or_response(
+            doc, request_document_selector(request), uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        if descriptor is not None and not descriptor["active"]:
+            try:
+                data = parse_request_data(request.data) if request and request.data else {}
+                if data.get("visible_in_view"):
+                    return attribute_response(routes.make_response(
+                        data={"error": "visible_in_view requires the active document; no document was activated."},
+                        status=412), descriptor, uiapp=uiapp)
+            except Exception as exc:
+                return attribute_response(routes.make_response(
+                    data={"error": str(exc)}, status=400), descriptor, uiapp=uiapp)
+        return attribute_response(_ai_element_filter_handler(selected, request), descriptor, uiapp=uiapp)
+
+    def _export_room_data_handler(doc):
         """Export data for all rooms in the model."""
         try:
             if not doc:
@@ -292,10 +311,18 @@ def register_analysis_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/material_quantities/", methods=["POST"])
-    def get_material_quantities_handler(doc, request):
+
+    @api.route("/room_data/", methods=["GET"])
+    def export_room_data_handler(doc, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_export_room_data_handler(selected), descriptor, uiapp=uiapp)
+
+    def _get_material_quantities_handler(doc, request):
         """Get material quantities from the model."""
-        strip_envelope(request)
         try:
             if not doc:
                 return routes.make_response(
@@ -416,8 +443,18 @@ def register_analysis_routes(api):
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
 
-    @api.route("/model_statistics/", methods=["GET"])
-    def analyze_model_statistics_handler(doc):
+
+    @api.route("/material_quantities/", methods=["POST"])
+    def get_material_quantities_handler(doc, request, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        strip_envelope(request)
+        selected, descriptor, refusal = read_document_or_response(
+            doc, request_document_selector(request), uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_get_material_quantities_handler(selected, request), descriptor, uiapp=uiapp)
+
+    def _analyze_model_statistics_handler(doc):
         """Analyze model and return element counts by category."""
         try:
             if not doc:
@@ -493,5 +530,15 @@ def register_analysis_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+
+    @api.route("/model_statistics/", methods=["GET"])
+    def analyze_model_statistics_handler(doc, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_analyze_model_statistics_handler(selected), descriptor, uiapp=uiapp)
 
     logger.info("Analysis routes registered successfully")

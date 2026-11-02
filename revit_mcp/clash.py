@@ -14,6 +14,7 @@ Best-practice notes (see ElementIntersectsElementFilter docs):
     (e.g. rebar). This is a Revit limitation, not a bug in this tool.
 """
 
+from .identity import read_document_or_response, request_document_selector, attribute_response
 from pyrevit import routes, revit, DB
 from System.Collections.Generic import List
 import logging
@@ -121,8 +122,7 @@ def _describe(elem):
 def register_clash_routes(api):
     """Register clash/interference detection routes with the API."""
 
-    @api.route("/clash_check/", methods=["POST"])
-    def clash_check(doc, request):
+    def _clash_check(doc, request):
         """
         Detect hard clashes (geometric interferences) between elements.
 
@@ -137,7 +137,6 @@ def register_clash_routes(api):
         - If only set_a is given, set_a is checked against itself.
         - If both are given, set_a is checked against set_b (cross-discipline).
         """
-        strip_envelope(request)
         try:
             if not doc:
                 return routes.make_response(
@@ -237,5 +236,16 @@ def register_clash_routes(api):
                 data={"error": str(e), "traceback": traceback.format_exc()},
                 status=500,
             )
+
+
+    @api.route("/clash_check/", methods=["POST"])
+    def clash_check(doc, request, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        strip_envelope(request)
+        selected, descriptor, refusal = read_document_or_response(
+            doc, request_document_selector(request), uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_clash_check(selected, request), descriptor, uiapp=uiapp)
 
     logger.info("Clash detection routes registered successfully")

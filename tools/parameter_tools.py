@@ -2,7 +2,7 @@
 """Parameter tools — read element properties and set parameter values"""
 
 from mcp.server.fastmcp import Context
-from .utils import format_response
+from .utils import read_options, format_response
 
 
 def _target_options(target):
@@ -35,6 +35,7 @@ def register_parameter_tools(mcp, revit_get, revit_post, revit_image=None):
         search: str = None,
         summary_only: bool = False,
         target: str = None,
+        document: str = None,
         ctx: Context = None,
     ) -> str:
         """List the project parameters bound in the current Revit model, marking
@@ -54,11 +55,10 @@ def register_parameter_tools(mcp, revit_get, revit_post, revit_image=None):
         level are NOT listed, and neither are built-in parameters. For all parameters
         on one element (including built-ins), use get_element_properties instead.
 
-        This is a read. It reports the bindings of the active document of the
-        selected Revit process; it has no document argument, because reading an
-        inactive document is supported only by read_document_summary and
-        read_document_levels, and an inactive document's parameters are never
-        reported here.
+        This is a read of document (an opaque selector from list_documents),
+        active or inactive. Without document, reads the active document. Never
+        activates a document. Invalid or closed selectors never fall back.
+        UI selection/current-view reads and visible_in_view require the active document.
 
         Returns a summary block (totals plus a name-prefix breakdown split by
         shared / non-shared) and, unless summary_only is set, the matching parameters
@@ -77,9 +77,14 @@ def register_parameter_tools(mcp, revit_get, revit_post, revit_image=None):
                 parameter list — the cheap option for models with hundreds of parameters
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
         params = {}
+        if document is not None:
+            params["document"] = document
         if shared_only:
             params["shared_only"] = "true"
         if prefix:
@@ -99,6 +104,7 @@ def register_parameter_tools(mcp, revit_get, revit_post, revit_image=None):
         element_id: int,
         include_type_params: bool = True,
         target: str = None,
+        document: str = None,
         ctx: Context = None,
     ) -> str:
         """Get all properties and parameters of a Revit element.
@@ -107,12 +113,10 @@ def register_parameter_tools(mcp, revit_get, revit_post, revit_image=None):
         both instance and type parameters with their values, storage types,
         and read-only status.
 
-        This is a read. The element is looked up in the active document of the
-        selected Revit process; it has no document argument, because reading an
-        inactive document is supported only by read_document_summary and
-        read_document_levels. An element id belongs to one document, so an id
-        read from another document is not found here, or may name a different
-        element.
+        This is a read of document (an opaque selector from list_documents),
+        active or inactive. Without document, reads the active document. Never
+        activates a document. Invalid or closed selectors never fall back.
+        UI selection/current-view reads and visible_in_view require the active document.
 
         Args:
             element_id: Revit element ID to inspect
@@ -120,10 +124,13 @@ def register_parameter_tools(mcp, revit_get, revit_post, revit_image=None):
                 parameters (default: true)
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
         response = await revit_get(
-            "/element_properties/{}".format(element_id), ctx, **_target_options(target)
+            "/element_properties/{}".format(element_id), ctx, **read_options(target, document)
         )
         return format_response(response)
 

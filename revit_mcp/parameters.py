@@ -15,6 +15,7 @@ from .utils import (
 from .identity import mutation_document_or_response, request_document_selector, attribute_response
 from .lookup import resolve_set_parameter
 from .security import gate_or_response
+from .identity import read_document_or_response
 from pyrevit import routes, revit, DB
 import traceback
 import logging
@@ -195,8 +196,7 @@ def _get_param_value_display(param, doc):
 def register_parameter_routes(api):
     """Register all parameter routes with the API"""
 
-    @api.route("/project_parameters/", methods=["GET"])
-    def get_project_parameters_handler(
+    def _get_project_parameters_handler(
         doc, shared_only=None, prefix=None, search=None, summary_only=None
     ):
         """List the project parameters bound in this document.
@@ -298,8 +298,17 @@ def register_parameter_routes(api):
                 status=500,
             )
 
-    @api.route("/element_properties/<element_id>", methods=["GET"])
-    def get_element_properties_handler(doc, element_id):
+
+    @api.route("/project_parameters/", methods=["GET"])
+    def get_project_parameters_handler(doc, shared_only=None, prefix=None, search=None, summary_only=None, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_get_project_parameters_handler(selected, shared_only, prefix, search, summary_only), descriptor, uiapp=uiapp)
+
+    def _get_element_properties_handler(doc, element_id):
         """Get all properties and parameters of an element."""
         try:
             if not doc:
@@ -406,6 +415,16 @@ def register_parameter_routes(api):
             return routes.make_response(
                 data={"error": str(e), "traceback": error_trace}, status=500
             )
+
+
+    @api.route("/element_properties/<element_id>", methods=["GET"])
+    def get_element_properties_handler(doc, element_id, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_get_element_properties_handler(selected, element_id), descriptor, uiapp=uiapp)
 
     def _set_parameter(doc, request):
         """Set a single parameter value on an element."""

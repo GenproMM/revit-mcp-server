@@ -20,6 +20,7 @@ def register_clash_tools(mcp, revit_get, revit_post, revit_image=None):
         set_b_categories: list[str] = None,
         max_clashes: int = 200,
         target: str = None,
+        document: str = None,
         ctx: Context = None,
     ) -> str:
         """Detect hard clashes (geometric interferences) between model elements.
@@ -42,10 +43,10 @@ def register_clash_tools(mcp, revit_get, revit_post, revit_image=None):
         approximate clash location in mm. Note: auto-joined concrete and
         geometry-less elements (e.g. rebar) are not reported by Revit.
 
-        This is a read. It checks the document that is active in the selected
-        Revit process and changes nothing. It has no document argument, because
-        reading an inactive document is supported only by read_document_summary
-        and read_document_levels; this tool never checks an inactive document.
+        This is a read of document (an opaque selector from list_documents),
+        active or inactive. Without document, reads the active document. Never
+        activates a document. Invalid or closed selectors never fall back.
+        UI selection/current-view reads and visible_in_view require the active document.
 
         Args:
             set_a_categories: First element set, e.g. ["beams", "OST_StructuralColumns"]
@@ -53,12 +54,17 @@ def register_clash_tools(mcp, revit_get, revit_post, revit_image=None):
             max_clashes: Maximum clashes to return (defaults to 200)
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
         data = {
             "set_a_categories": set_a_categories,
             "set_b_categories": set_b_categories,
             "max_clashes": max_clashes,
         }
+        if document is not None:
+            data["document"] = document
         response = await revit_post("/clash_check/", data, ctx, **_target_options(target))
         return format_response(response)

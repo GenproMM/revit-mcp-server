@@ -282,6 +282,8 @@ def build_message(request: AuthorizationRequest, rule: policy.Rule, decision=Non
                       "SHA-256: " + hashlib.sha256(source.encode("utf-8")).hexdigest()[:16],
                       "произвольный код, безопасность содержимого не проверяется"])
         excerpt = "Код (начало, данные): " + json.dumps(_plain(source[:600]), ensure_ascii=False)
+    if request.route == "/delete_elements/":
+        fixed.append("Будут удалены также зависимые элементы; точный каскад удаления: неизвестно.")
     if request.route == "/load_family/":
         fixed.extend(["содержимое семейства: неизвестно", "общие параметры внутри семейства не проверяются по ФОП"])
     if request.route == "/edit_family/" and request.data.get("reload", True):

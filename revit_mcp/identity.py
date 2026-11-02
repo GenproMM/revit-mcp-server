@@ -624,11 +624,58 @@ def mutation_document_or_response(selector=None, snapshot=None, registry=None,
     return None, None, routes.make_response(data=payload, status=decision["status"])
 
 
+def read_document_or_response(doc=None, selector=None, uiapp=None, active_only=False,
+                              snapshot=None, registry=None):
+    """Resolve an optional read selector without activating anything.
+
+    Omission keeps the injected active-document default. An explicit selector
+    always resolves through the live registry, never by title, path or fallback.
+    UI-only reads require that resolved document to be active. Direct in-process
+    callers may supply only doc; HTTP handlers always receive uiapp from Routes.
+    """
+    try:
+        if selector is None and uiapp is None and snapshot is None:
+            if doc is not None:
+                return doc, None, None
+            decision = {"ok": False, "status": 503, "code": "no-active-document",
+                        "error": "No active Revit document"}
+        else:
+            if snapshot is None:
+                snapshot = read_live_snapshot(uiapp)
+            snapshot, registry = _snapshot_and_registry(snapshot, registry)
+            observation = registry.observe(snapshot[0], snapshot[1])
+            if selector is None:
+                refusal = _doubt_refusal(observation)
+                token = _active_token(observation)
+                decision = refusal or (
+                    _resolve_observed(registry, observation, token) if token else
+                    _refusal(503, "no-active-document", "No active Revit document", observation))
+            else:
+                decision = _resolve_observed(registry, observation, selector)
+            if decision["ok"] and active_only:
+                decision = _require_active(decision, observation)
+            if decision["ok"]:
+                return decision["document"], decision["descriptor"], None
+    except Exception as exc:
+        decision = {"ok": False, "status": 503, "code": "document-registry-unavailable",
+                    "error": "The open documents could not be read ({}). No other document "
+                             "was substituted.".format(str(exc) or exc.__class__.__name__)}
+    from pyrevit import routes
+
+    payload = {"error": decision["error"], "error_code": decision["code"]}
+    identity, identity_error = process_identity_or_error(uiapp)
+    payload["process_identity" if identity else "identity_error"] = identity or identity_error
+    for key in ("candidates", "active_document"):
+        if key in decision:
+            payload[key] = decision[key]
+    return None, None, routes.make_response(data=payload, status=decision["status"])
+
+
 # ------------------------------------------------- request selector and attribution
 
 
 def request_document_selector(request):
-    """The ``document`` value of a mutating request body, or None when none was sent.
+    """The ``document`` value of an addressed request body, or None when none was sent.
 
     Never raises. An absent key, an empty or unreadable body, or a body that is not a
     JSON object is None: the handler's own parse then reports its own error exactly as
@@ -652,7 +699,7 @@ def request_document_selector(request):
 
 
 def attribute_response(response, descriptor, uiapp=None, identity=None):
-    """Stamp the document a mutation ran on, and the process, onto its reply (IDENT-02).
+    """Stamp the document a call ran on, and the process, onto its reply (IDENT-02).
 
     ``descriptor`` is the one the guard returned for this request, so the reply names the
     document the handler actually worked on, at request time, whatever the outcome: a

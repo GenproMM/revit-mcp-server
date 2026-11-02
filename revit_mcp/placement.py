@@ -24,6 +24,7 @@ from .identity import (
 )
 from .lookup import find_family_by_name, shared_definitions_by_name
 from .security import gate_or_response
+from .identity import read_document_or_response
 from pyrevit import routes, revit, DB
 import os
 import traceback
@@ -622,8 +623,7 @@ def register_placement_routes(api):
             return refusal
         return attribute_response(_load_family(document, request), descriptor, uiapp=uiapp)
 
-    @api.route("/list_families/", methods=["GET"])
-    def list_families(doc, request):
+    def _list_families(doc, request):
         """
         Simplified: Get a flat list of up to 50 family names and their types in the current Revit model.
         Returns:
@@ -670,8 +670,17 @@ def register_placement_routes(api):
                 data={"error": "Failed to list families: {}".format(str(e))}, status=500
             )
 
-    @api.route("/list_family_categories/", methods=["GET"])
-    def list_family_categories(doc):
+
+    @api.route("/list_families/", methods=["GET"])
+    def list_families(doc, request, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_list_families(selected, request), descriptor, uiapp=uiapp)
+
+    def _list_family_categories(doc):
         """
         Get a list of all family categories in the current Revit model
 
@@ -730,8 +739,17 @@ def register_placement_routes(api):
                 status=500,
             )
 
-    @api.route("/list_levels/", methods=["GET"])
-    def list_levels(doc):
+
+    @api.route("/list_family_categories/", methods=["GET"])
+    def list_family_categories(doc, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_list_family_categories(selected), descriptor, uiapp=uiapp)
+
+    def _list_levels(doc):
         """
         Get a list of all levels in the current Revit model
 
@@ -790,6 +808,16 @@ def register_placement_routes(api):
             return routes.make_response(
                 data={"error": "Failed to list levels: {}".format(str(e))}, status=500
             )
+
+
+    @api.route("/list_levels/", methods=["GET"])
+    def list_levels(doc, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_list_levels(selected), descriptor, uiapp=uiapp)
 
     def _edit_family(doc, request, touched):
         """

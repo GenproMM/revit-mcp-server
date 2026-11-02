@@ -2,7 +2,7 @@
 """View-related tools for capturing and listing Revit views"""
 
 from mcp.server.fastmcp import Context
-from .utils import format_response
+from .utils import read_options, format_response
 
 
 def _target_options(target):
@@ -14,7 +14,7 @@ def register_view_tools(mcp, revit_get, revit_post, revit_image=None):
     """Register view-related tools"""
 
     @mcp.tool()
-    async def get_revit_view(view_name: str, target: str = None, ctx: Context = None) -> str:
+    async def get_revit_view(view_name: str, target: str = None, document: str = None, ctx: Context = None) -> str:
         """Export one Revit view as a PNG image.
 
         Use list_revit_views first to get an exact, exportable view name.
@@ -28,26 +28,28 @@ def register_view_tools(mcp, revit_get, revit_post, revit_image=None):
         response formatting, so the result is either image data or an error
         string.
 
-        This is a read. It exports a view of the active document of the
-        selected Revit process; it has no document argument, never activates a
-        document or switches views, and never exports a view of an inactive
-        document as if it were this one. Only read_document_summary and
-        read_document_levels read a named inactive document.
+        This is a read of document (an opaque selector from list_documents),
+        active or inactive. Without document, reads the active document. Never
+        activates a document. Invalid or closed selectors never fall back.
+        UI selection/current-view reads and visible_in_view require the active document.
 
         Args:
             view_name: Exact view name as reported by list_revit_views,
                 e.g. "L2 Floor Plan"
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
-        response = await revit_image(f"/get_view/{view_name}", ctx, **_target_options(target))
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
+        response = await revit_image(f"/get_view/{view_name}", ctx, **read_options(target, document))
         # An Image has no text channel for provenance; an error string goes through
         # the shared renderer so a received 4xx names the process that answered.
         return format_response(response) if isinstance(response, str) else str(response)
 
     @mcp.tool()
-    async def list_revit_views(target: str = None, ctx: Context = None) -> str:
+    async def list_revit_views(target: str = None, document: str = None, ctx: Context = None) -> str:
         """List the views in the current Revit model that can be exported.
 
         This is the companion to get_revit_view: it returns the exact names
@@ -55,22 +57,24 @@ def register_view_tools(mcp, revit_get, revit_post, revit_image=None):
         legends, sheets) are excluded, so a view missing here cannot be
         captured — it is not a lookup failure.
 
-        This is a read. It lists the views of the active document of the
-        selected Revit process; it has no document argument, never activates a
-        document or switches views, and never lists the views of an inactive
-        document as if they were these. Only read_document_summary and
-        read_document_levels read a named inactive document.
+        This is a read of document (an opaque selector from list_documents),
+        active or inactive. Without document, reads the active document. Never
+        activates a document. Invalid or closed selectors never fall back.
+        UI selection/current-view reads and visible_in_view require the active document.
 
         Args:
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
-        response = await revit_get("/list_views/", ctx, **_target_options(target))
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
+        response = await revit_get("/list_views/", ctx, **read_options(target, document))
         return format_response(response)
 
     @mcp.tool()
-    async def get_current_view_info(target: str = None, ctx: Context = None) -> str:
+    async def get_current_view_info(target: str = None, document: str = None, ctx: Context = None) -> str:
         """
         Get detailed information about the currently active view in Revit.
 
@@ -86,24 +90,27 @@ def register_view_tools(mcp, revit_get, revit_post, revit_image=None):
         acting on "the current view". Scale is the denominator (100 means
         1:100).
 
-        This is a read. It describes the active view of the active document of
-        the selected Revit process; it has no document argument, never
-        activates a document or switches views, and never describes the view of
-        an inactive document as if it were this one. Only read_document_summary
-        and read_document_levels read a named inactive document.
+        This is a read of document (an opaque selector from list_documents),
+        which must be active: UI selection/current-view state is not model-wide
+        data. An inactive selector is refused with HTTP 412; nothing is activated.
+        Without document, reads the active document. Invalid/closed tokens never fall back.
 
         Args:
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
         if ctx:
             await ctx.info("Getting current view information...")
-        response = await revit_get("/current_view_info/", ctx, **_target_options(target))
+        response = await revit_get("/current_view_info/", ctx, **read_options(target, document))
         return format_response(response)
 
+
     @mcp.tool()
-    async def get_current_view_elements(target: str = None, ctx: Context = None) -> str:
+    async def get_current_view_elements(target: str = None, document: str = None, ctx: Context = None) -> str:
         """
         Get all elements visible in the currently active view in Revit.
 
@@ -122,19 +129,20 @@ def register_view_tools(mcp, revit_get, revit_post, revit_image=None):
         model-wide query. Locations are reported in millimetres. Schedules and
         sheets do not support element collection and return an error.
 
-        This is a read. It reads the active view of the active document of the
-        selected Revit process; it has no document argument, never activates a
-        document or switches views, and never reports the elements of an
-        inactive document's view as if they were these. Only
-        read_document_summary and read_document_levels read a named inactive
-        document.
+        This is a read of document (an opaque selector from list_documents),
+        which must be active: UI selection/current-view state is not model-wide
+        data. An inactive selector is refused with HTTP 412; nothing is activated.
+        Without document, reads the active document. Invalid/closed tokens never fall back.
 
         Args:
             target: Optional opaque process selector from discover_revit_targets;
                 omit it only when exactly one Revit process is usable
+            document: Optional opaque document selector from list_documents; omitted means active
             ctx: MCP context for logging
         """
+        if document is not None and (not isinstance(document, str) or not document.strip()):
+            return format_response({"error": "document must be a non-blank selector from list_documents. Nothing was sent to Revit."})
         if ctx:
             await ctx.info("Getting elements in current view...")
-        response = await revit_get("/current_view_elements/", ctx, **_target_options(target))
+        response = await revit_get("/current_view_elements/", ctx, **read_options(target, document))
         return format_response(response)

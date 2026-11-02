@@ -4,6 +4,7 @@ Model Info Module for Revit MCP
 Provides comprehensive model information for architects and designers
 """
 
+from .identity import read_document_or_response, attribute_response
 from pyrevit import routes, revit, DB
 from pyrevit.revit.db import ProjectInfo as RevitProjectInfo
 import pyrevit.revit.db.query as q
@@ -17,8 +18,7 @@ logger = logging.getLogger(__name__)
 def register_model_info_routes(api):
     """Register all model information routes with the API"""
 
-    @api.route("/model_info/", methods=["GET"])
-    def get_model_info():
+    def _get_model_info(doc):
         """
         Get comprehensive information about the current Revit model
 
@@ -31,7 +31,6 @@ def register_model_info_routes(api):
         - Link status
         """
         try:
-            doc = revit.doc
             if not doc:
                 return routes.make_response(
                     data={"error": "No active Revit document"}, status=503
@@ -349,5 +348,15 @@ def register_model_info_routes(api):
                 },
                 status=500,
             )
+
+
+    @api.route("/model_info/", methods=["GET"])
+    def get_model_info(doc, uiapp=None, document=None):
+        """Read the selected document without implicit UI activation."""
+        selected, descriptor, refusal = read_document_or_response(
+            doc, document, uiapp=uiapp, active_only=False)
+        if refusal is not None:
+            return refusal
+        return attribute_response(_get_model_info(selected), descriptor, uiapp=uiapp)
 
     logger.info("Model info routes registered successfully")

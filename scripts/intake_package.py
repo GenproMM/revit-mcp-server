@@ -388,7 +388,7 @@ def main():
     print("Next:")
     print("  1. Read revit_mcp/{}.py and tools/{}_tools.py in full.".format(domain, domain))
     print("  2. uv run pytest tests/unit")
-    print("  3. Fully restart Revit, check /revit_mcp/status/?verbose=true")
+    print("  3. Fully restart Revit, check /genpro_revit_mcp/status/?verbose=true")
     print("  4. Commit, crediting the author:")
     print("     git commit --author=\"{} <>\" ...".format(manifest.get("author")))
     return 0

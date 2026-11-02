@@ -63,7 +63,7 @@ Filled by the planner per task; requirement-level map below is the contract each
 | SAFE-17 | Execute window shows code head, length, SHA-256 and warning; tool still registered | unit | `uv run pytest tests/unit/test_policy_messages.py -q` | ✅ | ✅ green (offline, 2026-10-26) |
 | SAFE-18 | Pinned bypass-limit sentences (arbitrary code, OS access/readable secret, 999.1, `load_family` contents) | unit | `uv run pytest tests/unit/test_phase7_scope_docs.py -q` | ✅ | ✅ green (offline, 2026-10-26) |
 | SAFE-19 | SDK bump keeps FastMCP registration, `user_request` on 59 tools, no `outputSchema`, stdio purity, 3 transports, cold start, payload import | unit + scripts | `uv run pytest tests/unit/test_audit_registration.py tests/unit/test_audit_stdio.py -q` ; `python tests/test_init_latency.py` | ✅ | ✅ green (offline, 2026-10-26) |
-| SAFE-20 | Offline negative/concurrency suite; user-run live bench in Hermes Desktop after full Revit restart | manual + unit validator | live bench script (user-run) | ✅ | ⬜ pending (live evidence not supplied) |
+| SAFE-20 | Offline negative/concurrency suite; user-run live bench in Hermes Desktop after full Revit restart | manual + unit validator | live bench script (user-run) | ✅ | 🔴 blocked (PHASE7_BENCH_STOP, 2026-10-26) |
 | SAFE-21 | ROADMAP criterion 2 reworded per D-15 | manual review | — | — | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
@@ -136,6 +136,45 @@ Operator-procedure clarification for Task 2 (from the delivered bench docstring)
 | Payload-first rollout order (R3 pattern) | SAFE-14 | Fleet deployment | Operator runbook; user runs publish scripts |
 | ROADMAP criterion 2 wording | SAFE-21 | Documentation review | Review the diff of ROADMAP.md |
 | Operator-file share ACL is read-only for ordinary users | SAFE-09, SAFE-10 (D-27) | Share permissions owned by operator | Operator checks ACL before enabling the file |
+
+---
+
+## Live bench (D-20)
+
+2026-10-26, user-run pilot `2026.10.26-1209.92fbaf5`, Revit **2024**. The controller received console output, not the complete evidence files. Readiness OK: one loopback listener, status 200, permit protocol 1, base policy `dd435f53b542`, blocked=false, operator absent. Direct stage: `DIRECT_CHECK_OK`. Final classifier output, copied unchanged:
+
+```text
+PHASE7_BENCH_STOP
+POSTS_SENT=5
+SECRET_OCCURRENCES=0
+REASON=hermes.h1.audit: expected one audit entry
+REASON=hermes.h1: expected accepted confirmed delete
+REASON=hermes.h2.audit: expected one audit entry
+REASON=hermes.h2: expected declined delete without effect
+REASON=hermes.h3.audit: expected one audit entry
+REASON=hermes.h3: expected expired
+REASON=hermes.h4.audit: expected one audit entry
+REASON=hermes.h4.audit: expected one audit entry
+REASON=hermes.h4: each same-request audit entry needs approval
+REASON=hermes.h5.audit: expected one audit entry
+REASON=hermes.h5: expected accepted 12.5 mm fractional transform
+REVIT_VERSION=2024
+```
+
+SAFE-20 remains **blocked / live STOP**, not green. SAFE-21 and phase sign-off remain pending. No direct or Hermes mutation is to be repeated to repair evidence.
+
+- S6/S5a/S5b/S5c: direct-stage judge reported OK (missing/replay/changed-args/changed-route checks); five POST attempts, zero secret occurrences in recorded evidence. This is a stage result, not a replacement final verdict.
+- H1: user saw and accepted the client card, confirmed the selected element disappeared. Reply reported one selected plus 13 hosted elements removed. Target audit row shown by the user: confirm/accepted/success.
+- H2: declined; element remained; target audit confirm/declined/denied.
+- H3: timed out after approximately five minutes; target audit confirm/expired/expired.
+- H4: new card appeared for the second request, element remained, different call_ids, both target audits confirm/declined/denied. Operation codes were not recorded, so their difference is unverified; argument equality still needs the original evidence checked offline.
+- H5: user accepted card and verified 12.5 mm global-X movement; target audit confirm/accepted/success.
+- H6 Telegram/gateway: not verified (D-20).
+- Hermes rendering: interactive confirmation card inside the Desktop session; a separate OS window was not required. Actual card contents/cascade prediction were not captured. The edit_family Revit-2025+ limitation does not apply to this Revit-2024 bench; edit_family itself was not live tested.
+
+Read-only diagnosis of the saved final record: 25 entries in one audit segment. Each supplied call_id has one target-route row plus legitimate `/mutation_preflight/` rows (H1/H5: two; others: one). `_scenario_entry` incorrectly requires one row per call_id before filtering tool/route. This explains the STOP but **does not change it into a pass**. Fix the offline classifier with regression tests, then reclassify the original immutable evidence to a separate output without new HTTP or POST. Missing evidence or real duplicate target rows must still stop classification. Selection IDs/categories were also hidden by the tool's message-only projection; fix separately.
+
+Raw evidence stays on the user's workstation outside the repository; no secret, full audit or model data is attached here. Full session context: Obsidian session “2026-10-26 — пилот Phase 7, live STOP из-за аудита”.
 
 ---
 

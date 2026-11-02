@@ -257,6 +257,34 @@ Then open `http://127.0.0.1:6274` in your browser.
 | `get_element_properties` | Get all parameters and properties of an element |
 | `list_project_parameters` | List project parameters, flagging which are shared |
 
+### Reading another open model
+
+Use `list_documents` to obtain an opaque `document` selector for the chosen Revit
+process (`target`). Model-data reads in Inspect and Analyze accept this optional
+selector and read that open document directly, even when its tab is inactive.
+Omitting `document` preserves the active-model default. Unknown, closed or stale
+selectors are refused; a title or file path is not a selector and never selects a
+replacement model. Element IDs are interpreted only within the selected document.
+`read_document_summary` and `read_document_levels` also remain available with a
+required document selector. `list_model_worksets` instead inspects a file on disk.
+
+UI state is different: `get_selected_elements`, `get_current_view_info` and
+`get_current_view_elements` require the selected document to be active and refuse
+an inactive selection with HTTP 412. `ai_element_filter(visible_in_view=True)` has
+the same restriction. Reads never switch tabs implicitly. Named-view export uses
+the selected document; actual inactive-document export still needs live acceptance.
+
+Use the separate `activate_document` action to switch the active model. Already-open,
+saved file-backed workshared models and saved detached copies are eligible through
+their own existing path. The action makes one activation attempt, then checks the
+actual active document; it does not save, synchronize, substitute a central path or
+retry. Unsaved, linked, family and cloud documents remain unsupported. The expanded
+workshared/detached activation contract is covered offline, not yet live-accepted.
+Mutations still require the active document and keep their existing approval gates.
+
+Both the MCP server and extension must be updated together. After extension changes,
+fully close and reopen Revit; do not use pyRevit Reload for live testing.
+
 ### Modify (9)
 
 | Tool | Description |

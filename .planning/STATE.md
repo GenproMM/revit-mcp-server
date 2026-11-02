@@ -1,20 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.1
-current_phase: 7
+current_phase: 07
 current_phase_name: Repository-owned mutation safety and human approval
-current_plan: Not started
+current_plan: 1
 status: executing
-stopped_at: Phase 7 context gathered
-last_updated: "2026-10-25T17:42:04.208Z"
-last_activity: 2026-10-25
-last_activity_desc: Phase 06 complete, transitioned to Phase 07
-state_head: 781a5485bd77b3a1990d35084c4fcd4a3425b37f
+stopped_at: 07-14 Task 1 offline gates passed; waiting for Task 2 user-run D-20 live bench (blocking-human)
+last_updated: "2026-10-26T10:13:41.192Z"
+last_activity: 2026-10-26
+last_activity_desc: Phase 07 execution resumed (wave continue)
+state_head: c90464c4a34acd4825ffc7353a546169eb5fe5a3
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 84
-  completed_plans: 70
+  completed_plans: 83
 milestone_name: Доверенный мост
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 
 ## Current Position
 
-Phase: 7 (Repository-owned mutation safety and human approval) — READY TO EXECUTE
-Current Plan: Not started
+Phase: 07 (Repository-owned mutation safety and human approval) — EXECUTING
+Current Plan: 1
 Total Plans in Phase: 14
-Status: Ready to execute
-Last activity: 2026-10-25 - Completed quick task 261025-ld5: open_model defaults to a local copy
+Status: Executing Phase 07
+Last activity: 2026-10-26 — Phase 07 execution resumed (wave continue)
 
 Progress: [█████████░] 86% (6 of 7 phases complete, 70/70 planned plans)
 
@@ -126,6 +126,12 @@ Progress: [█████████░] 86% (6 of 7 phases complete, 70/70 pl
 | Phase 06 P04 | 6 min | 2 tasks | 6 files |
 | Phase 06 P05 | 40 min | 3 tasks | 7 files |
 | Phase 06 P06-06 | 20 min | 2 tasks | 2 files |
+| Phase 07 P01 | 5 min | 3 tasks | 5 files |
+| Phase 07 P02 | 13 min | 2 tasks | 12 files |
+| Phase 07 P03 | 15 min | 2 tasks | 6 files |
+| Phase 07 P04 | 16 min | 3 tasks | 9 files |
+| Phase 07 P05 | 5 min | 2 tasks | 3 files |
+| Phase 07 P07 | 25 min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -181,6 +187,13 @@ Decisions are logged in PROJECT.md Key Decisions table. Recent decisions affecti
 - [Phase 06]: 06-06: live-gate writes call the registered audit wrapper with ctx=None, not main.mcp.call_tool, because call_tool outside an MCP request makes execute_revit_code raise before sending — A one-shot gate cannot be spent on a runner bug; the wrapper is the production audit path
 - [Phase 06]: 06-06: w3 (set_parameter) is judged as succeeded == [parameter] plus args.element_id == wall id, since the route reports the parameter name in outcome.succeeded — Matches revit_mcp/parameters.py build_outcome
 - [Phase 06]: 06-06: classifier reasons name audit files by role and never print PIDs or the secret — 06-07 copies reasons into VALIDATION.md under T-06-36
+- [Phase 07]: 07-01: mcp pinned >=1.30,<2 (resolved 1.30.0, lock approved by user); structured_output=False default in the audit wrapper keeps the 59-tool surface and call_tool shape
+- [Phase 07]: 07-02: authorizer runs in bridge.revit_post before _dispatch (human wait holds no lock); permit hashes the exact envelope-first wire text; consent is the elicitation action only; a gated POST with no secret is refused (no_secret)
+- [Phase 07]: 07-03: pywin32 path shim is one identical _pywin32_paths(libs) in deploy/server.py, gate.py, warm.py, called before the first SDK import; scratch payload gate and 3-transport smoke prove it
+- [Phase 07]: 07-04: FileNotFoundError with a WinError other than 2/3 is unreachable (keeps the active operator policy), not absent — A share that cannot be reached must not silently drop an applied operator policy back to the base
+- [Phase 07]: 07-04: approval re-reads the policy with force=True after the human answers; a changed hash refuses with policy_changed — SAFE-13 policy half; a change applied seconds before the click must not be missed by the 2 s poll
+- [Phase 07]: 07-05: permits.failure() maps any non-refusal verdict (None, int, empty, ok) to malformed so a 403 body can never read like acceptance; an unparseable body answers missing (no trustworthy envelope) — T-07-23 fixed texts; refusal must never look like a pass
+- [Phase 07]: 07-07: unit request doubles and permissive authorization mint real permits bound to each API-relative route and pinned session token; no production bypass.
 
 ### Roadmap Evolution
 
@@ -219,7 +232,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-25T15:15:33.612Z
-Stopped at: Phase 7 context gathered
-Resume file: .planning/phases/07-repository-owned-mutation-safety-and-human-approval/07-CONTEXT.md
+Last session: 2026-10-25T19:28:17.653Z
+Stopped at: 07-14 Task 1 offline gates passed; waiting for Task 2 user-run D-20 live bench (blocking-human)
+Resume file: 07-14-PLAN.md (Task 2; Task 1 evidence in 07-VALIDATION.md)
 Next boundary: prepare bounded 02-02 recheck and require full Revit close/reopen before any live route; no G6 or broad rollout

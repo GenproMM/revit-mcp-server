@@ -334,23 +334,23 @@ Plans:
   6. Оба execute-code пути сохраняют явный статус доверенного произвольного кода по D-15, без скрытого отключения и без обещания sandbox/полной confinement. Перед заявлением о защите всех операций зафиксированы границы обхода через arbitrary code, ОС-доступ и cross-process handler overlap (backlog 999.1).
   7. Офлайн негативные/конкурентные тесты и отдельно разрешённый live bench подтверждают контракт. Изменения Revit extension проверяются после полного restart, не Reload; ни принятие фазы, ни создание этих материалов не разрешает live-операции или внешнюю передачу BIM-данных.
 
-**Plans:** 14 plans
+**Plans:** 6/14 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 07-01-PLAN.md — MCP SDK 1.9.0 -> 1.30.x behind a lock-review checkpoint; structured_output=False; in-memory Hermes-shaped elicitation harness (D-24, SAFE-19)
+- [x] 07-01-PLAN.md — MCP SDK 1.9.0 -> 1.30.x behind a lock-review checkpoint; structured_output=False; in-memory Hermes-shaped elicitation harness (D-24, SAFE-19)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 07-02-PLAN.md — Tracer: delete_elements confirmed in a client window, sent once with a one-time HMAC permit the Revit-side verifier accepts once; base policy TOML; payload copies the new modules
-- [ ] 07-03-PLAN.md — pywin32 path shim in deploy/server.py, gate.py, warm.py; scratch payload gate with pyRevit's CPython; three-transport smoke
+- [x] 07-02-PLAN.md — Tracer: delete_elements confirmed in a client window, sent once with a one-time HMAC permit the Revit-side verifier accepts once; base policy TOML; payload copies the new modules
+- [x] 07-03-PLAN.md — pywin32 path shim in deploy/server.py, gate.py, warm.py; scratch payload gate with pyRevit's CPython; three-transport smoke
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 07-04-PLAN.md — Policy as validated data: operator overlay, atomic hot reload with last-valid retention, invalid base blocks, policy change voids a pending approval; MCP_POLICY_FILE staging (D-14..D-17, D-27)
-- [ ] 07-05-PLAN.md — Permit protocol TDD: HMAC parity, golden vector, every refusal verdict, exactly-once under concurrency, 403 refusal body
-- [ ] 07-07-PLAN.md — Test plumbing: request doubles carry a path and a real permit; permissive test authorizer mints; registry isolated
+- [x] 07-04-PLAN.md — Policy as validated data: operator overlay, atomic hot reload with last-valid retention, invalid base blocks, policy change voids a pending approval; MCP_POLICY_FILE staging (D-14..D-17, D-27)
+- [x] 07-05-PLAN.md — Permit protocol TDD: HMAC parity, golden vector, every refusal verdict, exactly-once under concurrency, 403 refusal body
+- [x] 07-07-PLAN.md — Test plumbing: request doubles carry a path and a real permit; permissive test authorizer mints; registry isolated
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -392,7 +392,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Honest outcomes on every mutating route | 11/11 | Complete    | 2026-10-23 |
 | 5. Live secret gate and integrity enforcement | 16/16 | Complete    | 2026-10-25 |
 | 6. Structured audit log of true outcomes | 7/7 | Complete    | 2026-10-25 |
-| 7. Repository-owned mutation safety and human approval | 0/TBD | Not planned | - |
+| 7. Repository-owned mutation safety and human approval | 6/14 | In Progress|  |
 
 ## Backlog
 

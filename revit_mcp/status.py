@@ -12,6 +12,55 @@ from .utils import sanitize_string
 logger = logging.getLogger(__name__)
 
 
+def _pyrevit_facts():
+    """pyRevit version, engine and home directory, each None when unreadable; never raises."""
+    facts = {"version": None, "engine": None, "home": None}
+    try:
+        import pyrevit
+
+        version = getattr(pyrevit, "VERSION_STRING", None)
+        facts["version"] = str(version).strip() if version else None
+        home = getattr(pyrevit, "HOME_DIR", None)
+        facts["home"] = sanitize_string(home) if home else None
+    except Exception as exc:
+        logger.warning("Could not read the pyRevit version: {}".format(str(exc)))
+    try:
+        from pyrevit import engine
+
+        version = getattr(engine, "EngineVersion", None)
+        facts["engine"] = str(version) if version else None
+    except Exception as exc:
+        logger.warning("Could not read the pyRevit engine: {}".format(str(exc)))
+    return facts
+
+
+def _revit_facts(host_app):
+    """Revit version, sub-version and build, each None when unreadable; never raises."""
+    facts = {"version": None, "sub_version": None, "build": None}
+    try:
+        app = host_app.app
+        for key, attr in (("version", "VersionNumber"), ("sub_version", "SubVersionNumber"),
+                          ("build", "VersionBuild")):
+            value = getattr(app, attr, None)
+            facts[key] = str(value) if value else None
+    except Exception as exc:
+        logger.warning("Could not read the Revit version: {}".format(str(exc)))
+    return facts
+
+
+def _runtime():
+    """(runtime block, runtime alerts) for /status/; ({}, []) when it cannot be built."""
+    try:
+        from pyrevit import HOST_APP
+        from .runtime_info import extension_root, runtime_alerts, runtime_block
+
+        block = runtime_block(extension_root(__file__), _pyrevit_facts(), _revit_facts(HOST_APP))
+        return block, runtime_alerts(block)
+    except Exception as exc:
+        logger.warning("Could not build the runtime status block: {}".format(str(exc)))
+        return {}, []
+
+
 def register_status_routes(api):
     """Register all status-related routes with the API"""
 
@@ -34,6 +83,9 @@ def register_status_routes(api):
             dict: Health status, document information, and registration state.
                   "health" is "degraded" when any domain failed to register.
                   "failed_domains" is present only when something failed.
+                  "runtime" names the product version, the extension build and
+                  path, the Python engine, pyRevit and Revit; "runtime_alerts"
+                  (which also degrade health) say when the engine is unsupported.
         """
         identity_data = {}
         try:
@@ -94,6 +146,16 @@ def register_status_routes(api):
             if alerts:
                 block = dict(block)
                 block["security_alerts"] = alerts
+
+            # Versions of every layer, so one /status/ answers "what is installed
+            # and what runs it" without a shell on the workstation.
+            runtime, runtime_alerts = _runtime()
+            if runtime:
+                block = dict(block)
+                block["runtime"] = runtime
+            if runtime_alerts:
+                block["runtime_alerts"] = runtime_alerts
+                alerts = list(alerts) + list(runtime_alerts)
 
             doc = revit.doc
             if doc:

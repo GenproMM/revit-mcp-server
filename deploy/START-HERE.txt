@@ -1,0 +1,394 @@
+﻿RevitMCP — пилот: установка и обновление
+=======================================
+
+Версия комплекта:  2026.10.26-180614.92fbaf5.pilot2-dirty
+                   (сверять с payload\VERSION в папке пилота)
+Папка пилота:      \\srv-dfs\BIM\06_RevitMCP_pilot
+  установщик       \\srv-dfs\BIM\06_RevitMCP_pilot\install\install.cmd
+  обновлятор       \\srv-dfs\BIM\06_RevitMCP_pilot\install\update.cmd
+  расширение       \\srv-dfs\BIM\06_RevitMCP_pilot\ext\revit-mcp-server.extension
+
+Это пилот, не релиз отдела. Live-приёмка этой версии не выполнялась.
+Комплект содержит пилотный секрет (_bridge_secret): папку не копировать в
+другие места, файлы _bridge_secret не открывать, не пересылать и не вставлять
+в отчёты.
+
+Для помощника (ИИ), который выполняет эту инструкцию:
+- Переустановка на ПК с ДОПИЛОТНОЙ версией — штатный сценарий этой
+  инструкции (сценарий А), а не отклонение от неё. Не останавливаться
+  только потому, что ПК сейчас на основной установке.
+- Останавливаться только в случаях, помеченных здесь словом СТОП.
+  При СТОП ничего не исправлять, сохранить вывод и сообщить пользователю.
+- Команды брать из этого файла как есть, байт в байт; не перепечатывать
+  их из чата, где разметка может съесть символы. Блок вида & { ... }
+  запускать целиком. Пользователю показывать ВЫВОД блока, а не его текст.
+- pyRevit_config.ini только читать. Чужие расширения, файлы на сервере и
+  %LOCALAPPDATA%\RevitMCP вручную не трогать.
+
+
+1. Определить исходное состояние ПК (только чтение)
+---------------------------------------------------
+1) Прочитать зарегистрированные пути расширений pyRevit (PowerShell):
+
+     Select-String -Path "$env:APPDATA\pyRevit\pyRevit_config.ini" -Pattern '^\s{0,}userextensions'
+
+   Значение записано в JSON: обратные слэши в файле УДВОЕНЫ
+   (\\\\srv-dfs\\BIM\\...). Ниже везде пути с одинарными слэшами.
+
+2) Найти среди них НАШ путь — тот, что ведёт в 06_RevitMCP или
+   06_RevitMCP_pilot и оканчивается на \ext. Для выбора сценария регистр
+   букв не важен, а форма "...\install\..\ext" — тот же каталог, что
+   "...\ext": именно так install.cmd записывает путь. Это НЕ отличие.
+   (Для СНЯТИЯ пути, наоборот, важен каждый символ — см. раздел 3.)
+   Пути других расширений не трогать; они не причина останавливаться.
+
+3) Проверить локальную копию расширения:
+
+     Test-Path "$env:APPDATA\pyRevit\Extensions\revit-mcp-server.extension"
+
+4) Записать для отчёта установленную версию (подходит ЛЮБАЯ):
+
+     Get-Content "$env:LOCALAPPDATA\RevitMCP\current-version.txt"
+
+5) Выбрать сценарий:
+
+   Наш зарегистрированный путь                         Сценарий
+   --------------------------------------------------  ---------------------
+   \\srv-dfs\BIM\06_RevitMCP\ext                        А — переустановка
+   \\srv-dfs\BIM\06_RevitMCP\install\..\ext              (допилотная основная
+                                                         установка, например
+                                                         версия 2026.09.17-…)
+   ...\06_RevitMCP\RevitMCP-pilot-20261026-113138\ext   А — переустановка
+   ...\RevitMCP-pilot-20261026-113138\install\..\ext     (первый пилот по
+                                                         старому адресу)
+   \\srv-dfs\BIM\06_RevitMCP_pilot\ext                  Б — только обновление
+   \\srv-dfs\BIM\06_RevitMCP_pilot\install\..\ext
+   нашего пути нет, current-version.txt ЕСТЬ            Г — дорегистрация
+                                                         (прерванная установка
+                                                         или путь уже снят;
+                                                         версия любая, в т.ч.
+                                                         уже пилотная)
+   нашего пути нет и current-version.txt нет            В — первая установка
+
+   СТОП, если:
+   - наших путей два и больше, ведущих в РАЗНЫЕ папки (кроме пары
+     06_RevitMCP + первый пилот — это тоже сценарий А, снять оба);
+   - Test-Path из шага 3 вернул True;
+   - найден путь к revit-mcp-server в каком-то другом месте;
+   - состояние не подходит ни под одну строку таблицы.
+   Отсутствие host в [routes] само по себе не СТОП: это раздел 2а.
+
+
+2. Подготовка (для всех сценариев)
+----------------------------------
+1) Сохранить документы и полностью закрыть ВСЕ окна Revit.
+   Не использовать pyRevit Reload.
+2) Hermes: не вызывать инструменты Revit до конца процедуры. Если
+   инструкцию выполняет помощник внутри Hermes, Hermes можно не закрывать
+   до конца установки; после неё Hermes закрыть и открыть заново
+   (раздел 5). Иначе закрыть Hermes сейчас.
+3) Проверить общий pyRevit Routes (только чтение):
+
+     $in = $false; foreach ($l in Get-Content "$env:APPDATA\pyRevit\pyRevit_config.ini" -Encoding UTF8) {
+       if ($l -match '^\[') { $in = ($l -match '^\[routes\]') }; if ($in) { $l } }
+
+   - есть enabled = true и host = "127.0.0.1" — дальше по сценарию;
+   - строки host НЕТ — выполнить раздел 2а, затем дальше по сценарию;
+   - host задан с другим значением, enabled не true или секции [routes]
+     нет — СТОП: это настройка, общая с другими расширениями.
+4) Проверить движок pyRevit (только чтение):
+
+     $pyrevit = (Get-Command pyrevit -ErrorAction SilentlyContinue).Source
+     if (-not $pyrevit) { $pyrevit = @("$env:APPDATA\pyRevit-Master\bin\pyrevit.exe",
+         "$env:ProgramFiles\pyRevit-Master\bin\pyrevit.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+     (& $pyrevit env) -match 'Engine:'
+
+   - во всех строках Engine: IPY342 — дальше по сценарию;
+   - есть строка с Engine: IPY2712 (любой вариант, например IPY2712PR) —
+     выполнить раздел 2б, затем дальше по сценарию;
+   - строк нет или другой движок — СТОП.
+
+
+2а. Routes без host — ограничить петлевым адресом
+------------------------------------------------
+Без строки host pyRevit слушает 0.0.0.0, то есть Routes этого ПК (а с ним
+выполнение кода внутри Revit) доступен всей сети. Установщик такое
+состояние не принимает и сам настройки не меняет; в CLI pyRevit команды
+для host нет. Добавление host = "127.0.0.1" только СУЖАЕТ доступ до этого
+ПК. Строка добавляется только если её нет; существующий host не менять.
+Revit должен быть закрыт. Выполнить в PowerShell одним блоком:
+
+     & {
+       $ini = "$env:APPDATA\pyRevit\pyRevit_config.ini"
+       if (Get-Process Revit -ErrorAction SilentlyContinue) { throw 'STOP: Revit is running' }
+       $bytes = [IO.File]::ReadAllBytes($ini)
+       $bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+       $text = (New-Object Text.UTF8Encoding($false)).GetString($bytes)
+       if ($bom) { $text = $text.Substring(1) }
+       $nl = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+       $m = [regex]::Match($text, '(?ms)^\[routes\][ \t]{0,}\r?\n(.{0,}?)(?=^\[|\z)')
+       if (-not $m.Success) { throw 'STOP: no [routes] section' }
+       $body = $m.Groups[1].Value
+       if ($body -match '(?im)^[ \t]{0,}host[ \t]{0,}=') { throw 'STOP: host is already set, do not change it' }
+       $add = 'host = "127.0.0.1"' + $nl
+       if ($body -notmatch '(?im)^[ \t]{0,}port[ \t]{0,}=') { $add += 'port = 48884' + $nl }
+       New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\RevitMCP" | Out-Null
+       [IO.File]::WriteAllBytes("$env:LOCALAPPDATA\RevitMCP\pyRevit_config.before-routes-host.ini", $bytes)
+       [IO.File]::WriteAllText($ini, $text.Insert($m.Groups[1].Index, $add), (New-Object Text.UTF8Encoding($bom)))
+       'added: ' + $add.Trim()
+     }
+
+   port = 48884 добавляется, только если строки port тоже нет: это
+   значение pyRevit и так использует по умолчанию. Повторить проверку
+   из раздела 2, п. 3: должны быть enabled = true и host = "127.0.0.1".
+   Резервная копия: %LOCALAPPDATA%\RevitMCP\pyRevit_config.before-routes-host.ini
+   (вернуть её можно только при закрытом Revit).
+
+
+2б. Движок IronPython 2.7 — переключить на IronPython 3 (IPY342)
+----------------------------------------------------------------
+Расширение RevitMCP рассчитано на IPY342 (стандарт парка). Под IPY2712
+оно загружается и проходит проверку целостности, но не видит общий
+секрет: все изменения модели отвечают 401 server_not_configured.
+Переключение меняет движок для ВСЕХ расширений pyRevit этого ПК — это
+согласованное действие пилота. Revit должен быть закрыт
+(Get-Process Revit ничего не выводит).
+
+1) Имя клона — первое слово строк из п. 2.4 (обычно master).
+2) В той же сессии PowerShell, где задан $pyrevit (п. 2.4):
+
+     & $pyrevit attach master 342 --attached
+
+   (master заменить на имя клона, если оно другое).
+3) Повторить п. 2.4: во ВСЕХ строках должно быть Engine: IPY342.
+   Ошибка команды или после неё осталась IPY2712 — СТОП.
+Вернуть прежний движок (& $pyrevit attach master 2712 --attached) —
+только по согласованию с ответственным за пилот.
+
+
+3. Сценарий А — переустановка на пилот
+--------------------------------------
+1) Снять ТОЛЬКО наш старый путь. Путь НЕ набирать вручную.
+   pyrevit extensions paths forget для сетевого пути удаляет только
+   ТОЧНОЕ совпадение строки, включая регистр букв (Srv-dfs и srv-dfs —
+   разные строки), и при несовпадении молча ничего не делает с кодом 0.
+   Поэтому строку берёт из конфигурации сам скрипт (PowerShell, одним
+   блоком; Revit закрыт, сетевые папки доступны):
+
+     $ini = "$env:APPDATA\pyRevit\pyRevit_config.ini"
+     $line = (Select-String -Path $ini -Pattern '^\s{0,}userextensions\s{0,}=' -Encoding UTF8).Line
+     $line | Set-Content -Encoding UTF8 "$env:LOCALAPPDATA\RevitMCP\userextensions-before-pilot.txt"
+     $paths = foreach ($x in (($line -replace '^\s{0,}userextensions\s{0,}=\s{0,}', '') | ConvertFrom-Json)) { [string]$x }
+     $old = @($paths | Where-Object { $_ -match '\\06_RevitMCP\\' -and $_ -match '\\ext$' })
+     $pyrevit = (Get-Command pyrevit -ErrorAction SilentlyContinue).Source
+     if (-not $pyrevit) { $pyrevit = @("$env:APPDATA\pyRevit-Master\bin\pyrevit.exe",
+         "$env:ProgramFiles\pyRevit-Master\bin\pyrevit.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+     "pyrevit: $pyrevit"
+     foreach ($p in $old) { "forget: [$p]"; & $pyrevit extensions paths forget $p }
+     (Select-String -Path $ini -Pattern '^\s{0,}userextensions\s{0,}=' -Encoding UTF8).Line
+
+   Фильтр '\\06_RevitMCP\\' выбирает основную установку и первый пилот
+   (RevitMCP-pilot-20261026-113138 лежал внутри 06_RevitMCP) и НЕ
+   выбирает 06_RevitMCP_pilot. Если "pyrevit:" пустой или список "forget"
+   пуст — СТОП.
+
+2) Сравнить последнюю строку вывода с сохранённой копией
+   %LOCALAPPDATA%\RevitMCP\userextensions-before-pilot.txt:
+   - старых наших путей быть не должно; если остался — СТОП,
+     pyRevit_config.ini вручную не править;
+   - остальные пути должны остаться. pyRevit при forget молча выбрасывает
+     и те пути, которые в этот момент недоступны (например, отключённая
+     сетевая папка). Если пропал чужой путь — сообщить пользователю и
+     вернуть его командой pyrevit extensions paths add "<путь из копии>"
+     после того, как папка снова доступна.
+
+3) Запустить установщик пилота. Двойным щелчком или в cmd.exe:
+
+     "\\srv-dfs\BIM\06_RevitMCP_pilot\install\install.cmd" < nul
+
+   из PowerShell:
+
+     cmd /c --% "\\srv-dfs\BIM\06_RevitMCP_pilot\install\install.cmd" < nul
+
+   ("< nul" нужен при запуске помощником: в конце скрипта стоит pause.)
+
+   Ожидаемый вывод: шаги [1/6]…[5/6] и строка
+     Installed. Version 2026.10.26-180614.92fbaf5.pilot2-dirty
+   Строка "share : \\srv-dfs\BIM\06_RevitMCP_pilot\install\.." — норма.
+   Шаг [3/6] только напоминает про Hermes; для сценария А в Hermes
+   ничего менять не нужно (раздел 5, п. 4).
+
+   При строке "Installation stopped" или ERROR — СТОП, сохранить весь
+   вывод. Установка не атомарная: часть шагов могла выполниться.
+   Повторно не запускать и защитные проверки не обходить.
+
+   Единственное исключение — ошибка
+     Cannot confirm shared Routes settings: No option 'host' in section: 'routes'
+   Она возникает ДО регистрации расширения: к этому моменту старый путь
+   уже снят и payload уже обновлён, а пилотный путь ещё не добавлен.
+   Выполнить раздел 2а и запустить install.cmd из этого шага ОДИН раз
+   повторно. Шаги 1–2 сценария А не повторять (старых путей уже нет).
+   Любая другая ошибка Routes или повторная ошибка — СТОП.
+
+4) Перейти к разделу 5.
+
+
+4. Сценарии Б, В и Г
+--------------------
+Сценарий Б — уже на пилоте 06_RevitMCP_pilot.
+install.cmd повторно не нужен, регистрацию расширения не снимать.
+Запустить ярлык «Update RevitMCP» из меню Пуск или в cmd.exe:
+
+     "\\srv-dfs\BIM\06_RevitMCP_pilot\install\update.cmd" /interactive
+
+Строки "now at …" или "already at …" — норма. ERROR — СТОП, сохранить
+вывод и %LOCALAPPDATA%\RevitMCP\update.log. Перейти к разделу 5.
+
+Сценарий В — первая установка: выполнить шаг 3 сценария А, затем
+вручную создать запись сервера в Hermes по USER-GUIDE.md (Python CPY3123,
+скрипт %LOCALAPPDATA%\RevitMCP\current\app\server.py, REVIT_PORT — порт,
+который вывел установщик). Затем раздел 5.
+
+Сценарий Г — дорегистрация: наш путь уже не зарегистрирован, а payload
+в %LOCALAPPDATA%\RevitMCP есть. Типичный случай — прошлый запуск
+install.cmd остановился на проверке Routes (нет host) после того, как
+старый путь был снят и payload обновлён. Снимать нечего, поэтому шаги 1–2
+сценария А пропустить:
+1) раздел 2 полностью, включая 2а, если в [routes] нет host, и 2б,
+   если движок IPY2712;
+2) шаг 3 сценария А — запустить install.cmd один раз. Если версия уже
+   пилотная, обновлятор ответит "already at …" — это норма;
+3) раздел 5. Если в п. 5.4 записи Hermes нет — создать её как в сценарии В.
+
+
+5. Проверка до запуска Revit (только чтение)
+--------------------------------------------
+1) Версия payload:
+
+     Get-Content "$env:LOCALAPPDATA\RevitMCP\current-version.txt"
+
+   Должно быть: 2026.10.26-180614.92fbaf5.pilot2-dirty
+
+2) Шаг 1.1 ещё раз: наш путь ровно ОДИН, и он в 06_RevitMCP_pilot
+   (обычно \\srv-dfs\BIM\06_RevitMCP_pilot\install\..\ext).
+
+3) Все источники автообновления ведут в
+   \\srv-dfs\BIM\06_RevitMCP_pilot\install\update.cmd:
+
+     (Get-ScheduledTask -TaskName 'RevitMCP Update' -ErrorAction SilentlyContinue).Actions.Arguments
+     $w = New-Object -ComObject WScript.Shell
+     foreach ($p in "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\RevitMCP Update.lnk",
+                    "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Update RevitMCP.lnk") {
+       if (Test-Path $p) { $p + ' -> ' + $w.CreateShortcut($p).Arguments } }
+
+   Задачи или ярлыка может не быть — это допустимо. Если что-то ведёт в
+   06_RevitMCP\install\update.cmd или в папку первого пилота — СТОП:
+   такой обновлятор при следующем входе в Windows вернёт старый payload,
+   и половины сервера разойдутся.
+   WARNING установщика про автообновление — не успех: сообщить
+   ответственному за пилот (ручной ярлык обновления при этом работает).
+
+4) Запись Hermes остаётся прежней: Python CPY3123 запускает
+   %LOCALAPPDATA%\RevitMCP\current\app\server.py (полный путь, если
+   Hermes не подставляет переменные). Путь у основной установки и у
+   пилота одинаковый, поэтому после переустановки запись не меняется.
+   Вторую MCP-запись не создавать, чужие записи не трогать.
+
+5) Только после п. 1–4: запустить Revit полностью, затем Hermes
+   (закрыть и открыть заново).
+
+
+6. Первичная проверка после запуска (только чтение)
+---------------------------------------------------
+1) После полной загрузки Revit:
+
+     Get-NetTCPConnection -LocalPort 48884 -State Listen
+
+   Нужна ровно одна строка, LocalAddress 127.0.0.1 (0.0.0.0 — СТОП:
+   Routes открыт сети). Если установщик сообщил другой порт —
+   использовать его.
+2) В браузере: http://127.0.0.1:48884/genpro_revit_mcp/status/
+   Нужны "health": "healthy", api_name genpro_revit_mcp, permit protocol 1.
+   "degraded" — не успех: прочитать alerts. Если там "holds no shared
+   secret" / secret configured false (мутации отвечают 401
+   server_not_configured) — шаг 4.
+3) В Hermes: «Проверь состояние Revit инструментом get_revit_status.
+   Ничего не изменяй».
+4) Только если расширение не видит секрет. Секрет читается ОДИН раз при
+   загрузке Revit из папки зарегистрированного расширения. Диагностика —
+   отдельный файл рядом с этой инструкцией; он только читает и НЕ выводит
+   содержимое секрета. Запустить ОДНОЙ строкой (cmd.exe или PowerShell):
+
+     powershell -NoProfile -ExecutionPolicy Bypass -File "\\srv-dfs\BIM\06_RevitMCP_pilot\diag-secret.ps1"
+
+   Текст скрипта в консоль не вставлять: многострочная вставка в консоль
+   ломается. Пользователю показать ВЕСЬ вывод (строки our paths: ...,
+   extension secret: ..., revit-mcp-server | ..., status: ...).
+   Если запуск запрещён политикой — СТОП, сообщить ответственному за пилот.
+
+   Как читать результат:
+   - our paths не 1 — вернуться к п. 5.2.
+   - есть строка Engine: IPY2712 — это и есть причина: закрыть Revit,
+     выполнить раздел 2б, запустить Revit заново и повторить п. 1–2.
+     Переустановка не нужна.
+   - local extension copy: True, или строк "revit-mcp-server |" из
+     pyrevit env больше одной, или её Installed ведёт НЕ в
+     06_RevitMCP_pilot — СТОП: Revit может грузить другую копию
+     расширения. Копии не удалять самому. Строки других расширений
+     (например revit-mcp-python) не наши, их не трогать.
+   - failed_domains содержит security — СТОП с выводом скрипта.
+   - extension secret MISSING или NOT readable — СТОП. Это проблема
+     раздачи на сервере (файла нет или у пользователя нет права чтения),
+     на ПК она не чинится. Передать вывод скрипта ответственному за пилот.
+     Секрет ниоткуда не копировать и не создавать.
+   - readable, same as payload: True — файл в порядке, но этот Revit
+     загрузил расширение без него. Обычно Revit started раньше created/
+     modified (файл появился на раздаче после запуска) или Revit не был
+     полностью перезапущен после установки. Закрыть ВСЕ окна Revit
+     (Get-Process Revit ничего не выводит), запустить Revit заново и
+     повторить п. 1–2. После такого перезапуска всё ещё "has none" —
+     СТОП с выводом скрипта: Revit не читает файл, который читает
+     PowerShell (возможны антивирус или другая реплика DFS).
+   - same as payload: False или payload secret NOT readable — СТОП:
+     половины установлены из разных комплектов. Передать вывод скрипта.
+
+Политика пилота: C:\RevitMCP-Pilot\operator_policy.toml. Если файла нет,
+действует базовая политика. Переменная REVIT_MCP_POLICY_FILE имеет
+приоритет — проверить окружение записи Hermes. Ослабленную политику
+наугад не создавать.
+
+
+7. Проверка новых функций пилота
+--------------------------------
+После полного перезапуска Revit и Hermes: list_documents, затем чтение
+модели B с её document при активной A. Селекторы получать заново.
+Проверить модель/данные ответа и что чтение не переключило вкладку.
+UI-выделение/current-view и visible_in_view требуют активной модели (412).
+Отдельный activate_document допускает сохранённые workshared/detached
+проекты с собственным существующим файлом; результат сверяется с активной
+моделью. Live не проверено; ошибка Revit не должна выглядеть как успех.
+Сохранение, sync, удаление и перемещение для этой проверки не нужны.
+
+Приёмочные сценарии Direct и H1–H5 (2026-10-26) повторно НЕ запускать.
+
+
+8. Возврат на основную установку
+--------------------------------
+Только по согласованию с ответственным за пилот.
+1) Закрыть все Revit и Hermes.
+2) Снять пилотный путь блоком из раздела 3, шаг 1, заменив фильтр на
+     $old = @($paths | Where-Object { $_ -match '\\06_RevitMCP_pilot\\' -and $_ -match '\\ext$' })
+   и проверить по шагу 3.2, что его больше нет, а чужие пути на месте.
+3) Запустить "\\srv-dfs\BIM\06_RevitMCP\install\install.cmd" < nul
+4) Проверить: current-version.txt совпадает с
+   \\srv-dfs\BIM\06_RevitMCP\payload\VERSION, наш путь один и ведёт в
+   06_RevitMCP, все источники обновления — в 06_RevitMCP\install\update.cmd.
+5) Полностью перезапустить Revit и Hermes.
+Не откатывать только одну половину (extension или payload) и не переносить
+пилотный секрет в основную раздачу.
+
+
+Не удалять, не переименовывать и не перезаписывать на сервере:
+  \\srv-dfs\BIM\06_RevitMCP\ext\revit-mcp-server.extension
+  \\srv-dfs\BIM\06_RevitMCP\payload
+  \\srv-dfs\BIM\06_RevitMCP_pilot (содержимое пилота)

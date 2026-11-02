@@ -1,8 +1,54 @@
 # -*- coding: utf-8 -*-
 """Status and model information tools"""
 
+import sys
+from pathlib import Path
+
 from mcp.server.fastmcp import Context
 from .utils import PROVENANCE_ATTR, _body_of, format_response
+
+# Must equal revit_mcp/runtime_info.PRODUCT_VERSION and the version in pyproject.toml;
+# tests/unit/test_runtime_info.py keeps the three equal. The payload ships no
+# revit_mcp package, hence the copy.
+PRODUCT_VERSION = "2.0.0"
+
+
+def _payload_build():
+    """The build stamp in the installed payload's VERSION file, or None in a checkout.
+
+    In a payload this file lives at <payload>/app/tools/, so VERSION sits two levels
+    up; a development checkout has no app/ directory and reports None.
+    """
+    try:
+        app_dir = Path(__file__).resolve().parents[1]
+        if app_dir.name.lower() != "app":
+            return None
+        text = (app_dir.parent / "VERSION").read_text(encoding="utf-8-sig").strip()
+        return text or None
+    except (OSError, ValueError):
+        return None
+
+
+def _sdk_version():
+    """The installed mcp SDK version, or None."""
+    try:
+        from importlib.metadata import version
+
+        return version("mcp")
+    except Exception:
+        return None
+
+
+def server_info():
+    """{"product_version", "build", "python", "mcp_sdk", "executable"} of this server; never raises."""
+    info = sys.version_info
+    return {
+        "product_version": PRODUCT_VERSION,
+        "build": _payload_build(),
+        "python": "{}.{}.{}".format(info[0], info[1], info[2]),
+        "mcp_sdk": _sdk_version(),
+        "executable": sys.executable,
+    }
 
 
 def _launch_slot_note(configured, response):
@@ -74,6 +120,45 @@ def _permit_line(response):
         return ("One-time permits: the Revit extension does not report permit support (older than R5); "
                 "a direct HTTP mutation is not refused for lacking a permit.")
     return "One-time permits: the Revit extension enforces them (protocol {}).".format(protocol)
+
+
+def _version_lines(response, server=None):
+    """Lines naming the versions of both halves and what runs them; never raises.
+
+    The MCP-server line comes from this process. The extension lines come from the
+    reply's ``runtime`` block; an extension older than 2.0.0 has none and is named as
+    such. A product-version difference between the halves gets its own warning line.
+    """
+    server = server if isinstance(server, dict) else server_info()
+    lines = ["MCP server: RevitMCP {}, build {}, Python {}, MCP SDK {}.".format(
+        server.get("product_version"), server.get("build") or "development checkout",
+        server.get("python"), server.get("mcp_sdk") or "unknown")]
+    body = _body_of(response)
+    if not isinstance(body, dict):
+        return lines
+    runtime = body.get("runtime")
+    if not isinstance(runtime, dict):
+        lines.append("Revit extension: reports no version (older than 2.0.0).")
+        return lines
+    extension = runtime.get("extension") if isinstance(runtime.get("extension"), dict) else {}
+    python = runtime.get("python") if isinstance(runtime.get("python"), dict) else {}
+    pyrevit = runtime.get("pyrevit") if isinstance(runtime.get("pyrevit"), dict) else {}
+    revit = runtime.get("revit") if isinstance(runtime.get("revit"), dict) else {}
+    commit = extension.get("commit")
+    build = ("{} ({})".format(str(commit)[:7], extension.get("built_at") or "time unknown")
+             if commit else "no manifest (development junction)")
+    lines.append("Revit extension: RevitMCP {}, build {}, loaded from {}.".format(
+        runtime.get("product_version") or "unknown", build, extension.get("path") or "unknown"))
+    lines.append("Revit side: pyRevit {}, engine {} ({} {}), Revit {} build {}.".format(
+        pyrevit.get("version") or "unknown", pyrevit.get("engine") or "unknown",
+        python.get("implementation") or "unknown", python.get("version") or "unknown",
+        revit.get("sub_version") or revit.get("version") or "unknown", revit.get("build") or "unknown"))
+    remote = runtime.get("product_version")
+    if remote and remote != server.get("product_version"):
+        lines.append("Versions DIFFER: the Revit extension is {}, this MCP server is {}; run Update "
+                     "RevitMCP, restart the assistant session, then fully restart Revit.".format(
+                         remote, server.get("product_version")))
+    return lines
 
 
 async def _policy_line(revit_get):
@@ -158,6 +243,14 @@ def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
         approval-policy source and version and reports an invalid operator/base policy.
         "security_alerts" lists in plain words anything that needs action.
 
+        Version lines come right after the status: "MCP server:" names this server's RevitMCP version,
+        payload build, Python and MCP SDK; "Revit extension:" names the extension's
+        version, build commit and the folder it was loaded from; "Revit side:" names
+        the pyRevit version, the Python engine (IPY342 is the supported one) and the
+        Revit version and build. "Versions DIFFER" means the halves come from
+        different releases. The raw facts are in the reply's "runtime" block;
+        "runtime_alerts" (which degrade health) explain an unsupported engine.
+
         Uses a 10-second HTTP timeout. Selected status first allows up to
         10 seconds for OS inventory, so its total may approach 20 seconds.
         If Revit itself may be closed, use get_revit_process_status instead —
@@ -176,6 +269,12 @@ def register_status_tools(mcp, revit_get, revit_post=None, revit_image=None):
         response = await revit_get("/status/", ctx, **options)
         text = format_response(response)
         body = _body_of(response)
+        # Version lines need a runtime block or the real bridge (it carries the
+        # secret_fingerprint seam); a bare transport keeps its exact text.
+        if (isinstance(body, dict) and isinstance(body.get("runtime"), dict)) or \
+                callable(getattr(revit_get, "secret_fingerprint", None)):
+            for line in _version_lines(response):
+                text = "{}\n{}".format(text, line)
         secret_line = _secret_line(response, revit_get)
         if secret_line:
             text = "{}\n{}".format(text, secret_line)

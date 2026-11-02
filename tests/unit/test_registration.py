@@ -243,7 +243,8 @@ def test_every_route_domain_has_a_matching_tool_module():
 
 def test_revit_mcp_helpers_define_no_routes():
     """Helpers must stay helpers -- otherwise discovery would need to load them."""
-    for name in ("utils", "textutils", "registry", "identity", "trust", "integrity", "security"):
+    for name in ("utils", "textutils", "registry", "identity", "trust", "integrity", "security",
+                 "runtime_info"):
         assert not ROUTE_DECORATOR.search(_source_of(name)), (
             "revit_mcp/{}.py defines routes but is a helper module".format(name)
         )
@@ -263,7 +264,7 @@ def test_no_revit_mcp_module_imports_another_revit_mcp_module():
     """
     helpers = {
         "utils", "textutils", "registry", "identity", "trust", "integrity", "security",
-        "permits", "lookup",
+        "permits", "lookup", "runtime_info",
     }
     targets = re.compile(
         r"^from \.(\w+) import|^from revit_mcp\.(\w+) import|^\s*from \. import (\w+)",
